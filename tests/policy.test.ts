@@ -17,6 +17,11 @@ function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallCo
       pnpm: { ignoreScripts: true },
       bun: { ignoreScripts: true }
     },
+    typoSquat: {
+      mode: "off",
+      minNameLength: 4,
+      ignore: []
+    },
     ...overrides
   };
 }
@@ -169,5 +174,83 @@ describe("evaluatePackage", () => {
 
     expect(result.blockedReasons).toHaveLength(0);
     expect(result.warnings[0]).toMatch("allowlisted");
+  });
+
+  it("warns on suspected typo-squat when typoSquat.mode is warn", () => {
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({
+          typoSquat: { mode: "warn", minNameLength: 4, ignore: [] }
+        }),
+        requested: {
+          name: "raect",
+          raw: "raect",
+          requested: "latest",
+          sourceType: "registry",
+          registrySpecKind: "tag"
+        },
+        resolvedRegistryPackage: undefined
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).not.toContain("typo-squat-suspected");
+    expect(result.warnings.some((warning) => warning.includes("typo-squat"))).toBe(true);
+    expect(result.warnings.some((warning) => warning.includes("react"))).toBe(true);
+  });
+
+  it("blocks on suspected typo-squat when typoSquat.mode is block", () => {
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({
+          typoSquat: { mode: "block", minNameLength: 4, ignore: [] }
+        }),
+        requested: {
+          name: "lodahs",
+          raw: "lodahs",
+          requested: "latest",
+          sourceType: "registry",
+          registrySpecKind: "tag"
+        },
+        resolvedRegistryPackage: undefined
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toContain("typo-squat-suspected");
+    const block = result.blockedReasons.find((reason) => reason.code === "typo-squat-suspected");
+    expect(block?.message).toContain("lodash");
+  });
+
+  it("does not flag exact matches to popular packages even when typoSquat is on", () => {
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({
+          typoSquat: { mode: "block", minNameLength: 4, ignore: [] }
+        })
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).not.toContain("typo-squat-suspected");
+    expect(result.warnings.some((warning) => warning.includes("typo-squat"))).toBe(false);
+  });
+
+  it("does not check typo-squat when mode is off", () => {
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({
+          typoSquat: { mode: "off", minNameLength: 4, ignore: [] }
+        }),
+        requested: {
+          name: "raect",
+          raw: "raect",
+          requested: "latest",
+          sourceType: "registry",
+          registrySpecKind: "tag"
+        },
+        resolvedRegistryPackage: undefined
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).not.toContain("typo-squat-suspected");
+    expect(result.warnings).toHaveLength(0);
   });
 });

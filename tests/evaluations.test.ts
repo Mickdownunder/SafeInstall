@@ -22,6 +22,11 @@ function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallCo
       pnpm: { ignoreScripts: true },
       bun: { ignoreScripts: true }
     },
+    typoSquat: {
+      mode: "off",
+      minNameLength: 4,
+      ignore: []
+    },
     ...overrides
   };
 }

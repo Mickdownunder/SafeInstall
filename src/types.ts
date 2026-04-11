@@ -16,6 +16,14 @@ export interface PackageManagerDefaults {
   ignoreScripts: boolean;
 }
 
+export type TypoSquatMode = "off" | "warn" | "block";
+
+export interface TypoSquatConfig {
+  mode: TypoSquatMode;
+  minNameLength: number;
+  ignore: string[];
+}
+
 export interface SafeInstallConfig {
   minimumReleaseAgeHours: number;
   registryUrl: string;
@@ -24,6 +32,7 @@ export interface SafeInstallConfig {
   allowedPackages: string[];
   ciMode: boolean;
   packageManagerDefaults: Record<PackageManagerName, PackageManagerDefaults>;
+  typoSquat: TypoSquatConfig;
 }
 
 export interface RequestedPackage {
@@ -65,7 +74,8 @@ export type PolicyBlockCode =
   | "release-too-new"
   | "install-script-present"
   | "untrusted-source"
-  | "trust-level-dropped";
+  | "trust-level-dropped"
+  | "typo-squat-suspected";
 
 export interface PolicyBlockReason {
   code: PolicyBlockCode;

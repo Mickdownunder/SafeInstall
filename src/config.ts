@@ -14,8 +14,17 @@ const KNOWN_CONFIG_KEYS = new Set<keyof SafeInstallConfig>([
   "allowedSources",
   "allowedPackages",
   "ciMode",
-  "packageManagerDefaults"
+  "packageManagerDefaults",
+  "typoSquat"
 ]);
+
+const KNOWN_TYPO_SQUAT_KEYS = new Set<keyof SafeInstallConfig["typoSquat"]>([
+  "mode",
+  "minNameLength",
+  "ignore"
+]);
+
+const TYPO_SQUAT_MODES = new Set(["off", "warn", "block"]);
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -56,7 +65,51 @@ export function createDefaultConfig(): SafeInstallConfig {
       npm: { ignoreScripts: true },
       pnpm: { ignoreScripts: true },
       bun: { ignoreScripts: true }
+    },
+    typoSquat: {
+      mode: "off",
+      minNameLength: 4,
+      ignore: []
     }
+  };
+}
+
+function validateTypoSquat(
+  input: Partial<SafeInstallConfig["typoSquat"]> | undefined
+): SafeInstallConfig["typoSquat"] {
+  const defaults = createDefaultConfig().typoSquat;
+  if (!input) {
+    return defaults;
+  }
+
+  const unknownKeys = Object.keys(input).filter(
+    (key) => !KNOWN_TYPO_SQUAT_KEYS.has(key as keyof SafeInstallConfig["typoSquat"])
+  );
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `Config error: unknown key(s) in typoSquat: ${unknownKeys.map((key) => `"${key}"`).join(", ")}.`
+    );
+  }
+
+  const mode = input.mode ?? defaults.mode;
+  if (!TYPO_SQUAT_MODES.has(mode)) {
+    throw new Error(`Config error: typoSquat.mode must be one of "off", "warn", "block".`);
+  }
+
+  const minNameLength = input.minNameLength ?? defaults.minNameLength;
+  if (!Number.isInteger(minNameLength) || minNameLength < 1) {
+    throw new Error("Config error: typoSquat.minNameLength must be a positive integer.");
+  }
+
+  const ignore = input.ignore ?? defaults.ignore;
+  if (!Array.isArray(ignore) || ignore.some((entry) => typeof entry !== "string")) {
+    throw new Error("Config error: typoSquat.ignore must be an array of strings.");
+  }
+
+  return {
+    mode,
+    minNameLength,
+    ignore: ignore.map((entry) => entry.toLowerCase())
   };
 }
 
@@ -99,7 +152,8 @@ function mergeConfig(input: Partial<SafeInstallConfig>): SafeInstallConfig {
         ...defaultConfig.packageManagerDefaults.bun,
         ...(input.packageManagerDefaults?.bun ?? {})
       }
-    }
+    },
+    typoSquat: validateTypoSquat(input.typoSquat)
   };
 
   if (!Number.isFinite(merged.minimumReleaseAgeHours) || merged.minimumReleaseAgeHours < 0) {

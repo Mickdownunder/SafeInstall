@@ -19,6 +19,11 @@ const config: SafeInstallConfig = {
     npm: { ignoreScripts: true },
     pnpm: { ignoreScripts: true },
     bun: { ignoreScripts: true }
+  },
+  typoSquat: {
+    mode: "off",
+    minNameLength: 4,
+    ignore: []
   }
 };
 
