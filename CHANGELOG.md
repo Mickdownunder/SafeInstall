@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.1 - 2026-04-11
+
+### Fixed
+
+- Registry timeout errors raised by `AbortSignal.timeout()` on Node 20+ are now surfaced as a clear "timed out" message instead of an opaque runtime error.
+- Package names are percent-encoded via `encodeURIComponent` for all registry URLs, not just the leading scope separator.
+- Configuration files now reject unknown top-level keys so typos such as `minimumReleaseAgeHour` fail loudly.
+- `allowedPackages` now matches case-insensitively so allowlists work regardless of how the package name is requested.
+- The on-disk registry cache is written with 0600 file permissions and 0700 directories so co-located users on a shared host cannot poison cached publish timestamps.
+- `scripts/pack-smoke.mjs` resolves the project root from `import.meta.url` so the release smoke test runs on any machine, not just the author's.
+
+### Changed
+
+- A warning is now printed when `registryUrl` points at a non-loopback plaintext HTTP endpoint, since package metadata is unauthenticated in transit.
+- Releases published from GitHub Actions now include [npm provenance](https://docs.npmjs.com/generating-provenance-statements) attestations.
+
 ## 0.1.0 - 2026-03-31
 
 First public release. Open source under MIT license.
