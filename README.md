@@ -90,8 +90,31 @@ No registry proxy. No tarball rewriting. No cloud dependency.
 | **Lifecycle scripts** | preinstall, install, postinstall blocked | `Blocked: install script present` |
 | **Source types** | registry, workspace, file, directory allowed | `Blocked: untrusted source` |
 | **Trust downgrade** | Detects registry→git/url or new scripts on update | `Blocked: trust level dropped` |
+| **Typo-squat detection** | Off by default; opt in via `typoSquat.mode` | `Blocked: suspected typo-squat` |
+| **Provenance verification** | Off by default; opt in via `provenance.mode` | `Blocked: attestation missing/invalid/publisher mismatch` |
 
 All rules are configurable. Ambiguous or incomplete metadata **blocks instead of allowing**.
+
+### Typo-squat detection
+
+A new policy check in 0.2.0 that flags install requests whose package name is a close-but-not-exact match to a well-known popular package. It catches the most common supply-chain attack pattern: `lodsh` for `lodash`, `axois` for `axios`, `raect` for `react`, and so on.
+
+- **Algorithm:** Damerau-Levenshtein distance (transpositions count as a single edit)
+- **Target list:** curated set of popular ecosystem packages, embedded at build time (no runtime network fetch)
+- **Default mode:** `"off"` — opt in with `typoSquat: { "mode": "warn" }` or `"block"`
+- **False-positive mitigation:** exact matches to the list are never flagged, short names (< 4 chars) are skipped, per-project `ignore` list is supported
+
+### Provenance verification
+
+A new policy check in 0.2.0 that **cryptographically verifies** the npm provenance attestation for registry installs and optionally **pins the source repository** via per-package trusted publisher patterns.
+
+- Fetches the attestation bundle from the npm registry's `/-/npm/v1/attestations/<pkg>@<version>` endpoint
+- Verifies the Sigstore bundle via the official `sigstore` package (signatures, Rekor transparency log, Sigstore public trust root)
+- Extracts source repository, commit ref, and workflow path from the SLSA v1 provenance statement
+- Matches the source repository slug against per-package `trustedPublishers` patterns — catching not only tampered tarballs but also **maintainer-compromise attacks** where an attacker republishes a legitimate-looking package from a fork they control
+- **Publisher mismatches always block**, even in `"warn"` mode, because a valid signature from the wrong repo is exactly what maintainer compromise looks like
+
+Default mode is `"off"`. Opt in by setting `provenance.mode` to `"warn"` or `"require"`.
 
 ---
 
@@ -154,6 +177,19 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
     "npm": { "ignoreScripts": true },
     "pnpm": { "ignoreScripts": true },
     "bun": { "ignoreScripts": true }
+  },
+  "typoSquat": {
+    "mode": "warn",
+    "minNameLength": 4,
+    "ignore": []
+  },
+  "provenance": {
+    "mode": "warn",
+    "requireFor": [],
+    "trustedPublishers": {
+      "axios": "axios/axios"
+    },
+    "offlineBehavior": "fail-closed"
   }
 }
 ```
@@ -167,6 +203,13 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `allowedPackages` | Names that skip policy entirely (with warning) |
 | `ciMode` | Reserved for future CI-specific behavior |
 | `packageManagerDefaults` | Per-manager flags forwarded to the tool |
+| `typoSquat.mode` | `"off"` / `"warn"` / `"block"` — how to handle suspected typo-squats |
+| `typoSquat.minNameLength` | Minimum package name length to check (shorter names are skipped) |
+| `typoSquat.ignore` | Known legitimate lookalikes to skip, lowercased on load |
+| `provenance.mode` | `"off"` / `"warn"` / `"require"` — whether to verify Sigstore attestations |
+| `provenance.requireFor` | Package names (glob supported) for which provenance is required even in `"warn"` mode |
+| `provenance.trustedPublishers` | Map of package name pattern → expected `owner/repo` slug; mismatches always block |
+| `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cached attestation |
 
 Run `safeinstall init` to generate a starter config.
 
@@ -248,6 +291,34 @@ Install blocked.
 
 </details>
 
+<details>
+<summary><strong>Typo-squat caught</strong></summary>
+
+```
+$ safeinstall pnpm add raect
+Using config: ./safeinstall.config.json
+Install blocked.
+- raect
+  Blocked: Suspected typo-squat: "raect" is 1 edit(s) away from popular package "react".
+  Suggestion: Verify you meant to install "react". If this package is intentional, add "raect" to typoSquat.ignore.
+```
+
+</details>
+
+<details>
+<summary><strong>Publisher mismatch (maintainer compromise defense)</strong></summary>
+
+```
+$ safeinstall pnpm add axios@1.99.0
+Using config: ./safeinstall.config.json
+Install blocked.
+- axios@1.99.0
+  Blocked: publisher mismatch for axios (expected axios/axios, got evil-org/axios).
+  Suggestion: Verify the package source. Update provenance.trustedPublishers only if the change is intentional.
+```
+
+</details>
+
 ---
 
 ## Limitations
@@ -258,13 +329,16 @@ Install blocked.
 - **Trust downgrade detection** requires prior install state in `node_modules`
 - **`bun install`** uses manifest-only analysis (lockfile parity not yet implemented)
 - **`safeinstall check`** evaluates direct dependencies only
+- **Typo-squat target list** is curated and refreshed manually between releases; brand new packages published in the last day may not yet appear
+- **Provenance verification** supports GitHub Actions trusted publishers on the public Sigstore root only (GitLab CI, self-hosted Sigstore out of scope for 0.2.0)
+- **Git sources** are identified by URL for allowlist purposes, not by inferred package name — conflating registry `axios` with `github:any-fork/axios` would be dangerous
 - Ambiguous metadata blocks instead of guessing — by design
 
 ## What it does not do
 
 - Vulnerability scanning or CVE databases
 - Registry proxying or tarball rewriting
-- Malware detection or provenance attestation
+- Malware detection or package content analysis
 - Selective lifecycle script execution (forwards `--ignore-scripts` by default)
 
 ---

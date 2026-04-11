@@ -17,5 +17,16 @@
     "bun": {
       "ignoreScripts": true
     }
+  },
+  "typoSquat": {
+    "mode": "warn",
+    "minNameLength": 4,
+    "ignore": []
+  },
+  "provenance": {
+    "mode": "warn",
+    "requireFor": [],
+    "trustedPublishers": {},
+    "offlineBehavior": "fail-closed"
   }
 }
