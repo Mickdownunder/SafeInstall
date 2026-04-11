@@ -62,7 +62,8 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
     priorState: input.priorState,
     resolvedRegistryPackage: input.resolvedRegistryPackage,
     blockedReasons: [],
-    warnings: []
+    warnings: [],
+    infos: []
   };
 
   if (isPackageAllowlisted(input.config, input.requested.name)) {
@@ -243,7 +244,7 @@ function applyProvenanceDecision(
   }
 
   if (config.mode === "warn") {
-    evaluation.warnings.push(
+    evaluation.infos.push(
       `${requested}: provenance verified from ${result.sourceRepository ?? "unknown repository"}${result.workflowPath ? ` via ${result.workflowPath}` : ""}.`
     );
   }

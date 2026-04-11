@@ -97,6 +97,7 @@ async function main(): Promise<void> {
       ],
       summary: interrupted ? "SafeInstall interrupted." : "SafeInstall failed.",
       warnings: [],
+      infos: [],
       affectedPackages: []
     };
     writeCliResult(result, json);

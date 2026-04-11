@@ -91,6 +91,7 @@ export interface PackageEvaluation {
   resolvedRegistryPackage?: ResolvedRegistryPackage;
   blockedReasons: PolicyBlockReason[];
   warnings: string[];
+  infos: string[];
 }
 
 export type PolicyBlockCode =
@@ -134,6 +135,7 @@ export interface CliAffectedPackage {
   resolvedVersion?: string;
   reasons: CliReason[];
   warnings: string[];
+  infos: string[];
 }
 
 export interface CliExecutionInfo {
@@ -156,6 +158,7 @@ export interface CliResult {
   reasons: CliReason[];
   summary: string;
   warnings: string[];
+  infos: string[];
   affectedPackages: CliAffectedPackage[];
   execution?: CliExecutionInfo;
   details?: Record<string, unknown>;

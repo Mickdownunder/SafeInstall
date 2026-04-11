@@ -30,6 +30,7 @@ export async function runInitFlow(cwd: string, argv: string[], options: InitOpti
       ],
       summary: "Init failed: config already exists.",
       warnings: [],
+      infos: [],
       affectedPackages: [],
       details: {
         configPath,
@@ -53,6 +54,7 @@ export async function runInitFlow(cwd: string, argv: string[], options: InitOpti
     warnings: [
       "Edit allowedScripts, allowedSources, or allowedPackages only when you intend to trust that exception."
     ],
+    infos: [],
     affectedPackages: [],
     details: {
       configPath,
