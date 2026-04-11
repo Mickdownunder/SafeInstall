@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1 - 2026-04-11
+
+A follow-up to 0.2.0 that fixes two real-world UX issues found during manual verification of the published package, and rewrites the README opener to lead with the maintainer-compromise attack-catch demo.
+
+### Fixed
+
+- **Verified-OK provenance messages no longer print with a `Warning:` prefix.** In 0.2.0, a successful provenance verification in warn mode was routed through the same channel as policy concerns, producing confusing output like `Warning: ... provenance verified from ...`. A new `infos` field is now surfaced separately on `PackageEvaluation` and `CliResult`, and rendered with an `Info:` prefix in human mode. Missing attestations remain real warnings; only verified successes moved to infos. The change is additive (JSON consumers see an additional empty `infos` array) and non-breaking.
+- **Typo-squat detection now fires even when the registry cannot resolve the requested name.** Before 0.2.1, typing a suspicious package name that did not exist on npm (e.g. `raect` for `react`) produced a generic `fetch failed` runtime error instead of the helpful `Blocked: suspected typo-squat of "react"` message. Registry resolution is now wrapped in a try/catch, and the policy engine still runs typo-squat detection against the requested name. If nothing else catches it, a new `package-resolution-failed` block code surfaces the underlying error with the package name.
+
+### Changed
+
+- README opening section now leads with the trusted-publisher attack-catch demo and a dogfood example where SafeInstall verifies its own Sigstore attestation.
+
 ## 0.2.0 - 2026-04-11
 
 Two new policy checks covering opposite ends of the supply-chain attack spectrum: typo-squat detection for the most common attack (a one-letter mistake turning into a malware install) and Sigstore provenance verification for the most sophisticated (a tampered tarball with a valid-looking signature from the wrong source).
