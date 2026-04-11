@@ -111,7 +111,8 @@ function createAffectedPackage(evaluation: PackageEvaluation) {
     sourceType: evaluation.requested.sourceType,
     resolvedVersion: evaluation.resolvedRegistryPackage?.resolvedVersion,
     reasons: evaluation.blockedReasons,
-    warnings: evaluation.warnings
+    warnings: evaluation.warnings,
+    infos: evaluation.infos
   };
 }
 
@@ -147,6 +148,7 @@ export async function runInstallFlow(
       ],
       summary: "Install blocked.",
       warnings: [],
+      infos: [],
       affectedPackages: [],
       execution: {
         ranPackageManager: false
@@ -174,6 +176,7 @@ export async function runInstallFlow(
       ],
       summary: "Install blocked.",
       warnings: [],
+      infos: [],
       affectedPackages: [],
       execution: {
         ranPackageManager: false
@@ -201,6 +204,7 @@ export async function runInstallFlow(
       reasons: issues,
       summary: "Install blocked.",
       warnings: [],
+      infos: [],
       affectedPackages: [],
       execution: {
         ranPackageManager: false
@@ -227,6 +231,7 @@ export async function runInstallFlow(
       ],
       summary: "Install failed: no packages found.",
       warnings: [],
+      infos: [],
       affectedPackages: [],
       execution: {
         ranPackageManager: false
@@ -247,6 +252,7 @@ export async function runInstallFlow(
   );
   const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
   const warnings = evaluations.flatMap((evaluation) => evaluation.warnings);
+  const infos = evaluations.flatMap((evaluation) => evaluation.infos);
 
   if (blocked.length > 0) {
     return {
@@ -262,6 +268,7 @@ export async function runInstallFlow(
       reasons: blocked.flatMap((evaluation) => evaluation.blockedReasons),
       summary: "Install blocked.",
       warnings,
+      infos,
       affectedPackages: blocked.map(createAffectedPackage),
       execution: {
         ranPackageManager: false
@@ -307,12 +314,14 @@ export async function runInstallFlow(
         ? "Allowed: policy checks passed."
         : `Allowed by policy, but ${plan.manager} exited with code ${execution.code}.`,
     warnings,
+    infos,
     affectedPackages: plan.packages.map((requested) => ({
       name: requested.name,
       requested: requested.raw,
       sourceType: requested.sourceType,
       reasons: [],
-      warnings: []
+      warnings: [],
+      infos: []
     })),
     execution: {
       ranPackageManager: true,

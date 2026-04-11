@@ -16,6 +16,9 @@ export function formatCommand(command: string, args: string[]): string {
 
 export function printWarnings(evaluations: PackageEvaluation[]): void {
   for (const evaluation of evaluations) {
+    for (const info of evaluation.infos) {
+      console.error(`Info: ${info}`);
+    }
     for (const warning of evaluation.warnings) {
       console.error(`Warning: ${warning}`);
     }
@@ -50,6 +53,9 @@ export function writeCliResult(result: CliResult, jsonMode: boolean): void {
     printConfigInfo(result.configPath);
   }
 
+  for (const info of result.infos) {
+    console.error(`Info: ${info}`);
+  }
   for (const warning of result.warnings) {
     console.error(`Warning: ${warning}`);
   }

@@ -20,6 +20,7 @@ function createResult(overrides: Partial<CliResult> = {}): CliResult {
       }
     ],
     warnings: [],
+    infos: [],
     affectedPackages: [],
     ...overrides
   };
@@ -50,8 +51,36 @@ describe("writeCliResult", () => {
         }
       ]
     });
+    expect(payload.infos).toEqual([]);
     expect(payload.details).toBeUndefined();
 
     writeSpy.mockRestore();
+  });
+
+  it("renders info lines with an Info: prefix in human mode", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    writeCliResult(
+      createResult({
+        decision: "allow",
+        exitCode: 0,
+        exitCodeMeaning: "Check passed with no direct dependency policy violations.",
+        summary: "Check passed: no direct dependency policy violations found.",
+        reasons: [],
+        infos: ["axios: provenance verified from axios/axios via .github/workflows/release.yml."],
+        configLabel: "built-in defaults"
+      }),
+      false
+    );
+
+    const calls = errorSpy.mock.calls.map((call) => String(call[0]));
+    expect(calls.some((line) => line.startsWith("Info: "))).toBe(true);
+    expect(calls.some((line) => line.includes("provenance verified"))).toBe(true);
+    // Infos must NOT be prefixed with "Warning:"
+    expect(calls.some((line) => line.startsWith("Warning:") && line.includes("provenance verified"))).toBe(
+      false
+    );
+
+    errorSpy.mockRestore();
   });
 });

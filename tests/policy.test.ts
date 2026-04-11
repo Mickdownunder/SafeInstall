@@ -339,6 +339,7 @@ describe("evaluatePackage", () => {
       );
 
       expect(result.blockedReasons).toHaveLength(0);
+      // Missing attestation is a real warning (something absent that could be there)
       expect(result.warnings.some((warning) => warning.includes("provenance"))).toBe(true);
     });
 
@@ -466,7 +467,7 @@ describe("evaluatePackage", () => {
       expect(result.blockedReasons).toHaveLength(0);
     });
 
-    it("surfaces verification details as a warning in warn mode", () => {
+    it("surfaces verification details as an info line in warn mode (not a warning)", () => {
       const result = evaluatePackage(
         createInput({
           config: createConfig({
@@ -487,9 +488,12 @@ describe("evaluatePackage", () => {
       );
 
       expect(result.blockedReasons).toHaveLength(0);
+      // Verified-OK is informational, not a warning. This is the 0.2.1 fix
+      // for the confusing "Warning: ... verified" output users saw in 0.2.0.
+      expect(result.warnings).toHaveLength(0);
       expect(
-        result.warnings.some(
-          (warning) => warning.includes("verified") && warning.includes("axios/axios")
+        result.infos.some(
+          (info) => info.includes("verified") && info.includes("axios/axios")
         )
       ).toBe(true);
     });

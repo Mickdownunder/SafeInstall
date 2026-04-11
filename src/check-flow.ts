@@ -52,7 +52,8 @@ function createAffectedPackage(evaluation: PackageEvaluation) {
     sourceType: evaluation.requested.sourceType,
     resolvedVersion: evaluation.resolvedRegistryPackage?.resolvedVersion,
     reasons: evaluation.blockedReasons,
-    warnings: evaluation.warnings
+    warnings: evaluation.warnings,
+    infos: evaluation.infos
   };
 }
 
@@ -90,6 +91,7 @@ export async function runCheckFlow(
       ],
       summary: "Check blocked.",
       warnings: [],
+      infos: [],
       affectedPackages: []
     };
   }
@@ -107,6 +109,7 @@ export async function runCheckFlow(
       reasons: projectTargets.issues.map(createProjectIssueReason),
       summary: "Check blocked.",
       warnings: [],
+      infos: [],
       affectedPackages: []
     };
   }
@@ -130,6 +133,7 @@ export async function runCheckFlow(
       reasons: [],
       summary: "Check skipped: package.json has no direct dependencies.",
       warnings: [],
+      infos: [],
       affectedPackages: []
     };
   }
@@ -147,6 +151,7 @@ export async function runCheckFlow(
   );
   const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
   const warnings = evaluations.flatMap((evaluation) => evaluation.warnings);
+  const infos = evaluations.flatMap((evaluation) => evaluation.infos);
 
   if (blocked.length > 0) {
     return {
@@ -161,6 +166,7 @@ export async function runCheckFlow(
       reasons: blocked.flatMap((evaluation) => evaluation.blockedReasons),
       summary: "Check blocked.",
       warnings,
+      infos,
       affectedPackages: blocked.map(createAffectedPackage)
     };
   }
@@ -177,12 +183,14 @@ export async function runCheckFlow(
     reasons: [],
     summary: "Check passed: no direct dependency policy violations found.",
     warnings,
+    infos,
     affectedPackages: requestedPackages.map((requested) => ({
       name: requested.name,
       requested: requested.raw,
       sourceType: requested.sourceType,
       reasons: [],
-      warnings: []
+      warnings: [],
+      infos: []
     }))
   };
 }
