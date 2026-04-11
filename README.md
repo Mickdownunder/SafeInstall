@@ -39,6 +39,34 @@ No dashboard. No account. No cloud. One command prefix — policy runs locally, 
 
 ---
 
+## Catching a maintainer-compromise attack
+
+A valid Sigstore signature is not enough. An attacker who compromises an npm maintainer account can publish a malicious version of a package you already trust, and the attestation on that malicious version will cryptographically verify — signed by a GitHub Actions workflow the attacker controls in a fork of the real repository.
+
+SafeInstall catches this. Pin the expected source repository with `provenance.trustedPublishers` and any build that comes from anywhere else is blocked, even if the signature is valid:
+
+```
+$ safeinstall check
+Using config: ./safeinstall.config.json
+Check blocked.
+- axios@1.99.0
+  Blocked: publisher mismatch for axios (expected axios/axios, got evil-org/axios).
+  Suggestion: Verify the package source. Update provenance.trustedPublishers only if the change is intentional.
+```
+
+This is the only check of its kind in an install-time policy gate. CVE scanners look for known vulnerabilities. Content analyzers look for suspicious code. SafeInstall enforces that the cryptographic chain of trust points at the repository you agreed to trust — and refuses anything else, no matter how legitimate it looks.
+
+SafeInstall itself is published with a Sigstore attestation. You can eat your own dog food: enable provenance verification, pin `safeinstall-cli` to `Mickdownunder/SafeInstall`, and watch SafeInstall verify its own trust chain against the public Sigstore transparency log.
+
+```
+$ safeinstall check
+Using config: ./safeinstall.config.json
+Info: safeinstall-cli: provenance verified from Mickdownunder/SafeInstall via .github/workflows/release.yml.
+Check passed: no direct dependency policy violations found.
+```
+
+---
+
 ## Install
 
 ```bash
