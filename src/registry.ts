@@ -37,7 +37,16 @@ const VERSION_MANIFEST_CACHE_NAMESPACE = "registry-version-manifests-v1";
 const PUBLISH_TIME_CACHE_NAMESPACE = "registry-publish-times-v1";
 
 function encodePackageName(name: string): string {
-  return name.startsWith("@") ? name.replace("/", "%2f") : name;
+  // Preserve the leading "@" for scoped packages so the registry URL reads
+  // as /@scope%2Fname, then percent-encode every other reserved character.
+  return encodeURIComponent(name).replace(/^%40/, "@");
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.name === "TimeoutError")
+  );
 }
 
 function createTimeoutSignal(): AbortSignal {
@@ -228,7 +237,7 @@ export class RegistryClient {
         throw shutdownError;
       }
 
-      if (error instanceof Error && error.name === "AbortError") {
+      if (isTimeoutError(error)) {
         throw new Error(
           `Registry error: timed out while fetching tarball metadata for ${packageName}@${version}.`
         );
@@ -285,7 +294,7 @@ export class RegistryClient {
         throw shutdownError;
       }
 
-      if (error instanceof Error && error.name === "AbortError") {
+      if (isTimeoutError(error)) {
         throw new Error(`Registry error: timed out while fetching ${packageLabel}.`);
       }
 
