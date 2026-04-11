@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.0 - 2026-04-11
+
+Two new policy checks covering opposite ends of the supply-chain attack spectrum: typo-squat detection for the most common attack (a one-letter mistake turning into a malware install) and Sigstore provenance verification for the most sophisticated (a tampered tarball with a valid-looking signature from the wrong source).
+
+Both features default to `"off"` so upgrading from 0.1.1 is fully non-breaking. Opt in via `typoSquat.mode` and `provenance.mode` in `safeinstall.config.json`.
+
+### Added
+
+- **Typo-squat detection.** New `typoSquat` config block. Uses Damerau-Levenshtein distance with an early cutoff to flag install requests whose package name is a close-but-not-exact match to a popular package (e.g. `lodsh` for `lodash`, `raect` for `react`, `axois` for `axios`). Supports `"warn"` and `"block"` modes, a configurable minimum name length, and a per-project ignore list for known legitimate lookalikes. The popular-package list is curated and embedded at build time — no runtime network fetch.
+- **Sigstore provenance verification.** New `provenance` config block. Fetches the attestation bundle from the npm registry's `/-/npm/v1/attestations/` endpoint, verifies the Sigstore bundle cryptographically via the official `sigstore` package (signatures, Rekor transparency log, public trust root), and extracts the source repository and commit ref from the SLSA v1 provenance statement. Supports `"warn"` and `"require"` modes and per-package `requireFor` overrides.
+- **Trusted publisher pinning.** Inside the provenance config, `trustedPublishers` maps a package name pattern (exact name or glob) to an expected `owner/repo` slug. A valid provenance attestation from an unexpected repository is **always** blocked, regardless of mode — this is the defense against maintainer-account compromise attacks where an attacker republishes a legitimate-looking package from a fork they control.
+- **Offline behavior control.** `provenance.offlineBehavior` is either `"fail-closed"` (default, safer) or `"allow-cached"` (more available). Cached attestation bundles share the existing disk cache hardening from 0.1.1.
+
+### Changed
+
+- The config validator now recognizes and strictly validates the two new top-level keys (`typoSquat`, `provenance`) and their nested shapes.
+- `safeinstall.config.example.json` now includes both new blocks with sensible defaults.
+
+### Security
+
+- Trusted-publisher-mismatch blocks cannot be silenced by dropping to `"warn"` mode. This is intentional: a valid Sigstore signature from the wrong source repository is exactly what a maintainer-compromise attack looks like.
+
 ## 0.1.1 - 2026-04-11
 
 ### Fixed

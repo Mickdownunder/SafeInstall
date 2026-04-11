@@ -1,6 +1,6 @@
 {
   "name": "safeinstall-cli",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Local-first CLI that blocks risky npm, pnpm, and bun installs before they run. Open source.",
   "packageManager": "pnpm@10.17.0",
   "license": "MIT",
@@ -46,7 +46,6 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@sigstore/verify": "^3.1.0",
     "npm-package-arg": "^12.0.2",
     "semver": "^7.7.2",
     "sigstore": "^4.1.0",
