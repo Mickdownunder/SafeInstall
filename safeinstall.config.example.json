@@ -1,0 +1,21 @@
+{
+  "minimumReleaseAgeHours": 72,
+  "registryUrl": "https://registry.npmjs.org",
+  "allowedScripts": {
+    "esbuild": ["postinstall"]
+  },
+  "allowedSources": ["registry", "workspace", "file", "directory"],
+  "allowedPackages": [],
+  "ciMode": true,
+  "packageManagerDefaults": {
+    "npm": {
+      "ignoreScripts": true
+    },
+    "pnpm": {
+      "ignoreScripts": true
+    },
+    "bun": {
+      "ignoreScripts": true
+    }
+  }
+}
