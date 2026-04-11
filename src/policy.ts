@@ -1,3 +1,4 @@
+import { detectTypoSquat } from "./typo-squat";
 import type {
   InstallLifecycleScriptName,
   PackageEvaluation,
@@ -60,6 +61,23 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
   if (isPackageAllowlisted(input.config, input.requested.name)) {
     evaluation.warnings.push(`Package ${input.requested.name} is allowlisted; policy checks were skipped.`);
     return evaluation;
+  }
+
+  if (input.config.typoSquat.mode !== "off") {
+    const suspicion = detectTypoSquat(input.requested.name, input.config.typoSquat);
+    if (suspicion) {
+      const message = `Suspected typo-squat: "${suspicion.requested}" is ${suspicion.editDistance} edit(s) away from popular package "${suspicion.suspectedTarget}".`;
+      const suggestion = `Verify you meant to install "${suspicion.suspectedTarget}". If this package is intentional, add "${suspicion.requested.toLowerCase()}" to typoSquat.ignore.`;
+      if (input.config.typoSquat.mode === "block") {
+        evaluation.blockedReasons.push({
+          code: "typo-squat-suspected",
+          message: `Blocked: ${message}`,
+          suggestion
+        });
+      } else {
+        evaluation.warnings.push(`${message} ${suggestion}`);
+      }
+    }
   }
 
   if (
