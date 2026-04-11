@@ -15,6 +15,7 @@
 
 - A warning is now printed when `registryUrl` points at a non-loopback plaintext HTTP endpoint, since package metadata is unauthenticated in transit.
 - Releases published from GitHub Actions now include [npm provenance](https://docs.npmjs.com/generating-provenance-statements) attestations.
+- Releases are published via npm [trusted publisher](https://docs.npmjs.com/trusted-publishers) OIDC, eliminating long-lived tokens from the publish pipeline.
 
 ## 0.1.0 - 2026-03-31
 
