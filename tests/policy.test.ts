@@ -260,6 +260,79 @@ describe("evaluatePackage", () => {
     expect(result.warnings).toHaveLength(0);
   });
 
+  it("catches typo-squat even when registry resolution failed", () => {
+    // Regression test for a 0.2.0 bug: if a typo'd name does not exist on
+    // the registry, the resolve error used to shadow the typo-squat check
+    // and users saw "fetch failed" instead of "suspected typo-squat".
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({
+          typoSquat: { mode: "block", minNameLength: 4, ignore: [] }
+        }),
+        requested: {
+          name: "raect",
+          raw: "raect",
+          requested: "latest",
+          sourceType: "registry",
+          registrySpecKind: "tag"
+        },
+        resolvedRegistryPackage: undefined,
+        resolutionError: new Error("404 Not Found")
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toContain("typo-squat-suspected");
+    // The typo-squat block wins; we do NOT also add package-resolution-failed
+    expect(result.blockedReasons.map((reason) => reason.code)).not.toContain(
+      "package-resolution-failed"
+    );
+  });
+
+  it("adds package-resolution-failed when registry resolution failed and nothing else caught it", () => {
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({
+          typoSquat: { mode: "block", minNameLength: 4, ignore: [] }
+        }),
+        requested: {
+          name: "totally-unrelated-nonexistent-package",
+          raw: "totally-unrelated-nonexistent-package",
+          requested: "latest",
+          sourceType: "registry",
+          registrySpecKind: "tag"
+        },
+        resolvedRegistryPackage: undefined,
+        resolutionError: new Error("404 Not Found")
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toContain("package-resolution-failed");
+    const block = result.blockedReasons.find(
+      (reason) => reason.code === "package-resolution-failed"
+    );
+    expect(block?.message).toContain("totally-unrelated-nonexistent-package");
+    expect(block?.message).toContain("404 Not Found");
+  });
+
+  it("does not add package-resolution-failed for non-registry sources", () => {
+    const result = evaluatePackage(
+      createInput({
+        requested: {
+          name: "github:axios/axios",
+          raw: "github:axios/axios",
+          requested: "github:axios/axios",
+          sourceType: "git"
+        },
+        resolvedRegistryPackage: undefined,
+        resolutionError: new Error("should not happen")
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).not.toContain(
+      "package-resolution-failed"
+    );
+  });
+
   describe("provenance integration", () => {
     const provenanceBase = {
       minimumReleaseAgeHours: 0

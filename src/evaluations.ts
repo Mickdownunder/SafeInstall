@@ -41,10 +41,21 @@ export async function evaluateRequestedPackages(
           ? await registryClient.getLifecycleScripts(requested.name, priorState.installedVersion)
           : [];
 
-      const resolvedRegistryPackage =
-        requested.sourceType === "registry"
-          ? await registryClient.resolvePackage(requested)
-          : undefined;
+      let resolvedRegistryPackage: Awaited<
+        ReturnType<typeof registryClient.resolvePackage>
+      > | undefined;
+      let resolutionError: Error | undefined;
+      if (requested.sourceType === "registry") {
+        try {
+          resolvedRegistryPackage = await registryClient.resolvePackage(requested);
+        } catch (error) {
+          // Capture instead of throwing so typo-squat detection — which does
+          // not need registry data — can still fire on close-but-nonexistent
+          // names. If nothing else blocks, evaluatePackage surfaces the
+          // original error as a package-resolution-failed block.
+          resolutionError = error instanceof Error ? error : new Error(String(error));
+        }
+      }
 
       let provenanceResult: ProvenanceVerificationResult | undefined;
       if (
@@ -69,7 +80,8 @@ export async function evaluateRequestedPackages(
         priorState,
         resolvedRegistryPackage,
         priorLifecycleScripts,
-        provenanceResult
+        provenanceResult,
+        resolutionError
       });
     }
   );
