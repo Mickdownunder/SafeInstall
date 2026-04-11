@@ -103,7 +103,8 @@ export type PolicyBlockCode =
   | "attestation-missing"
   | "attestation-invalid"
   | "attestation-unreachable"
-  | "publisher-mismatch";
+  | "publisher-mismatch"
+  | "package-resolution-failed";
 
 export interface PolicyBlockReason {
   code: PolicyBlockCode;

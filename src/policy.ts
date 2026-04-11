@@ -54,6 +54,15 @@ export interface EvaluatePackageInput {
   resolvedRegistryPackage?: ResolvedRegistryPackage;
   priorLifecycleScripts?: InstallLifecycleScriptName[];
   provenanceResult?: ProvenanceVerificationResult;
+  /**
+   * Error captured when registry metadata resolution failed (package does
+   * not exist, network error, 5xx, etc.). If a typo-squat check fires on
+   * the same requested name, the typo-squat block is the user-facing
+   * result and this error is ignored. Otherwise, a `package-resolution-failed`
+   * block is added so the user sees a real error message rather than a
+   * silent, empty allow.
+   */
+  resolutionError?: Error;
 }
 
 export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation {
@@ -114,6 +123,21 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
   }
 
   if (!input.resolvedRegistryPackage) {
+    // If registry resolution failed for a registry-sourced package AND
+    // nothing else (typo-squat, source, trust-downgrade) caught it, surface
+    // a real error so the user isn't left with a silent empty allow.
+    if (
+      input.resolutionError &&
+      input.requested.sourceType === "registry" &&
+      evaluation.blockedReasons.length === 0
+    ) {
+      evaluation.blockedReasons.push({
+        code: "package-resolution-failed",
+        message: `Blocked: could not resolve ${input.requested.name} from the registry (${input.resolutionError.message}).`,
+        suggestion:
+          "Check the package name spelling and your network connectivity, then retry."
+      });
+    }
     return evaluation;
   }
 
