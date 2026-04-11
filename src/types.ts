@@ -24,6 +24,28 @@ export interface TypoSquatConfig {
   ignore: string[];
 }
 
+export type ProvenanceMode = "off" | "warn" | "require";
+
+export type TrustedPublisherPattern = string;
+
+export interface ProvenanceConfig {
+  mode: ProvenanceMode;
+  requireFor: string[];
+  trustedPublishers: Record<string, TrustedPublisherPattern>;
+  offlineBehavior: "fail-closed" | "allow-cached";
+}
+
+export type ProvenanceVerificationStatus = "verified" | "missing" | "invalid" | "unreachable";
+
+export interface ProvenanceVerificationResult {
+  status: ProvenanceVerificationStatus;
+  sourceRepository?: string;
+  sourceRef?: string;
+  workflowPath?: string;
+  builderId?: string;
+  error?: string;
+}
+
 export interface SafeInstallConfig {
   minimumReleaseAgeHours: number;
   registryUrl: string;
@@ -33,6 +55,7 @@ export interface SafeInstallConfig {
   ciMode: boolean;
   packageManagerDefaults: Record<PackageManagerName, PackageManagerDefaults>;
   typoSquat: TypoSquatConfig;
+  provenance: ProvenanceConfig;
 }
 
 export interface RequestedPackage {
@@ -75,7 +98,11 @@ export type PolicyBlockCode =
   | "install-script-present"
   | "untrusted-source"
   | "trust-level-dropped"
-  | "typo-squat-suspected";
+  | "typo-squat-suspected"
+  | "attestation-missing"
+  | "attestation-invalid"
+  | "attestation-unreachable"
+  | "publisher-mismatch";
 
 export interface PolicyBlockReason {
   code: PolicyBlockCode;

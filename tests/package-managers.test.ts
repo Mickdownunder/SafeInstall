@@ -24,6 +24,12 @@ const config: SafeInstallConfig = {
     mode: "off",
     minNameLength: 4,
     ignore: []
+  },
+  provenance: {
+    mode: "off",
+    requireFor: [],
+    trustedPublishers: {},
+    offlineBehavior: "fail-closed"
   }
 };
 

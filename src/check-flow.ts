@@ -142,7 +142,8 @@ export async function runCheckFlow(
     invocation.packageDir ?? invocation.effectiveCwd,
     requestedPackages,
     registryClient,
-    config
+    config,
+    options.signal
   );
   const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
   const warnings = evaluations.flatMap((evaluation) => evaluation.warnings);
