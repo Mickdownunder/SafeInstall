@@ -62,13 +62,19 @@ export class DiskCache {
 
   async setJson<TValue>(namespace: string, key: string, value: TValue): Promise<void> {
     try {
+      // Restrict permissions so a co-located user cannot poison cached
+      // publish timestamps and bypass release-age policy checks. The mode
+      // flags are a no-op on Windows, where ACLs gate access instead.
       const namespaceDir = path.join(this.cacheDir, namespace);
-      await mkdir(namespaceDir, { recursive: true });
+      await mkdir(namespaceDir, { recursive: true, mode: 0o700 });
       const payload: CacheEnvelope<TValue> = {
         cachedAt: Date.now(),
         value
       };
-      await writeFile(this.cacheFilePath(namespace, key), `${JSON.stringify(payload)}\n`, "utf8");
+      await writeFile(this.cacheFilePath(namespace, key), `${JSON.stringify(payload)}\n`, {
+        encoding: "utf8",
+        mode: 0o600
+      });
     } catch {
       // Cache failures must never block installs or checks.
     }
