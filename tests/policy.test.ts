@@ -22,6 +22,12 @@ function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallCo
       minNameLength: 4,
       ignore: []
     },
+    provenance: {
+      mode: "off",
+      requireFor: [],
+      trustedPublishers: {},
+      offlineBehavior: "fail-closed"
+    },
     ...overrides
   };
 }
@@ -252,5 +258,240 @@ describe("evaluatePackage", () => {
 
     expect(result.blockedReasons.map((reason) => reason.code)).not.toContain("typo-squat-suspected");
     expect(result.warnings).toHaveLength(0);
+  });
+
+  describe("provenance integration", () => {
+    const provenanceBase = {
+      minimumReleaseAgeHours: 0
+    } as const;
+
+    it("ignores provenance results when mode is off", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "off",
+              requireFor: [],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: { status: "missing" }
+        })
+      );
+
+      expect(result.blockedReasons).toHaveLength(0);
+    });
+
+    it("blocks on missing attestation when mode is require", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "require",
+              requireFor: [],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: { status: "missing" }
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toContain("attestation-missing");
+    });
+
+    it("blocks on missing attestation when package matches requireFor in warn mode", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "warn",
+              requireFor: ["axios"],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: { status: "missing" }
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toContain("attestation-missing");
+    });
+
+    it("warns on missing attestation in warn mode when package is not in requireFor", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "warn",
+              requireFor: [],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: { status: "missing" }
+        })
+      );
+
+      expect(result.blockedReasons).toHaveLength(0);
+      expect(result.warnings.some((warning) => warning.includes("provenance"))).toBe(true);
+    });
+
+    it("blocks on invalid attestation regardless of mode", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "warn",
+              requireFor: [],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: { status: "invalid", error: "signature mismatch" }
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toContain("attestation-invalid");
+    });
+
+    it("blocks on unreachable when offlineBehavior is fail-closed", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "require",
+              requireFor: [],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: { status: "unreachable", error: "ETIMEDOUT" }
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toContain("attestation-unreachable");
+    });
+
+    it("warns on unreachable when offlineBehavior is allow-cached", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "require",
+              requireFor: [],
+              trustedPublishers: {},
+              offlineBehavior: "allow-cached"
+            }
+          }),
+          provenanceResult: { status: "unreachable", error: "ETIMEDOUT" }
+        })
+      );
+
+      expect(result.blockedReasons).toHaveLength(0);
+      expect(result.warnings.some((warning) => warning.includes("unreachable"))).toBe(true);
+    });
+
+    it("blocks on publisher mismatch even when mode is warn", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "warn",
+              requireFor: [],
+              trustedPublishers: { axios: "axios/axios" },
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: {
+            status: "verified",
+            sourceRepository: "evil-org/axios"
+          }
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toContain("publisher-mismatch");
+    });
+
+    it("permits verified attestation when the publisher matches the pin", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "require",
+              requireFor: [],
+              trustedPublishers: { axios: "axios/axios" },
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: {
+            status: "verified",
+            sourceRepository: "axios/axios"
+          }
+        })
+      );
+
+      expect(result.blockedReasons).toHaveLength(0);
+    });
+
+    it("permits verified attestation without a publisher pin", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "require",
+              requireFor: [],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: {
+            status: "verified",
+            sourceRepository: "anyone/anything"
+          }
+        })
+      );
+
+      expect(result.blockedReasons).toHaveLength(0);
+    });
+
+    it("surfaces verification details as a warning in warn mode", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "warn",
+              requireFor: [],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: {
+            status: "verified",
+            sourceRepository: "axios/axios",
+            workflowPath: ".github/workflows/release.yml"
+          }
+        })
+      );
+
+      expect(result.blockedReasons).toHaveLength(0);
+      expect(
+        result.warnings.some(
+          (warning) => warning.includes("verified") && warning.includes("axios/axios")
+        )
+      ).toBe(true);
+    });
   });
 });

@@ -27,6 +27,12 @@ function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallCo
       minNameLength: 4,
       ignore: []
     },
+    provenance: {
+      mode: "off",
+      requireFor: [],
+      trustedPublishers: {},
+      offlineBehavior: "fail-closed"
+    },
     ...overrides
   };
 }

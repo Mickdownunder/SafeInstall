@@ -1,8 +1,14 @@
+import {
+  isProvenanceRequired,
+  lookupGlobPattern,
+  repositoryMatchesPublisher
+} from "./provenance";
 import { detectTypoSquat } from "./typo-squat";
 import type {
   InstallLifecycleScriptName,
   PackageEvaluation,
   ProjectDependencyState,
+  ProvenanceVerificationResult,
   RequestedPackage,
   ResolvedRegistryPackage,
   SafeInstallConfig
@@ -47,6 +53,7 @@ export interface EvaluatePackageInput {
   priorState?: ProjectDependencyState;
   resolvedRegistryPackage?: ResolvedRegistryPackage;
   priorLifecycleScripts?: InstallLifecycleScriptName[];
+  provenanceResult?: ProvenanceVerificationResult;
 }
 
 export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation {
@@ -144,5 +151,100 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
     });
   }
 
+  applyProvenanceDecision(evaluation, input);
+
   return evaluation;
+}
+
+/**
+ * Translate a provenance verification result into blocked reasons or
+ * warnings on the package evaluation, respecting the configured mode and
+ * the per-package `requireFor` overrides.
+ *
+ * Mode semantics:
+ *   - "off"     → no check; result is ignored even if present
+ *   - "warn"    → always record verification status as a warning; never block
+ *   - "require" → verification failures always block; verified results are silent
+ *
+ * Trusted publisher mismatches are **always** a block regardless of mode.
+ * An attacker who compromises an npm maintainer and republishes from a fork
+ * can produce valid provenance, so the publisher pin must be enforced the
+ * moment it's configured.
+ */
+function applyProvenanceDecision(
+  evaluation: PackageEvaluation,
+  input: EvaluatePackageInput
+): void {
+  const config = input.config.provenance;
+  if (config.mode === "off") {
+    return;
+  }
+
+  if (!input.provenanceResult) {
+    return;
+  }
+
+  const requested = input.requested.name;
+  const required = isProvenanceRequired(config, requested);
+  const result = input.provenanceResult;
+
+  if (result.status === "missing") {
+    if (required) {
+      evaluation.blockedReasons.push({
+        code: "attestation-missing",
+        message: `Blocked: ${requested} has no provenance attestation and policy requires one.`,
+        suggestion:
+          "Ask the maintainer to publish with --provenance, or remove this package from provenance.requireFor."
+      });
+    } else if (config.mode === "warn") {
+      evaluation.warnings.push(`${requested} has no provenance attestation.`);
+    }
+    return;
+  }
+
+  if (result.status === "invalid") {
+    evaluation.blockedReasons.push({
+      code: "attestation-invalid",
+      message: `Blocked: provenance verification failed for ${requested}${result.error ? ` (${result.error})` : ""}.`,
+      suggestion:
+        "The attestation could not be cryptographically verified. Do not trust this package without further review."
+    });
+    return;
+  }
+
+  if (result.status === "unreachable") {
+    if (config.offlineBehavior === "fail-closed") {
+      evaluation.blockedReasons.push({
+        code: "attestation-unreachable",
+        message: `Blocked: could not fetch provenance attestation for ${requested}${result.error ? ` (${result.error})` : ""}.`,
+        suggestion:
+          "Retry when the network is available, or set provenance.offlineBehavior to allow-cached."
+      });
+    } else {
+      evaluation.warnings.push(
+        `${requested}: provenance attestation unreachable${result.error ? ` (${result.error})` : ""}.`
+      );
+    }
+    return;
+  }
+
+  // Verified — check the trusted publisher pin.
+  const expectedPublisher = lookupGlobPattern(config.trustedPublishers, requested);
+  if (expectedPublisher && result.sourceRepository) {
+    if (!repositoryMatchesPublisher(result.sourceRepository, expectedPublisher)) {
+      evaluation.blockedReasons.push({
+        code: "publisher-mismatch",
+        message: `Blocked: publisher mismatch for ${requested} (expected ${expectedPublisher}, got ${result.sourceRepository}).`,
+        suggestion:
+          "Verify the package source. Update provenance.trustedPublishers only if the change is intentional."
+      });
+      return;
+    }
+  }
+
+  if (config.mode === "warn") {
+    evaluation.warnings.push(
+      `${requested}: provenance verified from ${result.sourceRepository ?? "unknown repository"}${result.workflowPath ? ` via ${result.workflowPath}` : ""}.`
+    );
+  }
 }

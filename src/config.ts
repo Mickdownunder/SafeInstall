@@ -15,7 +15,8 @@ const KNOWN_CONFIG_KEYS = new Set<keyof SafeInstallConfig>([
   "allowedPackages",
   "ciMode",
   "packageManagerDefaults",
-  "typoSquat"
+  "typoSquat",
+  "provenance"
 ]);
 
 const KNOWN_TYPO_SQUAT_KEYS = new Set<keyof SafeInstallConfig["typoSquat"]>([
@@ -24,7 +25,16 @@ const KNOWN_TYPO_SQUAT_KEYS = new Set<keyof SafeInstallConfig["typoSquat"]>([
   "ignore"
 ]);
 
+const KNOWN_PROVENANCE_KEYS = new Set<keyof SafeInstallConfig["provenance"]>([
+  "mode",
+  "requireFor",
+  "trustedPublishers",
+  "offlineBehavior"
+]);
+
 const TYPO_SQUAT_MODES = new Set(["off", "warn", "block"]);
+const PROVENANCE_MODES = new Set(["off", "warn", "require"]);
+const OFFLINE_BEHAVIORS = new Set(["fail-closed", "allow-cached"]);
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -70,6 +80,12 @@ export function createDefaultConfig(): SafeInstallConfig {
       mode: "off",
       minNameLength: 4,
       ignore: []
+    },
+    provenance: {
+      mode: "off",
+      requireFor: [],
+      trustedPublishers: {},
+      offlineBehavior: "fail-closed"
     }
   };
 }
@@ -113,6 +129,66 @@ function validateTypoSquat(
   };
 }
 
+function validateProvenance(
+  input: Partial<SafeInstallConfig["provenance"]> | undefined
+): SafeInstallConfig["provenance"] {
+  const defaults = createDefaultConfig().provenance;
+  if (!input) {
+    return defaults;
+  }
+
+  const unknownKeys = Object.keys(input).filter(
+    (key) => !KNOWN_PROVENANCE_KEYS.has(key as keyof SafeInstallConfig["provenance"])
+  );
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `Config error: unknown key(s) in provenance: ${unknownKeys.map((key) => `"${key}"`).join(", ")}.`
+    );
+  }
+
+  const mode = input.mode ?? defaults.mode;
+  if (!PROVENANCE_MODES.has(mode)) {
+    throw new Error(`Config error: provenance.mode must be one of "off", "warn", "require".`);
+  }
+
+  const requireFor = input.requireFor ?? defaults.requireFor;
+  if (!Array.isArray(requireFor) || requireFor.some((entry) => typeof entry !== "string")) {
+    throw new Error("Config error: provenance.requireFor must be an array of strings.");
+  }
+
+  const trustedPublishers = input.trustedPublishers ?? defaults.trustedPublishers;
+  if (
+    typeof trustedPublishers !== "object" ||
+    trustedPublishers === null ||
+    Array.isArray(trustedPublishers)
+  ) {
+    throw new Error(
+      "Config error: provenance.trustedPublishers must be an object mapping package patterns to repository patterns."
+    );
+  }
+  for (const [key, value] of Object.entries(trustedPublishers)) {
+    if (typeof key !== "string" || typeof value !== "string") {
+      throw new Error(
+        `Config error: provenance.trustedPublishers entries must map string to string (got ${key}: ${typeof value}).`
+      );
+    }
+  }
+
+  const offlineBehavior = input.offlineBehavior ?? defaults.offlineBehavior;
+  if (!OFFLINE_BEHAVIORS.has(offlineBehavior)) {
+    throw new Error(
+      `Config error: provenance.offlineBehavior must be "fail-closed" or "allow-cached".`
+    );
+  }
+
+  return {
+    mode,
+    requireFor: [...requireFor],
+    trustedPublishers: { ...trustedPublishers },
+    offlineBehavior
+  };
+}
+
 function isPackageManagerName(value: string): value is PackageManagerName {
   return value === "npm" || value === "pnpm" || value === "bun";
 }
@@ -153,7 +229,8 @@ function mergeConfig(input: Partial<SafeInstallConfig>): SafeInstallConfig {
         ...(input.packageManagerDefaults?.bun ?? {})
       }
     },
-    typoSquat: validateTypoSquat(input.typoSquat)
+    typoSquat: validateTypoSquat(input.typoSquat),
+    provenance: validateProvenance(input.provenance)
   };
 
   if (!Number.isFinite(merged.minimumReleaseAgeHours) || merged.minimumReleaseAgeHours < 0) {

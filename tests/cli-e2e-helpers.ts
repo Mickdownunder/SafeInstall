@@ -185,6 +185,12 @@ export async function writeDefaultConfig(
       minNameLength: 4,
       ignore: []
     },
+    provenance: {
+      mode: "off",
+      requireFor: [],
+      trustedPublishers: {},
+      offlineBehavior: "fail-closed"
+    },
     ...overrides
   });
 }

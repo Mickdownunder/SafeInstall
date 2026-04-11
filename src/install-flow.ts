@@ -242,7 +242,8 @@ export async function runInstallFlow(
     invocation.packageDir ?? invocation.effectiveCwd,
     plan.packages,
     registryClient,
-    config
+    config,
+    options.signal
   );
   const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
   const warnings = evaluations.flatMap((evaluation) => evaluation.warnings);
