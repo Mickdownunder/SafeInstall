@@ -13,6 +13,7 @@ import {
   readLoggedArgs,
   runCli,
   spawnCli,
+  waitForStderr,
   writeDefaultConfig,
   writeJson
 } from "./cli-e2e-helpers";
@@ -455,7 +456,12 @@ done
       }
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Wait for evidence that the CLI has finished its startup phase and
+    // registered its signal handlers, rather than sleeping a fixed amount.
+    // `Allowed: policy checks passed.` is printed right before the package
+    // manager is spawned — by this point the signal handler is definitely
+    // active and we are mid-install, which is exactly the state under test.
+    await waitForStderr(child, "Allowed: policy checks passed.", 5000);
     child.kill("SIGINT");
 
     const interrupted = await result;

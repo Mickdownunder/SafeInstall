@@ -164,6 +164,62 @@ export async function readLoggedArgs(logPath: string): Promise<string[]> {
   return (await readFile(logPath, "utf8")).trim().split("\n");
 }
 
+/**
+ * Wait for a spawned child process to emit a specific string on stderr.
+ * Rejects if the pattern does not appear within the timeout, with the
+ * full stderr buffer in the error message for diagnostics. Coexists
+ * with the stderr listener that `spawnCli` already attached; both see
+ * all data chunks.
+ */
+export function waitForStderr(
+  child: ReturnType<typeof spawn>,
+  pattern: string,
+  timeoutMs = 5000
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+
+    const onData = (chunk: Buffer | string) => {
+      buffer += chunk.toString();
+      if (buffer.includes(pattern)) {
+        cleanup();
+        resolve();
+      }
+    };
+
+    const onClose = () => {
+      cleanup();
+      if (buffer.includes(pattern)) {
+        resolve();
+      } else {
+        reject(
+          new Error(
+            `Child process exited before stderr contained "${pattern}". Buffered stderr:\n${buffer}`
+          )
+        );
+      }
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(
+        new Error(
+          `Timed out after ${timeoutMs}ms waiting for stderr to contain "${pattern}". Buffered stderr:\n${buffer}`
+        )
+      );
+    }, timeoutMs);
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.stderr?.off("data", onData);
+      child.off("close", onClose);
+    };
+
+    child.stderr?.on("data", onData);
+    child.on("close", onClose);
+  });
+}
+
 export async function writeDefaultConfig(
   cwd: string,
   overrides: Record<string, unknown> = {}
