@@ -7,6 +7,20 @@ import type { PackageManagerName, SafeInstallConfig } from "./types";
 export const CONFIG_FILE_NAME = "safeinstall.config.json";
 export const DEFAULT_REGISTRY_URL = "https://registry.npmjs.org";
 
+const KNOWN_CONFIG_KEYS = new Set<keyof SafeInstallConfig>([
+  "minimumReleaseAgeHours",
+  "registryUrl",
+  "allowedScripts",
+  "allowedSources",
+  "allowedPackages",
+  "ciMode",
+  "packageManagerDefaults"
+]);
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
 function normalizeRegistryUrl(input: string): string {
   let parsedUrl: URL;
   try {
@@ -17,6 +31,12 @@ function normalizeRegistryUrl(input: string): string {
 
   if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
     throw new Error("Config error: registryUrl must use http or https.");
+  }
+
+  if (parsedUrl.protocol === "http:" && !isLoopbackHost(parsedUrl.hostname)) {
+    console.error(
+      `Warning: registryUrl ${input} uses plaintext HTTP; package metadata is not protected against tampering in transit.`
+    );
   }
 
   const normalizedPathname = parsedUrl.pathname.replace(/\/+$/, "");
@@ -45,6 +65,16 @@ function isPackageManagerName(value: string): value is PackageManagerName {
 }
 
 function mergeConfig(input: Partial<SafeInstallConfig>): SafeInstallConfig {
+  const unknownKeys = Object.keys(input).filter(
+    (key) => !KNOWN_CONFIG_KEYS.has(key as keyof SafeInstallConfig)
+  );
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `Config error: unknown key(s) ${unknownKeys.map((key) => `"${key}"`).join(", ")}. ` +
+        "Check for typos against the documented schema."
+    );
+  }
+
   const defaultConfig = createDefaultConfig();
   const merged: SafeInstallConfig = {
     ...defaultConfig,
@@ -53,6 +83,9 @@ function mergeConfig(input: Partial<SafeInstallConfig>): SafeInstallConfig {
       ...defaultConfig.allowedScripts,
       ...(input.allowedScripts ?? {})
     },
+    allowedPackages: (input.allowedPackages ?? defaultConfig.allowedPackages).map((name) =>
+      name.toLowerCase()
+    ),
     packageManagerDefaults: {
       npm: {
         ...defaultConfig.packageManagerDefaults.npm,

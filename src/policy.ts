@@ -8,7 +8,7 @@ import type {
 } from "./types";
 
 function isPackageAllowlisted(config: SafeInstallConfig, packageName: string): boolean {
-  return config.allowedPackages.includes(packageName);
+  return config.allowedPackages.includes(packageName.toLowerCase());
 }
 
 function isSourcePolicyRelevant(sourceType: RequestedPackage["sourceType"]): boolean {
