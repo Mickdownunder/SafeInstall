@@ -349,6 +349,60 @@ Install blocked.
 
 ---
 
+## GitHub Action
+
+Run SafeInstall policy checks automatically on every pull request. Five lines of YAML, no configuration required — defaults apply immediately.
+
+```yaml
+# .github/workflows/safeinstall.yml
+name: SafeInstall Policy Check
+on: [pull_request]
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Mickdownunder/SafeInstall@v1
+```
+
+The action runs `safeinstall check` against your direct dependencies and sets the job status to pass or fail. Blocked dependencies appear in the GitHub Actions job summary with the exact block reason and suggestion.
+
+### Install mode
+
+To enforce policy during the actual install step (not just a check):
+
+```yaml
+      - uses: Mickdownunder/SafeInstall@v1
+        with:
+          mode: install
+          package-manager: pnpm
+          args: "--frozen-lockfile"
+```
+
+### Inputs
+
+| Input | Default | Description |
+|:---|:---|:---|
+| `mode` | `check` | `check` audits deps; `install` runs the package manager through SafeInstall |
+| `package-manager` | `pnpm` | `npm`, `pnpm`, or `bun` (install mode only) |
+| `args` | | Additional arguments forwarded to the package manager |
+| `config-path` | | Explicit path to `safeinstall.config.json` (auto-discovered if omitted) |
+| `version` | `latest` | SafeInstall CLI version to install |
+
+### Outputs
+
+| Output | Description |
+|:---|:---|
+| `decision` | `allow` or `block` |
+| `summary` | Human-readable one-line summary |
+| `exit-code` | `0` (allow), `2` (block), or `1` (error) |
+| `json` | Full JSON result from SafeInstall |
+
+---
+
 ## Limitations
 
 - **Not a CVE scanner** — pair with `npm audit` or Snyk for vulnerability data

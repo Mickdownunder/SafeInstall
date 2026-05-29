@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 - 2026-04-11
+
+### Added
+
+- **GitHub Action.** SafeInstall now ships as a reusable GitHub Action (`Mickdownunder/SafeInstall@v1`). Teams can run policy checks on every pull request with five lines of workflow YAML, no CLI installation required. Supports `check` mode (audit direct dependencies) and `install` mode (run the package manager through SafeInstall). Blocked dependencies appear in the GitHub Actions job summary with the exact block reason. Outputs `decision`, `summary`, `exit-code`, and `json` for downstream workflow steps.
+
+### Upgraded
+
+- All dependencies updated to latest patch/minor versions. vitest 3 → 4, @types/node 24 → 25.
+- All six previously reported security advisories resolved (vite, postcss, ip-address, brace-expansion) via dependency upgrades and pnpm overrides.
+- CI and release workflows updated from Node 20 (EOL) to Node 22 (Active LTS).
+- Community health files added: Code of Conduct (Contributor Covenant v2.1), Contributing guide, and Security policy with private vulnerability reporting.
+
 ## 0.2.1 - 2026-04-11
 
 A follow-up to 0.2.0 that fixes two real-world UX issues found during manual verification of the published package, and rewrites the README opener to lead with the maintainer-compromise attack-catch demo.

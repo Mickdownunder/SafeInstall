@@ -1,0 +1,136 @@
+name: "SafeInstall Policy Check"
+description: "Run SafeInstall policy checks in CI. Blocks risky package installs before they land in your repo."
+author: "Mickdownunder"
+
+branding:
+  icon: "shield"
+  color: "green"
+
+inputs:
+  mode:
+    description: >
+      "check" evaluates direct dependencies against policy without
+      installing. "install" runs the package manager through SafeInstall
+      so policy is enforced before any packages are written to disk.
+    required: false
+    default: "check"
+  package-manager:
+    description: >
+      Package manager to use in install mode (npm, pnpm, or bun).
+      Ignored in check mode.
+    required: false
+    default: "pnpm"
+  args:
+    description: >
+      Additional arguments forwarded to the package manager in install
+      mode. Example: "--frozen-lockfile". Ignored in check mode.
+    required: false
+    default: ""
+  config-path:
+    description: >
+      Explicit path to safeinstall.config.json. If omitted, SafeInstall
+      discovers the nearest config by walking upward from the project
+      directory.
+    required: false
+    default: ""
+  version:
+    description: >
+      SafeInstall CLI version to install. Defaults to the latest
+      published version. Pin to a specific version for reproducible
+      builds.
+    required: false
+    default: "latest"
+
+outputs:
+  decision:
+    description: "Policy decision: allow or block"
+    value: ${{ steps.run.outputs.decision }}
+  summary:
+    description: "Human-readable one-line summary"
+    value: ${{ steps.run.outputs.summary }}
+  exit-code:
+    description: "SafeInstall exit code (0 = allow, 2 = block, 1 = error)"
+    value: ${{ steps.run.outputs.exit_code }}
+  json:
+    description: "Full JSON result from SafeInstall"
+    value: ${{ steps.run.outputs.json }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install SafeInstall CLI
+      shell: bash
+      run: npm install -g "safeinstall-cli@${{ inputs.version }}"
+
+    - name: Run SafeInstall
+      id: run
+      shell: bash
+      env:
+        SAFEINSTALL_MODE: ${{ inputs.mode }}
+        SAFEINSTALL_PM: ${{ inputs.package-manager }}
+        SAFEINSTALL_ARGS: ${{ inputs.args }}
+        SAFEINSTALL_CONFIG: ${{ inputs.config-path }}
+      run: |
+        set +e
+
+        CONFIG_FLAG=""
+        if [ -n "$SAFEINSTALL_CONFIG" ]; then
+          CONFIG_FLAG="--config $SAFEINSTALL_CONFIG"
+        fi
+
+        if [ "$SAFEINSTALL_MODE" = "install" ]; then
+          CMD="safeinstall --json $SAFEINSTALL_PM install $SAFEINSTALL_ARGS"
+        else
+          CMD="safeinstall check --json"
+        fi
+
+        echo "::group::SafeInstall command"
+        echo "Running: $CMD"
+        echo "::endgroup::"
+
+        OUTPUT=$($CMD 2>/dev/null)
+        EXIT_CODE=$?
+
+        DECISION=$(echo "$OUTPUT" | grep -o '"decision":\s*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+        SUMMARY=$(echo "$OUTPUT" | grep -o '"summary":\s*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+
+        if [ -z "$DECISION" ]; then
+          DECISION="error"
+        fi
+        if [ -z "$SUMMARY" ]; then
+          SUMMARY="SafeInstall did not produce a parseable result."
+        fi
+
+        echo "decision=$DECISION" >> "$GITHUB_OUTPUT"
+        echo "summary=$SUMMARY" >> "$GITHUB_OUTPUT"
+        echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+        {
+          echo 'json<<SAFEINSTALL_JSON_EOF'
+          echo "$OUTPUT"
+          echo 'SAFEINSTALL_JSON_EOF'
+        } >> "$GITHUB_OUTPUT"
+
+        # Write job summary
+        if [ "$DECISION" = "allow" ]; then
+          echo "### :white_check_mark: SafeInstall — Policy passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$DECISION" = "block" ]; then
+          echo "### :x: SafeInstall — Policy blocked" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "<details><summary>Full JSON output</summary>" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          echo "$OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "</details>" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "### :warning: SafeInstall — Error" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        exit $EXIT_CODE
