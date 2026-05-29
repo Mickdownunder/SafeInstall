@@ -47,15 +47,24 @@
   },
   "dependencies": {
     "npm-package-arg": "^12.0.2",
-    "semver": "^7.7.2",
-    "sigstore": "^4.1.0",
-    "yaml": "^2.8.3"
+    "semver": "^7.8.1",
+    "sigstore": "^4.1.1",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@types/node": "^24.6.0",
+    "@types/node": "^25.9.1",
     "@types/npm-package-arg": "^6.1.4",
     "@types/semver": "^7.7.1",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vite": "7.3.3",
+    "vitest": "^4.1.7"
+  },
+  "pnpm": {
+    "overrides": {
+      "vite": ">=7.3.2",
+      "postcss": ">=8.5.10",
+      "ip-address": ">=10.1.1",
+      "brace-expansion": ">=5.0.6"
+    }
   }
 }
