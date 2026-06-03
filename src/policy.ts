@@ -75,12 +75,19 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
     infos: []
   };
 
-  if (isPackageAllowlisted(input.config, input.requested.name)) {
-    evaluation.warnings.push(`Package ${input.requested.name} is allowlisted; policy checks were skipped.`);
-    return evaluation;
+  // Allowlisting vouches for a package's identity and accepts its normal
+  // risk profile (fresh releases, declared install scripts, name spelling).
+  // It does NOT bypass active attack signals: source-type, trust downgrades,
+  // newly-introduced scripts, and provenance/publisher checks still run.
+  // This is the 0.3.0 tightening of the previous "skip everything" behavior.
+  const allowlisted = isPackageAllowlisted(input.config, input.requested.name);
+  if (allowlisted) {
+    evaluation.warnings.push(
+      `Package ${input.requested.name} is allowlisted; release-age, install-script, and typo-squat checks were skipped. Source, trust-downgrade, and provenance checks still apply.`
+    );
   }
 
-  if (input.config.typoSquat.mode !== "off") {
+  if (!allowlisted && input.config.typoSquat.mode !== "off") {
     const suspicion = detectTypoSquat(input.requested.name, input.config.typoSquat);
     if (suspicion) {
       const message = `Suspected typo-squat: "${suspicion.requested}" is ${suspicion.editDistance} edit(s) away from popular package "${suspicion.suspectedTarget}".`;
@@ -142,7 +149,7 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
   }
 
   const ageHours = releaseAgeHours(input.now, input.resolvedRegistryPackage.publishedAt);
-  if (ageHours < input.config.minimumReleaseAgeHours) {
+  if (!allowlisted && ageHours < input.config.minimumReleaseAgeHours) {
     evaluation.blockedReasons.push({
       code: "release-too-new",
       message: `Blocked: release too new (${input.requested.name}@${input.resolvedRegistryPackage.resolvedVersion} is ${formatHours(ageHours)} hours old; minimum is ${input.config.minimumReleaseAgeHours} hours).`,
@@ -151,6 +158,7 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
   }
 
   if (
+    !allowlisted &&
     input.resolvedRegistryPackage.lifecycleScripts.length > 0 &&
     hasUnallowedLifecycleScripts(
       input.config,

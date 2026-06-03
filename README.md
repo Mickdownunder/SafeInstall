@@ -228,7 +228,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `registryUrl` | npm-compatible registry URL for metadata (mirrors, Artifactory, Verdaccio) |
 | `allowedScripts` | Per-package lifecycle script exceptions |
 | `allowedSources` | Permitted source types |
-| `allowedPackages` | Names that skip policy entirely (with warning) |
+| `allowedPackages` | Names that skip release-age, install-script, and typo-squat checks (with warning). Source, trust-downgrade, and provenance checks still apply. |
 | `ciMode` | Reserved for future CI-specific behavior |
 | `packageManagerDefaults` | Per-manager flags forwarded to the tool |
 | `typoSquat.mode` | `"off"` / `"warn"` / `"block"` — how to handle suspected typo-squats |

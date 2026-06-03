@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 - 2026-05-29
+
+### Breaking changes
+
+- **`allowedPackages` no longer bypasses every policy check.** Previously, listing a package in `allowedPackages` skipped *all* checks, including the ones that detect active supply-chain attacks. As of 0.4.0, allowlisting a package skips only the checks a user legitimately wants to bypass for a known-good dependency:
+  - **Skipped when allowlisted:** release-age, install-script-present, typo-squat detection.
+  - **Still enforced when allowlisted:** untrusted-source, trust-downgrade (registry → git/url/tarball), newly-introduced lifecycle scripts on an update, and all provenance checks (including publisher-mismatch).
+
+  This closes a real gap: an allowlisted package that was later compromised — for example by adding a `postinstall` script it never had, or by being republished from a different source repository — is now still blocked. If you relied on `allowedPackages` to also permit a non-registry source, move that intent to `allowedSources`, which is the correct field for it.
+
 ## 0.3.0 - 2026-04-11
 
 ### Added

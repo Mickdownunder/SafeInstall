@@ -169,17 +169,136 @@ describe("evaluatePackage", () => {
     expect(result.blockedReasons.map((reason) => reason.code)).toContain("trust-level-dropped");
   });
 
-  it("skips policy checks for allowlisted packages", () => {
+  it("skips release-age and install-script checks for allowlisted packages", () => {
+    // Default input is a fresh release (release-too-new) — allowlisting
+    // should suppress that block.
     const result = evaluatePackage(
       createInput({
         config: createConfig({
           allowedPackages: ["axios"]
-        })
+        }),
+        resolvedRegistryPackage: {
+          ...createInput().resolvedRegistryPackage!,
+          lifecycleScripts: ["postinstall"]
+        }
       })
     );
 
     expect(result.blockedReasons).toHaveLength(0);
     expect(result.warnings[0]).toMatch("allowlisted");
+  });
+
+  it("still blocks an untrusted source even when the package is allowlisted", () => {
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({
+          allowedPackages: ["axios"],
+          allowedSources: ["registry"]
+        }),
+        requested: {
+          name: "axios",
+          raw: "git+https://github.com/evil/axios.git",
+          requested: "git+https://github.com/evil/axios.git",
+          sourceType: "git"
+        },
+        resolvedRegistryPackage: undefined
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toContain("untrusted-source");
+  });
+
+  it("still blocks a registry-to-git trust downgrade even when allowlisted", () => {
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({
+          allowedPackages: ["axios"]
+        }),
+        requested: {
+          name: "axios",
+          raw: "git+https://github.com/evil/axios.git",
+          requested: "git+https://github.com/evil/axios.git",
+          sourceType: "git"
+        },
+        priorState: {
+          installedVersion: "1.13.2",
+          declaredSpec: "^1.13.2",
+          declaredSourceType: "registry"
+        },
+        resolvedRegistryPackage: undefined
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toContain("trust-level-dropped");
+  });
+
+  it("still blocks newly-introduced lifecycle scripts even when allowlisted", () => {
+    // This is the exact attack scenario from issue #1: an allowlisted
+    // package that later adds a lifecycle script it did not have before.
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({
+          allowedPackages: ["axios"]
+        }),
+        priorState: {
+          installedVersion: "1.13.2",
+          declaredSpec: "^1.13.2",
+          declaredSourceType: "registry"
+        },
+        priorLifecycleScripts: [],
+        resolvedRegistryPackage: {
+          ...createInput().resolvedRegistryPackage!,
+          lifecycleScripts: ["postinstall"]
+        }
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toContain("trust-level-dropped");
+    // ...but NOT the static install-script-present block, which is skipped
+    expect(result.blockedReasons.map((reason) => reason.code)).not.toContain("install-script-present");
+  });
+
+  it("still blocks a publisher mismatch even when allowlisted", () => {
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({
+          allowedPackages: ["axios"],
+          provenance: {
+            mode: "require",
+            requireFor: [],
+            trustedPublishers: { axios: "axios/axios" },
+            offlineBehavior: "fail-closed"
+          }
+        }),
+        provenanceResult: {
+          status: "verified",
+          sourceRepository: "evil-org/axios"
+        }
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toContain("publisher-mismatch");
+  });
+
+  it("skips typo-squat detection for allowlisted packages", () => {
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({
+          allowedPackages: ["lodahs"],
+          typoSquat: { mode: "block", minNameLength: 4, ignore: [] }
+        }),
+        requested: {
+          name: "lodahs",
+          raw: "lodahs",
+          requested: "latest",
+          sourceType: "registry",
+          registrySpecKind: "tag"
+        },
+        resolvedRegistryPackage: undefined
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).not.toContain("typo-squat-suspected");
   });
 
   it("warns on suspected typo-squat when typoSquat.mode is warn", () => {
