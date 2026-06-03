@@ -13,7 +13,6 @@ const KNOWN_CONFIG_KEYS = new Set<keyof SafeInstallConfig>([
   "allowedScripts",
   "allowedSources",
   "allowedPackages",
-  "ciMode",
   "packageManagerDefaults",
   "typoSquat",
   "provenance",
@@ -75,7 +74,6 @@ export function createDefaultConfig(): SafeInstallConfig {
     allowedScripts: {},
     allowedSources: ["registry", "workspace", "file", "directory"],
     allowedPackages: [],
-    ciMode: process.env.CI === "true",
     packageManagerDefaults: {
       npm: { ignoreScripts: true },
       pnpm: { ignoreScripts: true },

@@ -6,7 +6,6 @@
   },
   "allowedSources": ["registry", "workspace", "file", "directory"],
   "allowedPackages": [],
-  "ciMode": true,
   "packageManagerDefaults": {
     "npm": {
       "ignoreScripts": true

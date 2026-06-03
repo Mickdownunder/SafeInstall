@@ -61,7 +61,6 @@ export interface SafeInstallConfig {
   allowedScripts: Record<string, InstallLifecycleScriptName[]>;
   allowedSources: SourceType[];
   allowedPackages: string[];
-  ciMode: boolean;
   packageManagerDefaults: Record<PackageManagerName, PackageManagerDefaults>;
   typoSquat: TypoSquatConfig;
   provenance: ProvenanceConfig;

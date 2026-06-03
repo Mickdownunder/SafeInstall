@@ -12,6 +12,10 @@
 
   Release-age, typo-squat, and provenance are deliberately not run transitively to avoid noise and per-package registry round-trips. Transitive evaluation applies to `safeinstall check` and project installs (`pnpm install`, `npm ci`). Findings are aggregated into one block reason per check type with a capped inline list so a large tree does not flood the output.
 
+### Breaking changes
+
+- **Removed the `ciMode` config field.** This field was declared, documented, validated, and configurable — but nothing in the codebase ever read it. Existing config files that include `ciMode` will now fail strict key validation with a clear error message. Remove the field from your `safeinstall.config.json` to fix. Closes #2.
+
   ```json
   {
     "transitive": {

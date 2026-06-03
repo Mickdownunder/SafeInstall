@@ -11,7 +11,6 @@ function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallCo
     allowedScripts: {},
     allowedSources: ["registry", "workspace", "file", "directory"],
     allowedPackages: [],
-    ciMode: false,
     packageManagerDefaults: {
       npm: { ignoreScripts: true },
       pnpm: { ignoreScripts: true },

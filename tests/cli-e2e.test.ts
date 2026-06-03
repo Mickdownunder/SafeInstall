@@ -143,7 +143,7 @@ packages:
       stderr: "json-stderr"
     });
 
-    await writeDefaultConfig(cwd, { ciMode: true });
+    await writeDefaultConfig(cwd, {});
 
     const result = await runCli(["--json", "npm", "install", "axios@1.14.0"], {
       cwd,
@@ -167,7 +167,7 @@ packages:
 
   it("reports a clear runtime error when the package manager binary is missing", async () => {
     const cwd = await createTempDir("safeinstall-e2e-missing-bin-");
-    await writeDefaultConfig(cwd, { ciMode: true });
+    await writeDefaultConfig(cwd, {});
 
     const result = await runCli(["pnpm", "add", "axios@1.13.2"], {
       cwd,
@@ -187,7 +187,7 @@ packages:
       stdout: "should-not-run"
     });
 
-    await writeDefaultConfig(cwd, { ciMode: true });
+    await writeDefaultConfig(cwd, {});
     await writeJson(path.join(cwd, "package.json"), {
       name: "demo",
       version: "1.0.0",
@@ -418,7 +418,7 @@ packages:
 
   it("fails closed on ambiguous workspace-targeting flags", async () => {
     const cwd = await createTempDir("safeinstall-e2e-ambiguous-workspace-");
-    await writeDefaultConfig(cwd, { ciMode: true });
+    await writeDefaultConfig(cwd, {});
 
     const result = await runCli(["--json", "pnpm", "add", "--filter", "app", "axios@1.14.0"], {
       cwd

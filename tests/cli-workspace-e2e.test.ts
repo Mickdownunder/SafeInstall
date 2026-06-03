@@ -84,7 +84,7 @@ describe("CLI workspace/root edge cases", () => {
     const cwd = await createTempDir("safeinstall-e2e-pnpm-missing-importer-");
     const packageDir = path.join(cwd, "packages", "app");
     await mkdirp(packageDir);
-    await writeDefaultConfig(cwd, { ciMode: true });
+    await writeDefaultConfig(cwd, {});
     await writeJson(path.join(cwd, "package.json"), {
       name: "repo",
       version: "1.0.0",
@@ -120,7 +120,7 @@ importers:
     const cwd = await createTempDir("safeinstall-e2e-npm-missing-package-entry-");
     const packageDir = path.join(cwd, "packages", "app");
     await mkdirp(packageDir);
-    await writeDefaultConfig(cwd, { ciMode: true });
+    await writeDefaultConfig(cwd, {});
     await writeJson(path.join(cwd, "package.json"), {
       name: "repo",
       version: "1.0.0",
@@ -158,7 +158,7 @@ importers:
     const cwd = await createTempDir("safeinstall-e2e-no-root-package-");
     const packageDir = path.join(cwd, "packages", "app");
     await mkdirp(packageDir);
-    await writeDefaultConfig(cwd, { ciMode: true });
+    await writeDefaultConfig(cwd, {});
     await writeJson(path.join(packageDir, "package.json"), {
       name: "@repo/app",
       version: "1.0.0",

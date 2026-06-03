@@ -14,7 +14,6 @@ const config: SafeInstallConfig = {
   allowedScripts: {},
   allowedSources: ["registry"],
   allowedPackages: [],
-  ciMode: false,
   packageManagerDefaults: {
     npm: { ignoreScripts: true },
     pnpm: { ignoreScripts: true },
