@@ -7,6 +7,7 @@ import { inferProjectInstallTargetsForCheck } from "./project-installs";
 import { RegistryClient } from "./registry";
 import { throwIfAborted } from "./signals";
 import { parseManifestDependency } from "./specs";
+import { evaluateTransitiveDependencies } from "./transitive";
 import type { CliReason, CliResult, PackageEvaluation } from "./types";
 
 function configLabel(configPath?: string): string {
@@ -149,11 +150,19 @@ export async function runCheckFlow(
     config,
     options.signal
   );
-  const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
-  const warnings = evaluations.flatMap((evaluation) => evaluation.warnings);
-  const infos = evaluations.flatMap((evaluation) => evaluation.infos);
+  const transitive = await evaluateTransitiveDependencies({
+    lockfilePath: projectTargets?.lockfilePath,
+    directNames: new Set(requestedPackages.map((requested) => requested.name)),
+    config
+  });
 
-  if (blocked.length > 0) {
+  const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
+  const warnings = [...evaluations.flatMap((evaluation) => evaluation.warnings), ...transitive.warnings];
+  const infos = evaluations.flatMap((evaluation) => evaluation.infos);
+  const directBlockReasons = blocked.flatMap((evaluation) => evaluation.blockedReasons);
+  const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons];
+
+  if (allBlockReasons.length > 0) {
     return {
       mode: "check",
       decision: "block",
@@ -163,7 +172,7 @@ export async function runCheckFlow(
       commandString,
       configPath: path,
       configLabel: configLabel(path),
-      reasons: blocked.flatMap((evaluation) => evaluation.blockedReasons),
+      reasons: allBlockReasons,
       summary: "Check blocked.",
       warnings,
       infos,

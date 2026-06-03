@@ -16,7 +16,8 @@ const KNOWN_CONFIG_KEYS = new Set<keyof SafeInstallConfig>([
   "ciMode",
   "packageManagerDefaults",
   "typoSquat",
-  "provenance"
+  "provenance",
+  "transitive"
 ]);
 
 const KNOWN_TYPO_SQUAT_KEYS = new Set<keyof SafeInstallConfig["typoSquat"]>([
@@ -32,9 +33,13 @@ const KNOWN_PROVENANCE_KEYS = new Set<keyof SafeInstallConfig["provenance"]>([
   "offlineBehavior"
 ]);
 
+const KNOWN_TRANSITIVE_KEYS = new Set<keyof SafeInstallConfig["transitive"]>(["mode", "checks"]);
+
 const TYPO_SQUAT_MODES = new Set(["off", "warn", "block"]);
 const PROVENANCE_MODES = new Set(["off", "warn", "require"]);
 const OFFLINE_BEHAVIORS = new Set(["fail-closed", "allow-cached"]);
+const TRANSITIVE_MODES = new Set(["off", "warn", "block"]);
+const TRANSITIVE_CHECKS = new Set(["install-script", "untrusted-source"]);
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -86,6 +91,10 @@ export function createDefaultConfig(): SafeInstallConfig {
       requireFor: [],
       trustedPublishers: {},
       offlineBehavior: "fail-closed"
+    },
+    transitive: {
+      mode: "off",
+      checks: ["install-script", "untrusted-source"]
     }
   };
 }
@@ -189,6 +198,46 @@ function validateProvenance(
   };
 }
 
+function validateTransitive(
+  input: Partial<SafeInstallConfig["transitive"]> | undefined
+): SafeInstallConfig["transitive"] {
+  const defaults = createDefaultConfig().transitive;
+  if (!input) {
+    return defaults;
+  }
+
+  const unknownKeys = Object.keys(input).filter(
+    (key) => !KNOWN_TRANSITIVE_KEYS.has(key as keyof SafeInstallConfig["transitive"])
+  );
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `Config error: unknown key(s) in transitive: ${unknownKeys.map((key) => `"${key}"`).join(", ")}.`
+    );
+  }
+
+  const mode = input.mode ?? defaults.mode;
+  if (!TRANSITIVE_MODES.has(mode)) {
+    throw new Error(`Config error: transitive.mode must be one of "off", "warn", "block".`);
+  }
+
+  const checks = input.checks ?? defaults.checks;
+  if (!Array.isArray(checks)) {
+    throw new Error("Config error: transitive.checks must be an array.");
+  }
+  for (const check of checks) {
+    if (!TRANSITIVE_CHECKS.has(check)) {
+      throw new Error(
+        `Config error: transitive.checks contains unsupported check "${check}". Supported: "install-script", "untrusted-source".`
+      );
+    }
+  }
+
+  return {
+    mode,
+    checks: [...checks]
+  };
+}
+
 function isPackageManagerName(value: string): value is PackageManagerName {
   return value === "npm" || value === "pnpm" || value === "bun";
 }
@@ -230,7 +279,8 @@ function mergeConfig(input: Partial<SafeInstallConfig>): SafeInstallConfig {
       }
     },
     typoSquat: validateTypoSquat(input.typoSquat),
-    provenance: validateProvenance(input.provenance)
+    provenance: validateProvenance(input.provenance),
+    transitive: validateTransitive(input.transitive)
   };
 
   if (!Number.isFinite(merged.minimumReleaseAgeHours) || merged.minimumReleaseAgeHours < 0) {

@@ -30,6 +30,10 @@ const config: SafeInstallConfig = {
     requireFor: [],
     trustedPublishers: {},
     offlineBehavior: "fail-closed"
+  },
+  transitive: {
+    mode: "off",
+    checks: ["install-script", "untrusted-source"]
   }
 };
 

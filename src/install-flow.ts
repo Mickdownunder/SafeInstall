@@ -8,6 +8,7 @@ import { loadProjectInstallTargetsForManager } from "./project-installs";
 import { RegistryClient } from "./registry";
 import { throwIfAborted } from "./signals";
 import { buildInstallPlan, parseManifestDependency } from "./specs";
+import { evaluateTransitiveDependencies } from "./transitive";
 import type { CliReason, CliResult, PackageEvaluation } from "./types";
 
 export interface InstallFlowOptions {
@@ -66,6 +67,7 @@ async function collectTargetPackages(
 ): Promise<{
   issues: CliReason[];
   plan: ReturnType<typeof buildInstallPlan>;
+  lockfilePath?: string;
 }> {
   const plan = buildInstallPlan(argv);
   if (!plan.projectInstall) {
@@ -77,7 +79,8 @@ async function collectTargetPackages(
     if (lockfileResult.issues.length > 0) {
       return {
         issues: lockfileResult.issues.map(createProjectIssueReason),
-        plan
+        plan,
+        lockfilePath: lockfileResult.lockfilePath
       };
     }
 
@@ -86,7 +89,8 @@ async function collectTargetPackages(
       plan: {
         ...plan,
         packages: lockfileResult.targets.map((target) => target.requested)
-      }
+      },
+      lockfilePath: lockfileResult.lockfilePath
     };
   }
 
@@ -184,7 +188,7 @@ export async function runInstallFlow(
     };
   }
 
-  const { issues, plan } = await collectTargetPackages(
+  const { issues, plan, lockfilePath } = await collectTargetPackages(
     invocation.packageDir ?? invocation.effectiveCwd,
     invocation.effectiveCwd,
     argv
@@ -250,11 +254,19 @@ export async function runInstallFlow(
     config,
     options.signal
   );
-  const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
-  const warnings = evaluations.flatMap((evaluation) => evaluation.warnings);
-  const infos = evaluations.flatMap((evaluation) => evaluation.infos);
+  const transitive = await evaluateTransitiveDependencies({
+    lockfilePath,
+    directNames: new Set(plan.packages.map((requested) => requested.name)),
+    config
+  });
 
-  if (blocked.length > 0) {
+  const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
+  const warnings = [...evaluations.flatMap((evaluation) => evaluation.warnings), ...transitive.warnings];
+  const infos = evaluations.flatMap((evaluation) => evaluation.infos);
+  const directBlockReasons = blocked.flatMap((evaluation) => evaluation.blockedReasons);
+  const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons];
+
+  if (allBlockReasons.length > 0) {
     return {
       mode: "install",
       decision: "block",
@@ -265,7 +277,7 @@ export async function runInstallFlow(
       configPath: path,
       configLabel: configLabel(path),
       packageManager: plan.manager,
-      reasons: blocked.flatMap((evaluation) => evaluation.blockedReasons),
+      reasons: allBlockReasons,
       summary: "Install blocked.",
       warnings,
       infos,

@@ -186,4 +186,52 @@ describe("config", () => {
 
     await expect(loadConfig(cwd)).rejects.toThrow("trustedPublishers must be an object");
   });
+
+  it("defaults transitive mode to off when not configured", () => {
+    const defaults = createDefaultConfig();
+    expect(defaults.transitive.mode).toBe("off");
+    expect(defaults.transitive.checks).toEqual(["install-script", "untrusted-source"]);
+  });
+
+  it("accepts a configured transitive block", async () => {
+    const cwd = await createTempDir("safeinstall-config-transitive-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ transitive: { mode: "block", checks: ["install-script"] } }, null, 2)
+    );
+
+    const { config } = await loadConfig(cwd);
+    expect(config.transitive.mode).toBe("block");
+    expect(config.transitive.checks).toEqual(["install-script"]);
+  });
+
+  it("rejects invalid transitive mode values", async () => {
+    const cwd = await createTempDir("safeinstall-config-transitive-invalid-mode-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ transitive: { mode: "strict" } }, null, 2)
+    );
+
+    await expect(loadConfig(cwd)).rejects.toThrow('transitive.mode must be one of "off", "warn", "block"');
+  });
+
+  it("rejects unsupported transitive checks", async () => {
+    const cwd = await createTempDir("safeinstall-config-transitive-check-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ transitive: { mode: "warn", checks: ["release-age"] } }, null, 2)
+    );
+
+    await expect(loadConfig(cwd)).rejects.toThrow("unsupported check");
+  });
+
+  it("rejects unknown keys inside transitive", async () => {
+    const cwd = await createTempDir("safeinstall-config-transitive-unknown-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ transitive: { mode: "warn", depth: 5 } }, null, 2)
+    );
+
+    await expect(loadConfig(cwd)).rejects.toThrow("unknown key");
+  });
 });

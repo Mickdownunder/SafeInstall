@@ -46,6 +46,15 @@ export interface ProvenanceVerificationResult {
   error?: string;
 }
 
+export type TransitiveMode = "off" | "warn" | "block";
+
+export type TransitiveCheck = "install-script" | "untrusted-source";
+
+export interface TransitiveConfig {
+  mode: TransitiveMode;
+  checks: TransitiveCheck[];
+}
+
 export interface SafeInstallConfig {
   minimumReleaseAgeHours: number;
   registryUrl: string;
@@ -56,6 +65,7 @@ export interface SafeInstallConfig {
   packageManagerDefaults: Record<PackageManagerName, PackageManagerDefaults>;
   typoSquat: TypoSquatConfig;
   provenance: ProvenanceConfig;
+  transitive: TransitiveConfig;
 }
 
 export interface RequestedPackage {
@@ -104,7 +114,9 @@ export type PolicyBlockCode =
   | "attestation-invalid"
   | "attestation-unreachable"
   | "publisher-mismatch"
-  | "package-resolution-failed";
+  | "package-resolution-failed"
+  | "transitive-install-script"
+  | "transitive-untrusted-source";
 
 export interface PolicyBlockReason {
   code: PolicyBlockCode;

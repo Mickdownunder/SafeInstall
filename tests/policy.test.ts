@@ -28,6 +28,10 @@ function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallCo
       trustedPublishers: {},
       offlineBehavior: "fail-closed"
     },
+    transitive: {
+      mode: "off",
+      checks: ["install-script", "untrusted-source"]
+    },
     ...overrides
   };
 }

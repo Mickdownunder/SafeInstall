@@ -247,6 +247,10 @@ export async function writeDefaultConfig(
       trustedPublishers: {},
       offlineBehavior: "fail-closed"
     },
+    transitive: {
+      mode: "off",
+      checks: ["install-script", "untrusted-source"]
+    },
     ...overrides
   });
 }
