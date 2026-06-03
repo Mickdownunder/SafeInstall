@@ -3,7 +3,10 @@ name: Release to npm
 on:
   push:
     tags:
-      - "v*"
+      # Only full semver release tags (v0.4.0, v1.2.3) trigger a publish.
+      # The floating major tag used by the GitHub Action (v1) is moved on
+      # every release and must NOT re-trigger npm publish.
+      - "v[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: read
