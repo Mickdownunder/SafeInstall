@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0 - 2026-05-29
+
+### Added
+
+- **Transitive dependency evaluation.** SafeInstall can now evaluate the full lockfile dependency tree, not just direct dependencies — closing the biggest coverage gap, since most real supply-chain attacks reach a project through a transitive dependency. Opt in via a new `transitive` config block (defaults to `"off"`, fully backward compatible).
+
+  Two checks run transitively, both read directly from the lockfile with **zero extra registry calls**:
+  - **`install-script`** — flags transitive packages that declare a lifecycle script (the `ua-parser-js` attack class). npm records this in the lockfile; pnpm lockfiles do not, so this check is npm-only for now.
+  - **`untrusted-source`** — flags transitive packages resolving from git, url, or tarball sources. Works for npm and pnpm.
+
+  Release-age, typo-squat, and provenance are deliberately not run transitively to avoid noise and per-package registry round-trips. Transitive evaluation applies to `safeinstall check` and project installs (`pnpm install`, `npm ci`). Findings are aggregated into one block reason per check type with a capped inline list so a large tree does not flood the output.
+
+  ```json
+  {
+    "transitive": {
+      "mode": "warn",
+      "checks": ["install-script", "untrusted-source"]
+    }
+  }
+  ```
+
 ## 0.4.0 - 2026-05-29
 
 ### Breaking changes

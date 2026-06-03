@@ -28,5 +28,9 @@
     "requireFor": [],
     "trustedPublishers": {},
     "offlineBehavior": "fail-closed"
+  },
+  "transitive": {
+    "mode": "warn",
+    "checks": ["install-script", "untrusted-source"]
   }
 }

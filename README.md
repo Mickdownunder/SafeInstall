@@ -120,8 +120,29 @@ No registry proxy. No tarball rewriting. No cloud dependency.
 | **Trust downgrade** | Detects registry→git/url or new scripts on update | `Blocked: trust level dropped` |
 | **Typo-squat detection** | Off by default; opt in via `typoSquat.mode` | `Blocked: suspected typo-squat` |
 | **Provenance verification** | Off by default; opt in via `provenance.mode` | `Blocked: attestation missing/invalid/publisher mismatch` |
+| **Transitive dependencies** | Off by default; opt in via `transitive.mode` | `Blocked: transitive install script / untrusted source` |
 
 All rules are configurable. Ambiguous or incomplete metadata **blocks instead of allowing**.
+
+### Transitive dependencies
+
+By default SafeInstall evaluates **direct** dependencies. Most supply-chain attacks, though, reach you through a *transitive* dependency — a package you never chose, pulled in several levels deep. Enable `transitive` mode to walk the full lockfile tree.
+
+Two checks run transitively, both read directly from the lockfile with **zero extra registry calls**:
+
+- **`install-script`** — flags transitive packages that declare a lifecycle script (the `ua-parser-js` attack class: a deeply nested dependency running code at install time). npm records this in the lockfile; pnpm lockfiles do not, so this check is npm-only for now.
+- **`untrusted-source`** — flags transitive packages resolving from git, url, or tarball sources instead of the registry. Works for both npm and pnpm.
+
+Release-age, typo-squat, and provenance are deliberately **not** run transitively — they would either flood you with noise or require a registry round-trip per package. Transitive evaluation applies to `safeinstall check` and project installs (`pnpm install`, `npm ci`), which have a resolved lockfile.
+
+```json
+{
+  "transitive": {
+    "mode": "warn",
+    "checks": ["install-script", "untrusted-source"]
+  }
+}
+```
 
 ### Typo-squat detection
 
@@ -218,6 +239,10 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
       "axios": "axios/axios"
     },
     "offlineBehavior": "fail-closed"
+  },
+  "transitive": {
+    "mode": "warn",
+    "checks": ["install-script", "untrusted-source"]
   }
 }
 ```
@@ -238,6 +263,8 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `provenance.requireFor` | Package names (glob supported) for which provenance is required even in `"warn"` mode |
 | `provenance.trustedPublishers` | Map of package name pattern → expected `owner/repo` slug; mismatches always block |
 | `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cached attestation |
+| `transitive.mode` | `"off"` / `"warn"` / `"block"` — evaluate the full lockfile tree, not just direct deps |
+| `transitive.checks` | Which checks run transitively: `"install-script"` and/or `"untrusted-source"` |
 
 Run `safeinstall init` to generate a starter config.
 
@@ -408,11 +435,11 @@ To enforce policy during the actual install step (not just a check):
 ## Limitations
 
 - **Not a CVE scanner** — pair with `npm audit` or Snyk for vulnerability data
-- **Transitive dependencies** not fully evaluated yet
+- **Transitive dependencies** are evaluated for install scripts and untrusted sources when `transitive.mode` is enabled. Release-age, typo-squat, and provenance still apply to direct dependencies only.
+- **Transitive install-script detection** is npm-only — pnpm lockfiles do not record install-script presence. Transitive untrusted-source detection works for both.
 - **`peerDependencies`** not evaluated unless also declared as direct dependencies
 - **Trust downgrade detection** requires prior install state in `node_modules`
-- **`bun install`** uses manifest-only analysis (lockfile parity not yet implemented)
-- **`safeinstall check`** evaluates direct dependencies only
+- **`bun install`** uses manifest-only analysis (lockfile parity not yet implemented); transitive evaluation is npm/pnpm only
 - **Typo-squat target list** is curated and refreshed manually between releases; brand new packages published in the last day may not yet appear
 - **Provenance verification** supports GitHub Actions trusted publishers on the public Sigstore root only (GitLab CI, self-hosted Sigstore out of scope for 0.2.0)
 - **Git sources** are identified by URL for allowlist purposes, not by inferred package name — conflating registry `axios` with `github:any-fork/axios` would be dangerous

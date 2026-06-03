@@ -44,7 +44,7 @@ describe("CLI end-to-end", () => {
     });
 
     expect(result.code).toBe(0);
-    expect(result.stdout.trim()).toBe("0.4.0");
+    expect(result.stdout.trim()).toBe("0.5.0");
     expect(result.stderr).toBe("");
   });
 
