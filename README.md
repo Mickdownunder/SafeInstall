@@ -267,6 +267,8 @@ Fields: `command`, `commandString`, `packageManager`, `decision`, `summary`, `re
 
 ## Examples
 
+> Want to see every check in action? Run [`bash demo/run.sh`](./demo) — a reproducible script that blocks one scenario per policy check against real packages. See [demo/README.md](./demo/README.md) for the walkthrough.
+
 <details>
 <summary><strong>Fresh release blocked</strong></summary>
 
