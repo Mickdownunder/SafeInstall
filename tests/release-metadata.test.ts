@@ -22,7 +22,7 @@ describe("release metadata", () => {
 
     expect(packageJson.private).not.toBe(true);
     expect(packageJson.name).toBe("safeinstall-cli");
-    expect(packageJson.version).toBe("0.5.0");
+    expect(packageJson.version).toBe("0.6.0");
     expect(packageJson.license).toBe("MIT");
     expect(packageJson.bin).toMatchObject({
       safeinstall: "dist/cli.js"

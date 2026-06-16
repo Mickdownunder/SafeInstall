@@ -196,13 +196,15 @@ async function defaultFetchAttestations(
 }
 
 async function defaultVerifyBundle(bundle: Bundle): Promise<void> {
-  // Lazy-load the sigstore verification library so users who never enable
-  // provenance.mode do not pay the module-load cost on every CLI invocation.
-  // This keeps cold-start time and memory footprint low by default and only
-  // loads the heavy transitive dependency tree (sigstore, @sigstore/bundle,
-  // @sigstore/core, @sigstore/sign, @sigstore/tuf) when verification is
-  // actually requested.
-  const sigstore = await import("sigstore");
+  let sigstore: typeof import("sigstore");
+  try {
+    sigstore = await import("sigstore");
+  } catch {
+    throw new Error(
+      "Sigstore provenance verification requires the optional 'sigstore' package. " +
+        "Install it with: npm install sigstore"
+    );
+  }
   await sigstore.verify(bundle);
 }
 

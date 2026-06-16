@@ -384,4 +384,35 @@ describe("verifyProvenance", () => {
     expect(result.status).toBe("verified");
     expect(result.sourceRepository).toBe("axios/axios");
   });
+
+  it("returns invalid with a clear message when verifyBundle throws because sigstore is missing", async () => {
+    const cacheDir = await createTempDir("safeinstall-provenance-");
+    const result = await verifyProvenance({
+      packageName: "axios",
+      version: "1.14.0",
+      registryUrl: "https://registry.npmjs.org",
+      diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
+      config: createConfig(),
+      deps: createDeps({
+        fetchAttestations: async () => ({
+          attestations: [
+            {
+              predicateType: "https://slsa.dev/provenance/v1",
+              bundle: makeBundleWithStatement(exampleStatement)
+            }
+          ]
+        }),
+        verifyBundle: async () => {
+          throw new Error(
+            "Sigstore provenance verification requires the optional 'sigstore' package. " +
+              "Install it with: npm install sigstore"
+          );
+        }
+      })
+    });
+
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("sigstore");
+    expect(result.error).toContain("npm install");
+  });
 });

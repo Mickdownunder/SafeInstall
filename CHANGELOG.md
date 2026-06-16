@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0 - 2026-06-16
+
+### Changed
+
+- **`sigstore` is now an optional dependency.** Users who do not enable `provenance.mode` no longer install sigstore and its ~160 transitive packages. This reduces installed package count from ~165 to ~5, dramatically improves install speed, and eliminates all six supply-chain warnings that Socket/Snyk flagged on the sigstore dependency subtree (network access, filesystem access, URL strings, unmaintained transitive, AI code anomaly, new author).
+
+  When `provenance.mode` is set to `"warn"` or `"require"` and sigstore is not installed, SafeInstall surfaces a clear error: *"Sigstore provenance verification requires the optional 'sigstore' package. Install it with: npm install sigstore"*.
+
+  For users who do enable provenance verification, the behavior is identical — sigstore is still lazy-loaded at verification time, not at startup.
+
 ## 0.5.0 - 2026-05-29
 
 ### Added
