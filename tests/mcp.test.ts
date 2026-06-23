@@ -2,10 +2,16 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CHECK_PACKAGE_TOOL, evaluationToVerdict, resolveMcpConfig } from "../src/mcp";
-import type { PackageEvaluation, PolicyBlockReason, ResolvedRegistryPackage } from "../src/types";
+import { CHECK_PACKAGE_TOOL, checkPackage, evaluationToVerdict, resolveMcpConfig } from "../src/mcp";
+import type { RegistryClient } from "../src/registry";
+import type {
+  PackageEvaluation,
+  PolicyBlockReason,
+  RequestedPackage,
+  ResolvedRegistryPackage
+} from "../src/types";
 
 const tempDirs: string[] = [];
 
@@ -208,5 +214,142 @@ describe("check_package tool definition", () => {
     expect(CHECK_PACKAGE_TOOL.inputSchema.properties.manager.enum).toEqual(["npm", "pnpm", "bun"]);
     expect(CHECK_PACKAGE_TOOL.inputSchema.additionalProperties).toBe(false);
     expect(CHECK_PACKAGE_TOOL.description).toContain("BEFORE");
+  });
+});
+
+describe("check_package continuity verdict (E2E through the MCP layer)", () => {
+  const TARGET_VERSION = "2.0.0";
+  const BASELINE_REPO = "acme/shapes";
+
+  // A registry packument whose time/versions give the continuity check a
+  // baseline of three releases published before the target version.
+  const packument = {
+    "dist-tags": { latest: TARGET_VERSION },
+    versions: { "1.0.0": {}, "1.1.0": {}, "1.2.0": {}, "2.0.0": {} },
+    time: {
+      created: "2025-01-01T00:00:00.000Z",
+      modified: "2025-06-01T00:00:00.000Z",
+      "1.0.0": "2025-01-01T00:00:00.000Z",
+      "1.1.0": "2025-02-01T00:00:00.000Z",
+      "1.2.0": "2025-03-01T00:00:00.000Z",
+      "2.0.0": "2025-06-01T00:00:00.000Z"
+    }
+  };
+
+  // An npm attestation response carrying a SLSA provenance statement that names
+  // the publishing GitHub repository — the exact shape src/provenance.ts parses.
+  function attestationResponse(repo: string) {
+    const statement = {
+      _type: "https://in-toto.io/Statement/v1",
+      predicateType: "https://slsa.dev/provenance/v1",
+      subject: [{ name: "acme-shapes", digest: { sha512: "deadbeef" } }],
+      predicate: {
+        buildDefinition: {
+          externalParameters: {
+            workflow: {
+              ref: "refs/tags/v1.0.0",
+              repository: `https://github.com/${repo}`,
+              path: ".github/workflows/publish.yml"
+            }
+          }
+        },
+        runDetails: { builder: { id: "https://github.com/actions/runner" } }
+      }
+    };
+    return {
+      attestations: [
+        {
+          predicateType: "https://slsa.dev/provenance/v1",
+          bundle: {
+            mediaType: "application/vnd.dev.sigstore.bundle+json;version=0.1",
+            dsseEnvelope: {
+              payload: Buffer.from(JSON.stringify(statement)).toString("base64"),
+              payloadType: "application/vnd.in-toto+json",
+              signatures: [{ sig: "MEUCIQ-stub-signature" }]
+            }
+          }
+        }
+      ]
+    };
+  }
+
+  const jsonResponse = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+  const notFound = () => ({ ok: false, status: 404, json: async () => ({}) });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("reports a provenance-downgrade block with the actionable why to the agent", async () => {
+    const cwd = await createTempDir("safeinstall-mcp-continuity-");
+    const cacheDir = await createTempDir("safeinstall-mcp-cache-");
+    vi.stubEnv("SAFEINSTALL_CACHE_DIR", cacheDir);
+
+    // Stub only the network the continuity check uses: version history and
+    // per-version attestations. The baseline (1.0.0–1.2.0) is attested from
+    // acme/shapes; the checked version 2.0.0 carries NO attestation — the
+    // signature of a compromised-account publish.
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", (input: unknown) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes("/-/npm/v1/attestations/")) {
+        const version = decodeURIComponent(url.split("@").pop() ?? "");
+        return Promise.resolve(
+          version === TARGET_VERSION ? notFound() : jsonResponse(attestationResponse(BASELINE_REPO))
+        );
+      }
+      if (url.endsWith("/acme-shapes")) {
+        return Promise.resolve(jsonResponse(packument));
+      }
+      return Promise.reject(new Error(`unexpected fetch in test: ${url}`));
+    });
+
+    // Resolution is injected so the test pins continuity behaviour, not the
+    // registry client (covered in registry.test.ts). publishedAt is old enough
+    // that release-age never fires, isolating the continuity verdict.
+    const registryClient = {
+      async resolvePackage(requested: RequestedPackage) {
+        return {
+          requested,
+          resolvedVersion: TARGET_VERSION,
+          publishedAt: new Date("2025-06-01T00:00:00.000Z"),
+          lifecycleScripts: []
+        };
+      },
+      async getLifecycleScripts() {
+        return [];
+      }
+    } as unknown as RegistryClient;
+
+    const verdict = await checkPackage(
+      cwd,
+      { name: "acme-shapes", version: TARGET_VERSION, manager: "pnpm" },
+      { registryClient }
+    );
+
+    // The continuity engine actually ran (history + target attestation fetched).
+    expect(calls.some((u) => u.endsWith("/acme-shapes"))).toBe(true);
+    expect(calls.some((u) => u.includes(`attestations/acme-shapes@${TARGET_VERSION}`))).toBe(true);
+
+    // The continuity verdict reaches the MCP layer cleanly — block, and the
+    // only reason is the downgrade (no release-age/typo-squat noise).
+    expect(verdict.verdict).toBe("block");
+    expect(verdict.reasons.map((reason) => reason.code)).toEqual(["provenance-downgrade"]);
+
+    // The actionable WHY is readable for the agent: expected repo + "this
+    // version has no attestation", plus a remediation suggestion — not "blocked".
+    const downgrade = verdict.reasons.find((reason) => reason.code === "provenance-downgrade");
+    expect(downgrade?.message).toContain(BASELINE_REPO);
+    expect(downgrade?.message).toContain("no attestation");
+    expect(downgrade?.suggestion).toBeTruthy();
+    expect(verdict.sourceRepository).toBe(BASELINE_REPO);
+
+    // The JSON the tool hands the agent round-trips with the verdict intact.
+    const agentPayload = JSON.parse(JSON.stringify(verdict, null, 2));
+    expect(agentPayload.verdict).toBe("block");
+    expect(agentPayload.reasons[0].code).toBe("provenance-downgrade");
+    expect(agentPayload.reasons[0].message).toContain(BASELINE_REPO);
   });
 });
