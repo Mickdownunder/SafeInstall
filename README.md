@@ -293,6 +293,8 @@ Fields: `command`, `commandString`, `packageManager`, `decision`, `summary`, `re
 ## Examples
 
 > Want to see every check in action? Run [`bash demo/run.sh`](./demo) — a reproducible script that blocks one scenario per policy check against real packages. See [demo/README.md](./demo/README.md) for the walkthrough.
+>
+> Want to see it against a **real attack**? Run [`pnpm replay mastra`](./demo/replay) — it feeds the recorded attack-time state of the June 2026 Mastra compromise into SafeInstall's real policy engine and shows which checks would have blocked it. See [demo/replay/README.md](./demo/replay/README.md).
 
 <details>
 <summary><strong>Fresh release blocked</strong></summary>

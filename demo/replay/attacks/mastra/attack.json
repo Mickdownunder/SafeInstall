@@ -1,0 +1,24 @@
+{
+  "name": "Mastra npm supply chain compromise",
+  "date": "2026-06-17",
+  "summary": "A dormant former-contributor account (ehindero), whose @mastra scope access was never revoked, republished 143 packages in the @mastra scope in 84 minutes. The package code was untouched; the only change per package was a new dependency line: easy-day-js, a dayjs typosquat. easy-day-js@1.11.21 was a clean dayjs clone; 1.11.22 (tagged latest) carried a postinstall dropper, and the ^1.11.21 caret range resolved to the malicious version.",
+  "sources": [
+    "https://safedep.io/mastra-npm-scope-takeover-supply-chain-attack/",
+    "https://www.microsoft.com/en-us/security/blog/2026/06/17/postinstall-payload-inside-mastra-npm-supply-chain-compromise/",
+    "https://www.stepsecurity.io/blog/mastra-npm-packages-compromised-using-easy-day-js"
+  ],
+  "now": "2026-06-17T03:00:00.000Z",
+  "directInstall": {
+    "name": "@mastra/core",
+    "version": "0.20.1",
+    "publishedAt": "2026-06-17T01:20:00.000Z",
+    "lifecycleScripts": [],
+    "sourceType": "registry"
+  },
+  "lockfile": "package-lock.json",
+  "expected": {
+    "release-too-new": "blocks @mastra/core (republished ~1.7h before install; default minimum 72h)",
+    "transitive-install-script": "blocks easy-day-js (postinstall dropper; requires transitive.mode opt-in)"
+  },
+  "note": "Version numbers and the lockfile shape are reconstructed from public incident reporting; integrity hashes are illustrative placeholders. The replay feeds this attack-time state into SafeInstall's real policy engine — the verdicts below are produced by the shipped code, not hardcoded."
+}
