@@ -1,6 +1,17 @@
-import type { Bundle } from "sigstore";
-
-export type { Bundle };
+/**
+ * Minimal Bundle shape compatible with sigstore's Bundle type. Defined
+ * inline so the build succeeds even when the optional sigstore package
+ * is not installed — TypeScript needs resolvable types at compile time,
+ * but sigstore is only loaded at runtime when provenance.mode is enabled.
+ */
+export interface Bundle {
+  mediaType?: string;
+  dsseEnvelope?: {
+    payload: string | Uint8Array;
+    payloadType: string;
+    signatures: Array<{ sig: string; keyid?: string }>;
+  };
+}
 
 import { DiskCache } from "./disk-cache";
 import { getShutdownSignalError, throwIfAborted } from "./signals";
@@ -196,16 +207,17 @@ async function defaultFetchAttestations(
 }
 
 async function defaultVerifyBundle(bundle: Bundle): Promise<void> {
-  let sigstore: typeof import("sigstore");
+  let verify: (b: unknown) => Promise<unknown>;
   try {
-    sigstore = await import("sigstore");
+    const sigstore = await import("sigstore");
+    verify = sigstore.verify as (b: unknown) => Promise<unknown>;
   } catch {
     throw new Error(
       "Sigstore provenance verification requires the optional 'sigstore' package. " +
         "Install it with: npm install sigstore"
     );
   }
-  await sigstore.verify(bundle);
+  await verify(bundle);
 }
 
 export function createDefaultProvenanceDependencies(): ProvenanceDependencies {
