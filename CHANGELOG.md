@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.7.0 - 2026-06-23
+
+### Added
+
+- **Provenance continuity.** A new opt-in check that learns a per-package trust baseline from the provenance identity of recent versions and blocks deviations at install time — the structural gap npm itself does not close. npm verifies provenance at publish time but does not enforce continuity *between* versions, so a compromised account can publish a version with no attestation (from a stolen token) or from a different repository without raising any alarm. This is the dominant 2026 attack pattern (Mastra and the dormant-account republishes).
+
+  Two block-worthy deviations:
+  - **`provenance-downgrade`** — recent versions were attested, this one is not. The fingerprint of an account-compromise publish from a personal token.
+  - **`identity-discontinuity`** — this version is attested from a different source repository than the established baseline.
+
+  Because the baseline is learned per package, packages that never adopted provenance simply have no baseline and the check stays silent — no false positives, no global "require provenance" sledgehammer. It reads npm's published attestation metadata, so it works **without** the optional sigstore package. Opt in via a new `continuity` config block (defaults to `"off"`).
+
+  ```json
+  {
+    "continuity": {
+      "mode": "warn",
+      "baselineSize": 5
+    }
+  }
+  ```
+
+  Honest limit: continuity does not catch an attack delivered through a legitimately-compromised CI workflow that still produces valid provenance from the real repository (the Shai-Hulud worm class) — there is no identity discontinuity to detect there.
+
+- The attack replay (`pnpm replay mastra`) now demonstrates the `provenance-downgrade` verdict alongside the release-age and transitive checks, showing the catch that npm defaults structurally cannot make.
+
 ## 0.6.0 - 2026-06-16
 
 ### Changed
