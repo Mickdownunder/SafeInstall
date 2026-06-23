@@ -159,6 +159,12 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
     });
   }
 
+  // This also covers native builds: a package shipping a `binding.gyp` runs
+  // `node-gyp rebuild` at install time. npm normalizes that into an explicit
+  // `install` script at publish, so it appears in `lifecycleScripts` from the
+  // registry metadata — no tarball inspection needed. The only case this misses
+  // is a non-standard publish that omits the normalization while still shipping
+  // a binding.gyp (documented as a known limitation in the README).
   if (
     !allowlisted &&
     input.resolvedRegistryPackage.lifecycleScripts.length > 0 &&

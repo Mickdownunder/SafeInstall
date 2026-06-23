@@ -512,6 +512,7 @@ To enforce policy during the actual install step (not just a check):
 - **Not a CVE scanner** — pair with `npm audit` or Snyk for vulnerability data
 - **Transitive dependencies** are evaluated for install scripts and untrusted sources when `transitive.mode` is enabled. Release-age, typo-squat, and provenance still apply to direct dependencies only.
 - **Transitive install-script detection** is npm-only — pnpm lockfiles do not record install-script presence. Transitive untrusted-source detection works for both.
+- **Native builds (`binding.gyp`)** are caught via the install-script check: npm normalizes `binding.gyp` into a `node-gyp rebuild` install script at publish time, so it is present in the registry metadata SafeInstall already reads — no tarball download required. The residual edge is a package published through a non-standard client that omits this normalization while still shipping a `binding.gyp`; detecting that would require tarball content inspection, which is out of scope (see *What it does not do*).
 - **`peerDependencies`** not evaluated unless also declared as direct dependencies
 - **Trust downgrade detection** requires prior install state in `node_modules`
 - **`bun install`** uses manifest-only analysis (lockfile parity not yet implemented); transitive evaluation is npm/pnpm only
