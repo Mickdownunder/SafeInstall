@@ -1,10 +1,12 @@
 import { mapConcurrent } from "./async";
+import { evaluateContinuity } from "./continuity";
 import { DiskCache } from "./disk-cache";
 import { loadProjectDependencyState } from "./project-state";
 import { evaluatePackage } from "./policy";
 import { verifyProvenance } from "./provenance";
 import { RegistryClient } from "./registry";
 import type {
+  ContinuityResult,
   PackageEvaluation,
   ProvenanceVerificationResult,
   RequestedPackage,
@@ -73,6 +75,22 @@ export async function evaluateRequestedPackages(
         });
       }
 
+      let continuityResult: ContinuityResult | undefined;
+      if (
+        config.continuity.mode !== "off" &&
+        requested.sourceType === "registry" &&
+        resolvedRegistryPackage
+      ) {
+        continuityResult = await evaluateContinuity({
+          packageName: requested.name,
+          targetVersion: resolvedRegistryPackage.resolvedVersion,
+          registryUrl: config.registryUrl,
+          config: config.continuity,
+          diskCache: provenanceCache,
+          signal
+        });
+      }
+
       return evaluatePackage({
         config,
         requested,
@@ -81,6 +99,7 @@ export async function evaluateRequestedPackages(
         resolvedRegistryPackage,
         priorLifecycleScripts,
         provenanceResult,
+        continuityResult,
         resolutionError
       });
     }

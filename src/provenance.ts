@@ -227,6 +227,93 @@ export function createDefaultProvenanceDependencies(): ProvenanceDependencies {
   };
 }
 
+/**
+ * The publish identity of a single package version, derived from npm's
+ * attestation metadata. Used by the continuity check to compare a version
+ * against the package's historical baseline. Identity extraction does NOT
+ * cryptographically verify the bundle — npm verifies provenance at publish
+ * time and binds the repository, so the presence and contents of the
+ * attestation are meaningful on their own. This keeps continuity fast and
+ * usable even when the optional sigstore package is not installed.
+ */
+export interface AttestationIdentity {
+  hasProvenance: boolean;
+  sourceRepository?: string;
+  workflowPath?: string;
+}
+
+export interface FetchAttestationIdentityInput {
+  packageName: string;
+  version: string;
+  registryUrl: string;
+  diskCache?: DiskCache;
+  deps?: Pick<ProvenanceDependencies, "fetchAttestations">;
+  signal?: AbortSignal;
+}
+
+/**
+ * Fetch a single version's attestation from the registry and extract its
+ * publish identity (whether it has SLSA provenance, and from which GitHub
+ * repository and workflow). Returns `{ hasProvenance: false }` when the
+ * version has no attestation or the attestation can't be parsed. Never
+ * throws on ordinary failures; re-throws shutdown signals.
+ */
+export async function fetchAttestationIdentity(
+  input: FetchAttestationIdentityInput
+): Promise<AttestationIdentity> {
+  throwIfAborted(input.signal);
+  const fetchAttestations = input.deps?.fetchAttestations ?? defaultFetchAttestations;
+  const url = attestationUrl(input.registryUrl, input.packageName, input.version);
+  const cacheKey = `${input.registryUrl}|${input.packageName}@${input.version}`;
+
+  let rawResponse: NpmAttestationResponse | null = null;
+  const cached = input.diskCache
+    ? await input.diskCache.getJson<NpmAttestationResponse>(ATTESTATION_CACHE_NAMESPACE, cacheKey)
+    : undefined;
+  if (cached) {
+    rawResponse = cached;
+  } else {
+    try {
+      rawResponse = await fetchAttestations(url, input.signal);
+      if (rawResponse && input.diskCache) {
+        await input.diskCache.setJson(ATTESTATION_CACHE_NAMESPACE, cacheKey, rawResponse);
+      }
+    } catch (error) {
+      const shutdownError = getShutdownSignalError(input.signal);
+      if (shutdownError) {
+        throw shutdownError;
+      }
+      return { hasProvenance: false };
+    }
+  }
+
+  if (!rawResponse) {
+    return { hasProvenance: false };
+  }
+
+  const slsa = (rawResponse.attestations ?? []).find((entry) =>
+    entry.predicateType?.startsWith(SLSA_PREDICATE_TYPE_PREFIX)
+  );
+  if (!slsa?.bundle) {
+    return { hasProvenance: false };
+  }
+
+  const statement = parseStatement(slsa.bundle);
+  const workflow = statement?.predicate?.buildDefinition?.externalParameters?.workflow;
+  const sourceRepository = extractRepositorySlug(workflow?.repository);
+  if (!sourceRepository) {
+    // Has an attestation but no usable repository — treat as provenance
+    // present but identity unknown.
+    return { hasProvenance: true };
+  }
+
+  return {
+    hasProvenance: true,
+    sourceRepository,
+    workflowPath: workflow?.path
+  };
+}
+
 export interface VerifyProvenanceInput {
   packageName: string;
   version: string;

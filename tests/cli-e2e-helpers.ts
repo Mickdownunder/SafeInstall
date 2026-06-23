@@ -250,6 +250,10 @@ export async function writeDefaultConfig(
       mode: "off",
       checks: ["install-script", "untrusted-source"]
     },
+    continuity: {
+      mode: "off",
+      baselineSize: 5
+    },
     ...overrides
   });
 }

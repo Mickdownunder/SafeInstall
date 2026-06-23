@@ -16,9 +16,19 @@
     "sourceType": "registry"
   },
   "lockfile": "package-lock.json",
+  "continuity": {
+    "baseline": [
+      { "version": "0.19.0", "publishedAt": "2026-05-12T09:00:00.000Z", "repository": "mastra-ai/mastra" },
+      { "version": "0.19.1", "publishedAt": "2026-05-26T09:00:00.000Z", "repository": "mastra-ai/mastra" },
+      { "version": "0.19.2", "publishedAt": "2026-06-02T09:00:00.000Z", "repository": "mastra-ai/mastra" },
+      { "version": "0.20.0", "publishedAt": "2026-06-09T09:00:00.000Z", "repository": "mastra-ai/mastra" }
+    ],
+    "target": { "version": "0.20.1", "publishedAt": "2026-06-17T01:20:00.000Z", "hasProvenance": false }
+  },
   "expected": {
     "release-too-new": "blocks @mastra/core (republished at 01:20 UTC, ~1.7h before the 03:00 UTC install; default 72h minimum). easy-day-js@1.11.22 was published at 01:01 UTC the same day — also minutes old.",
-    "transitive-install-script": "blocks easy-day-js@1.11.22 (postinstall dropper; requires transitive.mode opt-in)"
+    "transitive-install-script": "blocks easy-day-js@1.11.22 (postinstall dropper; requires transitive.mode opt-in)",
+    "provenance-downgrade": "blocks @mastra/core: prior CI releases carried SLSA provenance from mastra-ai/mastra, this version has none (requires continuity.mode opt-in). This is the differentiator npm defaults do not catch."
   },
-  "note": "Version numbers and timestamps are reconstructed from public incident reporting (Microsoft, SafeDep, StepSecurity). The 84-minute republish window (01:12–02:39 UTC) and easy-day-js publish time (01:01 UTC) are documented in the sources. Integrity hashes are illustrative placeholders. The replay feeds this attack-time state into SafeInstall's real policy engine — the verdicts below are produced by the shipped code, not hardcoded."
+  "note": "Version numbers and timestamps are reconstructed from public incident reporting (Microsoft, SafeDep, StepSecurity). The 84-minute republish window (01:12–02:39 UTC) and easy-day-js publish time (01:01 UTC) are documented in the sources. SafeDep reported that Mastra generated provenance on CI publishes but did not enforce it, so the malicious wave published without attestation — the basis for the provenance-downgrade verdict; the per-version baseline here is illustrative of that CI-provenance history. Integrity hashes are illustrative placeholders. The replay feeds this attack-time state into SafeInstall's real policy engine — the verdicts are produced by the shipped code, not hardcoded."
 }

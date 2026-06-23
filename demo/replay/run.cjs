@@ -21,10 +21,12 @@ const path = require("node:path");
 
 let policy;
 let transitive;
+let continuity;
 let config;
 try {
   policy = require("../../dist/policy.js");
   transitive = require("../../dist/transitive.js");
+  continuity = require("../../dist/continuity.js");
   config = require("../../dist/config.js");
 } catch (error) {
   console.error("Could not load SafeInstall from dist/. Run `pnpm build` first.");
@@ -95,6 +97,64 @@ async function replay(attackName) {
   });
   for (const reason of transitiveEvaluation.blockedReasons) {
     findings.push({ reason, requires: 'transitive.mode = "block" (opt-in)' });
+  }
+
+  // --- Provenance continuity: requires opt-in continuity mode ---
+  if (attack.continuity) {
+    const baseline = attack.continuity.baseline.map((entry) => ({
+      version: entry.version,
+      publishedAt: new Date(entry.publishedAt)
+    }));
+    const target = attack.continuity.target;
+    const history = [...baseline, { version: target.version, publishedAt: new Date(target.publishedAt) }];
+    const identityByVersion = new Map();
+    for (const entry of attack.continuity.baseline) {
+      identityByVersion.set(entry.version, {
+        hasProvenance: true,
+        sourceRepository: entry.repository,
+        workflowPath: ".github/workflows/publish.yml"
+      });
+    }
+    identityByVersion.set(target.version, {
+      hasProvenance: Boolean(target.hasProvenance),
+      sourceRepository: target.repository
+    });
+
+    const continuityResult = await continuity.evaluateContinuity({
+      packageName: attack.directInstall.name,
+      targetVersion: target.version,
+      registryUrl: "https://registry.npmjs.org",
+      config: { mode: "block", baselineSize: 5 },
+      diskCache: undefined,
+      deps: {
+        async fetchVersionHistory() {
+          return history;
+        },
+        async fetchIdentity(_pkg, version) {
+          return identityByVersion.get(version) ?? { hasProvenance: false };
+        }
+      }
+    });
+
+    const continuityConfig = config.createDefaultConfig();
+    continuityConfig.continuity = { mode: "block", baselineSize: 5 };
+    const continuityEval = policy.evaluatePackage({
+      config: continuityConfig,
+      requested,
+      now,
+      resolvedRegistryPackage: {
+        requested,
+        resolvedVersion: attack.directInstall.version,
+        publishedAt: new Date(attack.directInstall.publishedAt),
+        lifecycleScripts: attack.directInstall.lifecycleScripts
+      },
+      continuityResult
+    });
+    for (const reason of continuityEval.blockedReasons) {
+      if (reason.code === "provenance-downgrade" || reason.code === "identity-discontinuity") {
+        findings.push({ reason, requires: 'continuity.mode = "block" (opt-in) — npm defaults cannot detect this' });
+      }
+    }
   }
 
   if (findings.length === 0) {

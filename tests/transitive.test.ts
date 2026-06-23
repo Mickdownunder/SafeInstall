@@ -24,6 +24,7 @@ function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallCo
     typoSquat: { mode: "off", minNameLength: 4, ignore: [] },
     provenance: { mode: "off", requireFor: [], trustedPublishers: {}, offlineBehavior: "fail-closed" },
     transitive: { mode: "off", checks: ["install-script", "untrusted-source"] },
+    continuity: { mode: "off", baselineSize: 5 },
     ...overrides
   };
 }

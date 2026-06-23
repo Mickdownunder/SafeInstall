@@ -33,6 +33,10 @@ const config: SafeInstallConfig = {
   transitive: {
     mode: "off",
     checks: ["install-script", "untrusted-source"]
+  },
+  continuity: {
+    mode: "off",
+    baselineSize: 5
   }
 };
 

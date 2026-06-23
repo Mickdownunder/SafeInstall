@@ -16,7 +16,8 @@ const KNOWN_CONFIG_KEYS = new Set<keyof SafeInstallConfig>([
   "packageManagerDefaults",
   "typoSquat",
   "provenance",
-  "transitive"
+  "transitive",
+  "continuity"
 ]);
 
 const KNOWN_TYPO_SQUAT_KEYS = new Set<keyof SafeInstallConfig["typoSquat"]>([
@@ -34,11 +35,14 @@ const KNOWN_PROVENANCE_KEYS = new Set<keyof SafeInstallConfig["provenance"]>([
 
 const KNOWN_TRANSITIVE_KEYS = new Set<keyof SafeInstallConfig["transitive"]>(["mode", "checks"]);
 
+const KNOWN_CONTINUITY_KEYS = new Set<keyof SafeInstallConfig["continuity"]>(["mode", "baselineSize"]);
+
 const TYPO_SQUAT_MODES = new Set(["off", "warn", "block"]);
 const PROVENANCE_MODES = new Set(["off", "warn", "require"]);
 const OFFLINE_BEHAVIORS = new Set(["fail-closed", "allow-cached"]);
 const TRANSITIVE_MODES = new Set(["off", "warn", "block"]);
 const TRANSITIVE_CHECKS = new Set(["install-script", "untrusted-source"]);
+const CONTINUITY_MODES = new Set(["off", "warn", "block"]);
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -93,6 +97,10 @@ export function createDefaultConfig(): SafeInstallConfig {
     transitive: {
       mode: "off",
       checks: ["install-script", "untrusted-source"]
+    },
+    continuity: {
+      mode: "off",
+      baselineSize: 5
     }
   };
 }
@@ -236,6 +244,39 @@ function validateTransitive(
   };
 }
 
+function validateContinuity(
+  input: Partial<SafeInstallConfig["continuity"]> | undefined
+): SafeInstallConfig["continuity"] {
+  const defaults = createDefaultConfig().continuity;
+  if (!input) {
+    return defaults;
+  }
+
+  const unknownKeys = Object.keys(input).filter(
+    (key) => !KNOWN_CONTINUITY_KEYS.has(key as keyof SafeInstallConfig["continuity"])
+  );
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `Config error: unknown key(s) in continuity: ${unknownKeys.map((key) => `"${key}"`).join(", ")}.`
+    );
+  }
+
+  const mode = input.mode ?? defaults.mode;
+  if (!CONTINUITY_MODES.has(mode)) {
+    throw new Error(`Config error: continuity.mode must be one of "off", "warn", "block".`);
+  }
+
+  const baselineSize = input.baselineSize ?? defaults.baselineSize;
+  if (!Number.isInteger(baselineSize) || baselineSize < 1 || baselineSize > 50) {
+    throw new Error("Config error: continuity.baselineSize must be an integer between 1 and 50.");
+  }
+
+  return {
+    mode,
+    baselineSize
+  };
+}
+
 function isPackageManagerName(value: string): value is PackageManagerName {
   return value === "npm" || value === "pnpm" || value === "bun";
 }
@@ -278,7 +319,8 @@ function mergeConfig(input: Partial<SafeInstallConfig>): SafeInstallConfig {
     },
     typoSquat: validateTypoSquat(input.typoSquat),
     provenance: validateProvenance(input.provenance),
-    transitive: validateTransitive(input.transitive)
+    transitive: validateTransitive(input.transitive),
+    continuity: validateContinuity(input.continuity)
   };
 
   if (!Number.isFinite(merged.minimumReleaseAgeHours) || merged.minimumReleaseAgeHours < 0) {

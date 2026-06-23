@@ -121,8 +121,24 @@ No registry proxy. No tarball rewriting. No cloud dependency.
 | **Typo-squat detection** | Off by default; opt in via `typoSquat.mode` | `Blocked: suspected typo-squat` |
 | **Provenance verification** | Off by default; opt in via `provenance.mode` | `Blocked: attestation missing/invalid/publisher mismatch` |
 | **Transitive dependencies** | Off by default; opt in via `transitive.mode` | `Blocked: transitive install script / untrusted source` |
+| **Provenance continuity** | Off by default; opt in via `continuity.mode` | `Blocked: provenance downgrade / identity discontinuity` |
 
 All rules are configurable. Ambiguous or incomplete metadata **blocks instead of allowing**.
+
+### Provenance continuity — catching what npm defaults can't
+
+This is SafeInstall's most distinctive check, and the one no other consumer-side tool does. npm verifies provenance at *publish* time and binds a package to a source repository — but it does not enforce **continuity** between versions. A compromised maintainer account can publish a new version with *no* attestation (from a stolen token), or from a *different* repository, and npm raises no alarm. This is the signature of the 2026 attack wave (Mastra, the dormant-account republishes).
+
+Continuity learns a per-package trust baseline from the provenance identity of recent versions, then blocks deviations:
+
+- **`provenance-downgrade`** — recent versions were attested, this one isn't. The fingerprint of an account-compromise publish from a personal token. *(This is the Mastra case.)*
+- **`identity-discontinuity`** — this version is attested from a different source repository than the established baseline.
+
+Because the baseline is learned **per package**, there are no false positives on the large majority of packages that never adopted provenance — they simply have no baseline and the check stays silent. No global "require provenance" sledgehammer.
+
+It reads npm's published attestation metadata, so it works **without the optional sigstore package**. Opt in with `continuity.mode` set to `"warn"` or `"block"`.
+
+> **Honest limit:** continuity does not catch an attack that comes *through* a legitimately-compromised CI workflow with valid provenance from the real repository (e.g. the Shai-Hulud worm class). There is no identity discontinuity to detect there. SafeInstall raises the bar against the dominant 2026 attack pattern; it does not close every door.
 
 ### Transitive dependencies
 
@@ -242,6 +258,10 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
   "transitive": {
     "mode": "warn",
     "checks": ["install-script", "untrusted-source"]
+  },
+  "continuity": {
+    "mode": "warn",
+    "baselineSize": 5
   }
 }
 ```
@@ -263,6 +283,8 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cached attestation |
 | `transitive.mode` | `"off"` / `"warn"` / `"block"` — evaluate the full lockfile tree, not just direct deps |
 | `transitive.checks` | Which checks run transitively: `"install-script"` and/or `"untrusted-source"` |
+| `continuity.mode` | `"off"` / `"warn"` / `"block"` — detect provenance downgrades and source-repo changes against a learned per-package baseline |
+| `continuity.baselineSize` | How many recent versions to sample when learning the baseline (default 5) |
 
 Run `safeinstall init` to generate a starter config.
 

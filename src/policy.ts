@@ -5,6 +5,7 @@ import {
 } from "./provenance";
 import { detectTypoSquat } from "./typo-squat";
 import type {
+  ContinuityResult,
   InstallLifecycleScriptName,
   PackageEvaluation,
   ProjectDependencyState,
@@ -54,6 +55,7 @@ export interface EvaluatePackageInput {
   resolvedRegistryPackage?: ResolvedRegistryPackage;
   priorLifecycleScripts?: InstallLifecycleScriptName[];
   provenanceResult?: ProvenanceVerificationResult;
+  continuityResult?: ContinuityResult;
   /**
    * Error captured when registry metadata resolution failed (package does
    * not exist, network error, 5xx, etc.). If a typo-squat check fires on
@@ -185,8 +187,66 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
   }
 
   applyProvenanceDecision(evaluation, input);
+  applyContinuityDecision(evaluation, input);
 
   return evaluation;
+}
+
+/**
+ * Translate a provenance continuity result into blocked reasons, warnings,
+ * or info on the package evaluation.
+ *
+ * Continuity learns a per-package trust baseline from the provenance
+ * identity of recent versions. The two block-worthy deviations are:
+ *   - provenance-downgrade: the baseline was provenance-bearing, but the
+ *     installed version carries no attestation (the signature of an account
+ *     compromise publishing from a personal token, e.g. Mastra).
+ *   - identity-discontinuity: the installed version is attested from a
+ *     different source repository than the established baseline.
+ *
+ * "consistent" surfaces as an info line in warn mode. "no-baseline" and
+ * "unevaluated" are silent — most packages never adopted provenance, and a
+ * registry hiccup must not block.
+ */
+function applyContinuityDecision(evaluation: PackageEvaluation, input: EvaluatePackageInput): void {
+  const config = input.config.continuity;
+  if (config.mode === "off" || !input.continuityResult) {
+    return;
+  }
+
+  const result = input.continuityResult;
+  const name = input.requested.name;
+  const block = config.mode === "block";
+
+  if (result.status === "provenance-downgrade") {
+    const message = `${name}@${input.resolvedRegistryPackage?.resolvedVersion ?? input.requested.requested} dropped provenance: recent versions were attested${result.baselineRepository ? ` from ${result.baselineRepository}` : ""}, but this version has no attestation. This is the signature of a compromised-account publish.`;
+    const suggestion =
+      "Treat this as a likely account compromise. Do not install until the maintainer confirms the release.";
+    if (block) {
+      evaluation.blockedReasons.push({ code: "provenance-downgrade", message: `Blocked: ${message}`, suggestion });
+    } else {
+      evaluation.warnings.push(`${message} ${suggestion}`);
+    }
+    return;
+  }
+
+  if (result.status === "identity-discontinuity") {
+    const message = `${name} changed publish identity: recent versions were attested from ${result.baselineRepository}, but this version is attested from ${result.targetRepository}.`;
+    const suggestion =
+      "Verify the source repository change is intentional before installing.";
+    if (block) {
+      evaluation.blockedReasons.push({ code: "identity-discontinuity", message: `Blocked: ${message}`, suggestion });
+    } else {
+      evaluation.warnings.push(`${message} ${suggestion}`);
+    }
+    return;
+  }
+
+  if (result.status === "consistent" && config.mode === "warn") {
+    evaluation.infos.push(
+      `${name}: provenance consistent with baseline${result.baselineRepository ? ` (${result.baselineRepository})` : ""}.`
+    );
+  }
 }
 
 /**

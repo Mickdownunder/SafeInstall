@@ -4,6 +4,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { createDefaultConfig } from "../src/config";
+import { evaluateContinuity } from "../src/continuity";
+import type { ContinuityDependencies } from "../src/continuity";
 import { evaluatePackage } from "../src/policy";
 import { evaluateTransitiveDependencies } from "../src/transitive";
 
@@ -24,6 +26,10 @@ interface AttackFixture {
     sourceType: "registry";
   };
   lockfile: string;
+  continuity?: {
+    baseline: { version: string; publishedAt: string; repository: string }[];
+    target: { version: string; publishedAt: string; hasProvenance: boolean; repository?: string };
+  };
 }
 
 function loadAttack(name: string): { fixture: AttackFixture; dir: string } {
@@ -81,5 +87,44 @@ describe("attack replay: mastra (2026-06-17)", () => {
     });
 
     expect(result.blockedReasons).toHaveLength(0);
+  });
+
+  it("flags the provenance downgrade via continuity (the npm-defaults-can't-see-this catch)", async () => {
+    expect(fixture.continuity).toBeDefined();
+    const cont = fixture.continuity!;
+
+    const history = [...cont.baseline, cont.target].map((entry) => ({
+      version: entry.version,
+      publishedAt: new Date(entry.publishedAt)
+    }));
+    const identities = new Map<string, { hasProvenance: boolean; sourceRepository?: string }>();
+    for (const entry of cont.baseline) {
+      identities.set(entry.version, { hasProvenance: true, sourceRepository: entry.repository });
+    }
+    identities.set(cont.target.version, {
+      hasProvenance: cont.target.hasProvenance,
+      sourceRepository: cont.target.repository
+    });
+
+    const deps: ContinuityDependencies = {
+      async fetchVersionHistory() {
+        return history;
+      },
+      async fetchIdentity(_pkg, version) {
+        return identities.get(version) ?? { hasProvenance: false };
+      }
+    };
+
+    const result = await evaluateContinuity({
+      packageName: fixture.directInstall.name,
+      targetVersion: cont.target.version,
+      registryUrl: "https://registry.npmjs.org",
+      config: { mode: "block", baselineSize: 5 },
+      diskCache: undefined as never,
+      deps
+    });
+
+    expect(result.status).toBe("provenance-downgrade");
+    expect(result.baselineRepository).toBe("mastra-ai/mastra");
   });
 });

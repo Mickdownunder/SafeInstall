@@ -31,6 +31,10 @@ function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallCo
       mode: "off",
       checks: ["install-script", "untrusted-source"]
     },
+    continuity: {
+      mode: "off",
+      baselineSize: 5
+    },
     ...overrides
   };
 }
@@ -691,6 +695,107 @@ describe("evaluatePackage", () => {
           (info) => info.includes("verified") && info.includes("axios/axios")
         )
       ).toBe(true);
+    });
+  });
+
+  describe("continuity integration", () => {
+    it("ignores continuity results when mode is off", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            minimumReleaseAgeHours: 0,
+            continuity: { mode: "off", baselineSize: 5 }
+          }),
+          continuityResult: { status: "provenance-downgrade", baselineRepository: "demo/demo" }
+        })
+      );
+
+      expect(result.blockedReasons).toHaveLength(0);
+    });
+
+    it("blocks a provenance downgrade in block mode", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            minimumReleaseAgeHours: 0,
+            continuity: { mode: "block", baselineSize: 5 }
+          }),
+          continuityResult: {
+            status: "provenance-downgrade",
+            baselineRepository: "mastra-ai/mastra",
+            targetHasProvenance: false
+          }
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toContain("provenance-downgrade");
+      const block = result.blockedReasons.find((reason) => reason.code === "provenance-downgrade");
+      expect(block?.message).toContain("mastra-ai/mastra");
+    });
+
+    it("blocks an identity discontinuity in block mode", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            minimumReleaseAgeHours: 0,
+            continuity: { mode: "block", baselineSize: 5 }
+          }),
+          continuityResult: {
+            status: "identity-discontinuity",
+            baselineRepository: "axios/axios",
+            targetRepository: "evil-fork/axios"
+          }
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toContain("identity-discontinuity");
+      const block = result.blockedReasons.find((reason) => reason.code === "identity-discontinuity");
+      expect(block?.message).toContain("axios/axios");
+      expect(block?.message).toContain("evil-fork/axios");
+    });
+
+    it("warns instead of blocking in warn mode", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            minimumReleaseAgeHours: 0,
+            continuity: { mode: "warn", baselineSize: 5 }
+          }),
+          continuityResult: { status: "provenance-downgrade", baselineRepository: "demo/demo" }
+        })
+      );
+
+      expect(result.blockedReasons).toHaveLength(0);
+      expect(result.warnings.some((w) => w.includes("dropped provenance"))).toBe(true);
+    });
+
+    it("does not block on consistent or no-baseline status", () => {
+      for (const status of ["consistent", "no-baseline", "unevaluated"] as const) {
+        const result = evaluatePackage(
+          createInput({
+            config: createConfig({
+              minimumReleaseAgeHours: 0,
+              continuity: { mode: "block", baselineSize: 5 }
+            }),
+            continuityResult: { status }
+          })
+        );
+        expect(result.blockedReasons).toHaveLength(0);
+      }
+    });
+
+    it("surfaces a consistent baseline as an info line in warn mode", () => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            minimumReleaseAgeHours: 0,
+            continuity: { mode: "warn", baselineSize: 5 }
+          }),
+          continuityResult: { status: "consistent", baselineRepository: "demo/demo" }
+        })
+      );
+
+      expect(result.infos.some((info) => info.includes("consistent with baseline"))).toBe(true);
     });
   });
 });

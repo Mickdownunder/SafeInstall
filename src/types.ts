@@ -55,6 +55,30 @@ export interface TransitiveConfig {
   checks: TransitiveCheck[];
 }
 
+export type ContinuityMode = "off" | "warn" | "block";
+
+export interface ContinuityConfig {
+  mode: ContinuityMode;
+  baselineSize: number;
+}
+
+export type ContinuityStatus =
+  | "consistent"
+  | "provenance-downgrade"
+  | "identity-discontinuity"
+  | "no-baseline"
+  | "unevaluated";
+
+export interface ContinuityResult {
+  status: ContinuityStatus;
+  sampledVersions?: number;
+  baselineProvenanceRate?: number;
+  baselineRepository?: string;
+  targetHasProvenance?: boolean;
+  targetRepository?: string;
+  error?: string;
+}
+
 export interface SafeInstallConfig {
   minimumReleaseAgeHours: number;
   registryUrl: string;
@@ -65,6 +89,7 @@ export interface SafeInstallConfig {
   typoSquat: TypoSquatConfig;
   provenance: ProvenanceConfig;
   transitive: TransitiveConfig;
+  continuity: ContinuityConfig;
 }
 
 export interface RequestedPackage {
@@ -115,7 +140,9 @@ export type PolicyBlockCode =
   | "publisher-mismatch"
   | "package-resolution-failed"
   | "transitive-install-script"
-  | "transitive-untrusted-source";
+  | "transitive-untrusted-source"
+  | "provenance-downgrade"
+  | "identity-discontinuity";
 
 export interface PolicyBlockReason {
   code: PolicyBlockCode;

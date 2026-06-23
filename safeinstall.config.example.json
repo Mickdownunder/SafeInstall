@@ -31,5 +31,9 @@
   "transitive": {
     "mode": "warn",
     "checks": ["install-script", "untrusted-source"]
+  },
+  "continuity": {
+    "mode": "warn",
+    "baselineSize": 5
   }
 }
