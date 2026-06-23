@@ -27,6 +27,10 @@ afterEach(async () => {
 
 const NOW = new Date("2026-06-23T12:00:00.000Z");
 
+// Minimal stubbed-fetch Response shapes used by the deterministic E2E tests.
+const jsonResponse = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const notFound = () => ({ ok: false, status: 404, json: async () => ({}) });
+
 function resolvedPackage(overrides: Partial<ResolvedRegistryPackage> = {}): ResolvedRegistryPackage {
   const requested = {
     name: "axios",
@@ -273,9 +277,6 @@ describe("check_package continuity verdict (E2E through the MCP layer)", () => {
     };
   }
 
-  const jsonResponse = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-  const notFound = () => ({ ok: false, status: 404, json: async () => ({}) });
-
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
@@ -351,5 +352,72 @@ describe("check_package continuity verdict (E2E through the MCP layer)", () => {
     expect(agentPayload.verdict).toBe("block");
     expect(agentPayload.reasons[0].code).toBe("provenance-downgrade");
     expect(agentPayload.reasons[0].message).toContain(BASELINE_REPO);
+  });
+});
+
+describe("check_package native-build (binding.gyp) coverage", () => {
+  // The sleep pattern: a package ships a binding.gyp but its author declared no
+  // install script. npm normalizes that into install: "node-gyp rebuild" at
+  // publish time, so it lands in the registry metadata SafeInstall already
+  // reads — no tarball download. This pins that the injected script is caught
+  // as install-script-present, enforcing the coverage rather than asserting it.
+  //
+  // Old publish dates keep release-age silent; attestations 404 so the secure
+  // preset's continuity check finds no baseline and stays silent. The only
+  // variable across the two cases is whether the manifest carries the script.
+  function registryStub(name: string, scripts: Record<string, string>) {
+    const version = "1.4.0";
+    const packument = {
+      "dist-tags": { latest: version },
+      versions: { "1.0.0": {}, "1.1.0": {}, "1.2.0": {}, "1.4.0": {} },
+      time: {
+        created: "2024-01-01T00:00:00.000Z",
+        modified: "2024-06-01T00:00:00.000Z",
+        "1.0.0": "2024-01-01T00:00:00.000Z",
+        "1.1.0": "2024-02-01T00:00:00.000Z",
+        "1.2.0": "2024-03-01T00:00:00.000Z",
+        "1.4.0": "2024-06-01T00:00:00.000Z"
+      }
+    };
+    const manifest = { version, scripts };
+    return (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/-/npm/v1/attestations/")) return Promise.resolve(notFound());
+      if (url.endsWith(`/${name}/${version}`)) return Promise.resolve(jsonResponse(manifest));
+      if (url.endsWith(`/${name}`)) return Promise.resolve(jsonResponse(packument));
+      return Promise.reject(new Error(`unexpected fetch in test: ${url}`));
+    };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("blocks a binding.gyp package via the npm-injected node-gyp install script", async () => {
+    const cwd = await createTempDir("safeinstall-mcp-gyp-");
+    vi.stubEnv("SAFEINSTALL_CACHE_DIR", await createTempDir("safeinstall-mcp-gyp-cache-"));
+    // Author declared no script; the registry metadata carries the injected one.
+    vi.stubGlobal("fetch", registryStub("acme-native-addon", { install: "node-gyp rebuild" }));
+
+    const verdict = await checkPackage(cwd, { name: "acme-native-addon" });
+
+    expect(verdict.verdict).toBe("block");
+    expect(verdict.reasons.map((reason) => reason.code)).toEqual(["install-script-present"]);
+    const reason = verdict.reasons.find((r) => r.code === "install-script-present");
+    expect(reason?.message).toContain("install script present");
+    expect(reason?.suggestion).toBeTruthy();
+  });
+
+  it("does not block a pure-JS package that declares no install script", async () => {
+    const cwd = await createTempDir("safeinstall-mcp-purejs-");
+    vi.stubEnv("SAFEINSTALL_CACHE_DIR", await createTempDir("safeinstall-mcp-purejs-cache-"));
+    vi.stubGlobal("fetch", registryStub("acme-plain-utils", {}));
+
+    const verdict = await checkPackage(cwd, { name: "acme-plain-utils" });
+
+    expect(verdict.verdict).toBe("allow");
+    expect(verdict.reasons).toEqual([]);
+    expect(verdict.reasons.map((reason) => reason.code)).not.toContain("install-script-present");
   });
 });
