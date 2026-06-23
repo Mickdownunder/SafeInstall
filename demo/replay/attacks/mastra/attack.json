@@ -17,8 +17,8 @@
   },
   "lockfile": "package-lock.json",
   "expected": {
-    "release-too-new": "blocks @mastra/core (republished ~1.7h before install; default minimum 72h)",
-    "transitive-install-script": "blocks easy-day-js (postinstall dropper; requires transitive.mode opt-in)"
+    "release-too-new": "blocks @mastra/core (republished at 01:20 UTC, ~1.7h before the 03:00 UTC install; default 72h minimum). easy-day-js@1.11.22 was published at 01:01 UTC the same day — also minutes old.",
+    "transitive-install-script": "blocks easy-day-js@1.11.22 (postinstall dropper; requires transitive.mode opt-in)"
   },
-  "note": "Version numbers and the lockfile shape are reconstructed from public incident reporting; integrity hashes are illustrative placeholders. The replay feeds this attack-time state into SafeInstall's real policy engine — the verdicts below are produced by the shipped code, not hardcoded."
+  "note": "Version numbers and timestamps are reconstructed from public incident reporting (Microsoft, SafeDep, StepSecurity). The 84-minute republish window (01:12–02:39 UTC) and easy-day-js publish time (01:01 UTC) are documented in the sources. Integrity hashes are illustrative placeholders. The replay feeds this attack-time state into SafeInstall's real policy engine — the verdicts below are produced by the shipped code, not hardcoded."
 }
