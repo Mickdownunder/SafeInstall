@@ -204,6 +204,7 @@ safeinstall check                     # direct dependency audit
 safeinstall check --json              # machine-readable
 safeinstall init                      # create starter config
 safeinstall init --force              # overwrite existing config
+safeinstall mcp                       # MCP server for AI coding agents
 safeinstall --help
 safeinstall --version
 
@@ -221,6 +222,58 @@ For `pnpm install` and `npm install` / `npm ci`, dependency versions come from t
 - If `packageManager` is set in `package.json`, using a different CLI is blocked
 - Workspace-targeting flags (`--filter`, `--workspace`) are blocked — use `-C` or `--prefix`
 - `bun install` uses manifest-oriented analysis (full lockfile parity not yet implemented)
+
+---
+
+## MCP server / AI agents
+
+The CLI reaches humans who type `safeinstall`. The **MCP server reaches every AI coding agent** — Claude Code, Cursor, Windsurf, Cline — so the policy engine is consulted *before* an agent suggests or runs an install, without anyone typing anything.
+
+`safeinstall mcp` starts a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio that exposes one tool, `check_package`, backed by the exact same engine as the CLI (release age, install scripts, untrusted sources, typo-squat, Sigstore provenance, and provenance continuity).
+
+> [!IMPORTANT]
+> MCP tools are **advisory**. Installing the server makes `check_package` *available*; it does not force an agent to call it. "Install once, protected forever" = **one MCP config block + one rule snippet** ([`mcp/agent-rule.md`](mcp/agent-rule.md)) telling the agent to call the tool before every install.
+
+### Wire it into your agent
+
+**Claude Code / Claude Desktop** — add to your MCP config (`claude_desktop_config.json` or `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "safeinstall": { "command": "npx", "args": ["safeinstall-cli", "mcp"] }
+  }
+}
+```
+
+**Cursor** — add the same block to `.cursor/mcp.json`.
+
+Then paste the rule from [`mcp/agent-rule.md`](mcp/agent-rule.md) into your `CLAUDE.md` / Cursor Rules. Full setup details: [`mcp/README.md`](mcp/README.md).
+
+### What the agent sees
+
+`check_package` accepts `name` (required), `version` (optional, defaults to latest), and `manager` (optional, informational) and returns a JSON verdict:
+
+```json
+{
+  "verdict": "block",
+  "name": "raect",
+  "version": null,
+  "reasons": [
+    { "code": "typo-squat-suspected", "message": "Blocked: Suspected typo-squat: \"raect\" is 2 edit(s) away from popular package \"react\".", "suggestion": "Verify you meant to install \"react\"." }
+  ],
+  "warnings": [],
+  "infos": [],
+  "sourceRepository": null,
+  "ageHours": null
+}
+```
+
+`verdict` is `"block"` when any policy reason blocks the install, otherwise `"allow"`.
+
+When **no `safeinstall.config.json` is found**, the MCP server uses a **recommended secure preset** — the built-in defaults with `typoSquat` and `continuity` promoted to `"block"`, because the agent use case wants maximum signal. When a config file **is** found, it is respected exactly (same resolution as the CLI).
+
+The MCP SDK ships as an **optional dependency**, lazily loaded only when `safeinstall mcp` runs — CLI-only users never install it. If it is missing, the command prints an install hint and exits non-zero.
 
 ---
 
