@@ -126,6 +126,12 @@ export interface PackageEvaluation {
   blockedReasons: PolicyBlockReason[];
   warnings: string[];
   infos: string[];
+  /**
+   * The GitHub `owner/repo` slug the installed version was published from,
+   * derived from Sigstore provenance or the continuity baseline when
+   * available. Undefined for packages without usable attestation data.
+   */
+  sourceRepository?: string;
 }
 
 export type PolicyBlockCode =

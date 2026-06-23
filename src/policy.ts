@@ -189,7 +189,29 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
   applyProvenanceDecision(evaluation, input);
   applyContinuityDecision(evaluation, input);
 
+  evaluation.sourceRepository = deriveSourceRepository(input);
+
   return evaluation;
+}
+
+/**
+ * Surface the package's publish source repository (`owner/repo`) so callers
+ * that present a verdict — the MCP server, JSON consumers — can show where the
+ * installed version came from. Prefers a cryptographically verified provenance
+ * repository, then the target version's continuity identity, then the
+ * continuity baseline. Returns undefined when no attestation data is available.
+ */
+function deriveSourceRepository(input: EvaluatePackageInput): string | undefined {
+  if (input.provenanceResult?.status === "verified" && input.provenanceResult.sourceRepository) {
+    return input.provenanceResult.sourceRepository;
+  }
+
+  const continuity = input.continuityResult;
+  if (continuity) {
+    return continuity.targetRepository ?? continuity.baselineRepository;
+  }
+
+  return undefined;
 }
 
 /**
