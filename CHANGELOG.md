@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.8.0 - 2026-06-23
+
+### Added
+
+- **MCP server for AI coding agents.** A new `safeinstall mcp` subcommand starts a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio that exposes a single `check_package` tool. AI coding agents (Claude Code, Claude Desktop, Cursor, Windsurf, Cline) can call it *before* suggesting or running any install, so the policy engine reaches every agent user without anyone typing `safeinstall`.
+
+  The tool runs the **same engine as the CLI** — release age, install scripts, untrusted sources, typo-squat, Sigstore provenance, and provenance continuity — via `evaluateRequestedPackages`, and returns a machine-readable verdict:
+
+  ```json
+  {
+    "verdict": "allow" | "block",
+    "name": "...",
+    "version": "...resolved...",
+    "reasons": [ { "code": "...", "message": "...", "suggestion": "..." } ],
+    "warnings": ["..."],
+    "infos": ["..."],
+    "sourceRepository": "owner/repo" | null,
+    "ageHours": 0
+  }
+  ```
+
+  - **Config resolution matches the CLI.** A project `safeinstall.config.json` is respected exactly. When none is found, the server uses a **recommended secure preset** — built-in defaults with `typoSquat` and `continuity` promoted to `"block"` — because the agent use case wants maximum signal.
+  - **Lightweight by design.** `@modelcontextprotocol/sdk` is an **optional dependency**, dynamically imported only when `safeinstall mcp` runs (same pattern as the optional `sigstore` package). CLI-only users never install it; if it is missing the command prints an install hint and exits non-zero.
+  - **Onboarding artifacts.** New [`mcp/README.md`](mcp/README.md) (copy-paste MCP client config for Claude Code/Desktop and Cursor) and [`mcp/agent-rule.md`](mcp/agent-rule.md) (a ready-to-paste rule that instructs the agent to call `check_package` before every install). MCP tools are advisory — the server plus the rule snippet is the "install once, protected forever" combination.
+
+- **`sourceRepository` on package evaluations.** The engine now surfaces the `owner/repo` a version was published from (from verified provenance or the continuity baseline) on `PackageEvaluation`, so JSON consumers and the MCP verdict can show package origin.
+
 ## 0.7.0 - 2026-06-23
 
 ### Added
