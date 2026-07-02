@@ -198,7 +198,7 @@ export interface CliResult {
   decision: CliDecision;
   exitCode: number;
   exitCodeMeaning: string;
-  mode: "install" | "check" | "init" | "guard";
+  mode: "install" | "check" | "init" | "guard" | "trust";
   packageManager?: PackageManagerName;
   reasons: CliReason[];
   summary: string;

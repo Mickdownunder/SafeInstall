@@ -60,7 +60,7 @@ export function writeCliResult(result: CliResult, jsonMode: boolean): void {
     console.error(`Warning: ${warning}`);
   }
 
-  if (result.mode === "init" || result.mode === "guard") {
+  if (result.mode === "init" || result.mode === "guard" || result.mode === "trust") {
     if (result.decision === "allow") {
       console.error(result.summary);
       if (typeof result.details?.configPath === "string") {
@@ -69,7 +69,7 @@ export function writeCliResult(result: CliResult, jsonMode: boolean): void {
       return;
     }
 
-    if (result.mode === "guard") {
+    if (result.mode === "guard" || result.mode === "trust") {
       console.error(result.summary);
     }
     for (const reason of result.reasons) {

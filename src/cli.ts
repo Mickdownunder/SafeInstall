@@ -8,6 +8,7 @@ import { runInitFlow } from "./init-flow";
 import { runInstallFlow } from "./install-flow";
 import { runMcpServer } from "./mcp";
 import { formatCommand, writeCliResult } from "./output";
+import { isTrustSubcommand, runTrustFlow } from "./trust-flow";
 import { createShutdownController, ShutdownSignalError, signalExitCode } from "./signals";
 import type { CliResult } from "./types";
 
@@ -31,6 +32,10 @@ function printHelp(): void {
       "  safeinstall mcp",
       "  safeinstall guard install [--client claude,cursor]",
       "  safeinstall guard <claude|cursor>",
+      "  safeinstall trust lock [--mode warn|strict]",
+      "  safeinstall trust status [--require-lock]",
+      "  safeinstall trust approve",
+      "  safeinstall trust unlock",
       "",
       "Commands:",
       "  mcp          Run the MCP server (stdio) so AI coding agents can call",
@@ -40,6 +45,14 @@ function printHelp(): void {
       "  guard <client>  Run as the hook itself: reads the hook event from stdin",
       "               and denies raw package installs, pointing the agent at the",
       "               equivalent safeinstall command instead.",
+      "  trust lock   Create the Agent Trust Surface baseline: hash the files",
+      "               that configure SafeInstall and your AI agents (policy,",
+      "               hooks, rules files, MCP configs).",
+      "  trust status  Reconcile the trust surface against the baseline.",
+      "               Exit 2 on drift — use it in CI to catch tampering.",
+      "  trust approve  Review drift and approve a new baseline. Interactive",
+      "               only: refuses to run from CI or agent hooks.",
+      "  trust unlock  Remove the trust baseline (lock, ledger, head mirror).",
       "",
       "Global options:",
       "  --json       Emit machine-readable JSON output.",
@@ -107,6 +120,20 @@ async function main(): Promise<void> {
       return;
     }
 
+    if (argv[0] === "trust") {
+      if (!isTrustSubcommand(argv[1])) {
+        process.stderr.write(
+          "Usage: safeinstall trust lock [--mode warn|strict] | safeinstall trust status [--require-lock] | safeinstall trust approve | safeinstall trust unlock\n"
+        );
+        process.exitCode = 1;
+        return;
+      }
+      const result = await runTrustFlow(process.cwd(), argv);
+      writeCliResult(result, json);
+      process.exitCode = result.exitCode;
+      return;
+    }
+
     if (argv[0] === "mcp") {
       // The MCP server owns stdio for the JSON-RPC protocol and runs until the
       // client closes the transport. It reports its own failures to stderr, so
@@ -146,7 +173,8 @@ async function main(): Promise<void> {
   } catch (error) {
     const interrupted = error instanceof ShutdownSignalError;
     const result: CliResult = {
-      mode: argv[0] === "check" ? "check" : argv[0] === "init" ? "init" : "install",
+      mode:
+        argv[0] === "check" ? "check" : argv[0] === "init" ? "init" : argv[0] === "trust" ? "trust" : "install",
       decision: "error",
       exitCode: interrupted ? signalExitCode(error.signalName) : 1,
       exitCodeMeaning: interrupted
