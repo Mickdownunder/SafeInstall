@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 - 2026-07-02
 
 ### Added
 
@@ -28,7 +28,13 @@
   - New `safeinstall trust unlock` removes the lock, ledger, and head mirror — including clearing a stale mirror that would otherwise keep reporting `lock-removed`.
   - The local head mirror is documented as a best-effort signal against naive/accidental history rewrites; a missing mirror self-heals from the verified head rather than nagging on every fresh clone. The durable anchor is CI re-verification of the committed lock.
 
-- **`safeinstall trust lock --ci github`** scaffolds the CI re-verification workflow (`.github/workflows/safeinstall-trust.yml`) that runs the SafeInstall Action with `verify-trust: true`, so the committed baseline is re-checked on every pull request on a machine the agent does not control. This closes the gap between "the guarantee lives in CI" and "did the user actually wire up CI". An existing workflow file is never overwritten.
+- **`safeinstall trust lock --ci github`** scaffolds the CI re-verification workflow (`.github/workflows/safeinstall-trust.yml`) that runs `safeinstall trust status --require-lock` on every pull request, so the committed baseline is re-checked on a machine the agent does not control. This closes the gap between "the guarantee lives in CI" and "did the user actually wire up CI".
+
+  Built to avoid the release-sequencing and self-protection traps:
+  - The workflow **pins the CLI to an exact version** (never `@latest`), so it can never resolve to a CLI that predates the `trust` command and silently pass — the anchor cannot become a no-op.
+  - It is **trust-only** (`trust status --require-lock`, not the full dependency check) with `permissions: contents: read`, so it does not fail on a repo without a `package.json` and holds no write token.
+  - The workflow file is **part of the tracked enforcement surface**: flipping it off or deleting it is detected as drift, and the guard denies raw shell writes to it. It is scaffolded into the baseline so it does not itself register as drift.
+  - Honest scope, documented in the README: for the check to enforce you must make it a required status check and require review of `.safeinstall/`/`.github/workflows/` (CODEOWNERS) — the automatic check catches inconsistent tampering; a fully consistent baseline rewrite needs human review. An existing workflow file is never overwritten.
 
 ## 0.9.0 - 2026-07-02
 
