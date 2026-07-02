@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Agent Trust Surface: self-defending policy.** The guard stops raw installs, but a prompt-injected agent can instead rewrite the rules — weaken `safeinstall.config.json`, delete the hook from `.cursor/hooks.json`, plant invisible-Unicode instructions in `AGENTS.md`, or register a malicious MCP server. Those files program the next agent session; in the agent era they are the persistence mechanism. `safeinstall trust lock` records a hash baseline of that surface, and SafeInstall reconciles the real state against it before guard decisions and before every install/check.
+
+  Three zones with proportionate responses: the **enforcement** zone (SafeInstall config, agent hook files, `.safeinstall/`) locks down every agent command on drift; the **instruction** zone (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.cursor/rules/**`, `.github/copilot-instructions.md`) always blocks hidden Unicode but only warns on content drift by default, because Claude Code writes to `CLAUDE.md` itself; the **tool** zone (`.mcp.json`, `.cursor/mcp.json`, MCP blocks in `.claude/settings.json`) denies installs and runners on drift and flags unpinned MCP servers (the rug-pull vector where `npx evil-mcp` fetches new code without any config change).
+
+  Defense that survives adversarial review:
+  - **Reconciliation, not just interception.** Every `safeinstall` install/check reconciles, not only the guard. A bypass the guard never sees — a `node -e` install, or deleting the hook to silence the guard — still leaves a hash drift caught before the next run.
+  - **Hash-chained ledger with an out-of-workspace mirror** (`.safeinstall/ledger.jsonl` + a head mirror under `~/.safeinstall/`). Rewriting the in-repo lock and ledger to hide tampering still mismatches the mirror.
+  - **Human-gated approval.** `safeinstall trust approve` reads confirmation from the controlling terminal (`/dev/tty`), never stdin, and refuses CI and known agent-hook contexts, so an agent cannot approve its own tampering.
+  - **CI backstop.** The GitHub Action gains a `verify-trust` input: with the committed `.safeinstall/` baseline, `safeinstall trust status --require-lock` re-verifies the surface on every pull request, so a compromised local machine cannot slip drift past review.
+
+  New commands: `safeinstall trust lock [--mode warn|strict]`, `safeinstall trust status [--require-lock]`, `safeinstall trust approve`, `safeinstall trust unlock`. Honest scope, documented in the README: the durable guarantee is the committed lock re-verified by CI on a separate machine; locally it is tamper-evident against mistakes and non-targeted tampering, not tamper-proof against a scheme-aware agent in your own account; it watches files, not intent.
+
+- The guard also denies shell writes that target a trust-surface file (`echo … > safeinstall.config.json`, `sed -i … AGENTS.md`, `tee`, `rm`), interception to complement reconciliation.
+
+  Hardening from an adversarial review:
+  - The ledger-bound baseline hash now covers the enforcement `mode` and schema version, not just the file/MCP list — so editing the committed lock to downgrade `strict`→`warn` (softening instruction-drift enforcement) is detected as `trust-lock-forged`.
+  - `trust status` is strictly read-only: it no longer appends to the ledger on drift, so it does not dirty the working tree in CI or grow the ledger unbounded.
+  - Ledger appends are serialized with an exclusive lock file, so concurrent runs (parallel agent commands, CI matrices) cannot corrupt the hash chain into a false lockdown.
+  - The trust precheck in the install/check flows fails closed as a clean policy block on a read error instead of crashing with an unhandled error.
+  - Hidden-Unicode detection extended to the implicit bidi mark `U+061C`, soft hyphen, line/paragraph separators, deprecated formatting controls, and interlinear annotation anchors (Trojan-Source class).
+  - Unpinned-MCP detection now treats semver ranges (`^1`, `~1`, `1.x`, `*`, `>=1`), not only tags, as floating, and resolves the spec through `-p/--package` and value-taking runner flags. Unpinned servers are surfaced on every reconciliation (warning in warn mode, block in strict mode), not only at lock time.
+  - New `safeinstall trust unlock` removes the lock, ledger, and head mirror — including clearing a stale mirror that would otherwise keep reporting `lock-removed`.
+  - The local head mirror is documented as a best-effort signal against naive/accidental history rewrites; a missing mirror is surfaced as a warning (a fresh clone legitimately has none) rather than silently ignored. The durable anchor is CI re-verification of the committed lock.
+
 ## 0.9.0 - 2026-07-02
 
 ### Added

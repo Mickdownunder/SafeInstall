@@ -5,3 +5,9 @@ coverage/
 *.log
 *.tgz
 website/
+
+# SafeInstall trust-ledger transient mutex files — never commit. Scoped to the
+# ledger mutex by exact name: a blanket `*.lock` would also ignore the
+# committed trust-surface.lock, which IS the CI re-verification anchor.
+.safeinstall/ledger.jsonl.lock
+.safeinstall/ledger.jsonl.lock.stale-*
