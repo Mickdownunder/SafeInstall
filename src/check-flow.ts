@@ -8,6 +8,7 @@ import { RegistryClient } from "./registry";
 import { throwIfAborted } from "./signals";
 import { parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
+import { trustSurfacePrecheck } from "./trust-surface";
 import type { CliReason, CliResult, PackageEvaluation } from "./types";
 
 function configLabel(configPath?: string): string {
@@ -73,6 +74,26 @@ export async function runCheckFlow(
   );
   const commandString = formatCommand("safeinstall", argv);
 
+  const trust = await trustSurfacePrecheck(invocation.effectiveCwd);
+  if (trust.reasons.length > 0) {
+    return {
+      mode: "check",
+      decision: "block",
+      exitCode: 2,
+      exitCodeMeaning: "Check was blocked because the Agent Trust Surface has drifted.",
+      command: argv,
+      commandString,
+      configPath: path,
+      configLabel: configLabel(path),
+      reasons: trust.reasons,
+      summary: "Check blocked.",
+      warnings: trust.warnings,
+      infos: [],
+      affectedPackages: []
+    };
+  }
+  const trustWarnings = trust.warnings;
+
   if (!invocation.packageDir) {
     return {
       mode: "check",
@@ -91,7 +112,7 @@ export async function runCheckFlow(
         }
       ],
       summary: "Check blocked.",
-      warnings: [],
+      warnings: trustWarnings,
       infos: [],
       affectedPackages: []
     };
@@ -109,7 +130,7 @@ export async function runCheckFlow(
       configLabel: configLabel(path),
       reasons: projectTargets.issues.map(createProjectIssueReason),
       summary: "Check blocked.",
-      warnings: [],
+      warnings: trustWarnings,
       infos: [],
       affectedPackages: []
     };
@@ -133,7 +154,7 @@ export async function runCheckFlow(
       configLabel: configLabel(path),
       reasons: [],
       summary: "Check skipped: package.json has no direct dependencies.",
-      warnings: [],
+      warnings: trustWarnings,
       infos: [],
       affectedPackages: []
     };
@@ -157,7 +178,11 @@ export async function runCheckFlow(
   });
 
   const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
-  const warnings = [...evaluations.flatMap((evaluation) => evaluation.warnings), ...transitive.warnings];
+  const warnings = [
+    ...trustWarnings,
+    ...evaluations.flatMap((evaluation) => evaluation.warnings),
+    ...transitive.warnings
+  ];
   const infos = evaluations.flatMap((evaluation) => evaluation.infos);
   const directBlockReasons = blocked.flatMap((evaluation) => evaluation.blockedReasons);
   const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons];

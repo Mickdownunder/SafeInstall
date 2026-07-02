@@ -242,7 +242,10 @@ export async function runGuardSetupFlow(
     warnings: [
       "The guard requires the safeinstall binary on the agent's PATH (npm install -g safeinstall-cli)."
     ],
-    infos,
+    infos: [
+      ...infos,
+      "Next: run `safeinstall trust lock` to baseline the Agent Trust Surface, so hook and policy tampering is detected."
+    ],
     affectedPackages: [],
     details: { results: results.map(({ client, configPath, status }) => ({ client, configPath, status })) }
   };

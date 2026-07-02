@@ -3,6 +3,8 @@ import path from "node:path";
 import { analyzeShellCommand } from "./guard-commands";
 import type { GuardRunnerMatch } from "./guard-commands";
 import { findNearestUpward } from "./project-discovery";
+import { checkTrustSurface, isTrustSurfacePath, partitionTrustFindings } from "./trust-surface";
+import type { TrustSurfaceStatus } from "./trust-surface";
 
 /**
  * `safeinstall guard <claude|cursor>` — a pre-shell-execution hook for AI
@@ -103,8 +105,99 @@ async function resolvesLocally(runner: GuardRunnerMatch, cwd: string): Promise<b
   return binPath !== undefined;
 }
 
+const TRUST_APPROVE_INSTRUCTION =
+  "Tell the user to review the drift with `safeinstall trust status` and, if it is intentional, " +
+  "approve it with `safeinstall trust approve` in their own terminal. Do not attempt to run the " +
+  "approval yourself — it refuses non-interactive contexts.";
+
+/**
+ * Trust-surface reconciliation, evaluated before any command analysis.
+ * Inactive projects (no trust lock) return undefined and cost only a few
+ * file stats. Deviations turn into decisions:
+ * - lockdown findings (enforcement drift, hidden Unicode, broken ledger)
+ *   deny every command until a human approves,
+ * - tool findings (MCP drift) deny installs and runners only,
+ * - shell writes targeting protected files are denied outright.
+ */
+async function decideTrustSurface(
+  command: string,
+  cwd: string,
+  analysis: ReturnType<typeof analyzeShellCommand>
+): Promise<GuardDecision | undefined> {
+  let status: TrustSurfaceStatus;
+  try {
+    status = await checkTrustSurface(cwd);
+  } catch (error) {
+    // The reconciliation itself failing is an enforcement-surface problem:
+    // fail closed rather than silently dropping the trust layer.
+    return {
+      action: "deny",
+      userMessage: "SafeInstall could not verify the Agent Trust Surface.",
+      agentMessage: `SafeInstall guard: trust-surface verification failed (${error instanceof Error ? error.message : String(error)}). ${TRUST_APPROVE_INSTRUCTION}`
+    };
+  }
+
+  if (!status.active || !status.root) {
+    return undefined;
+  }
+
+  const { lockdown, tool } = partitionTrustFindings(status.findings);
+
+  if (lockdown.length > 0) {
+    const details = lockdown.map((finding) => `- ${finding.message}`).join("\n");
+    return {
+      action: "deny",
+      userMessage: "SafeInstall locked down agent commands: the Agent Trust Surface has drifted.",
+      agentMessage:
+        "SafeInstall guard: the files that configure SafeInstall or this agent were changed without approval:\n" +
+        `${details}\n${TRUST_APPROVE_INSTRUCTION}`
+    };
+  }
+
+  const protectedWrite = analysis.writeTargets.find((target) =>
+    isTrustSurfacePath(status.root as string, path.resolve(cwd, target))
+  );
+  if (protectedWrite) {
+    return {
+      action: "deny",
+      userMessage: `SafeInstall blocked a write to the protected file ${protectedWrite}.`,
+      agentMessage:
+        `SafeInstall guard: ${JSON.stringify(protectedWrite)} is part of the Agent Trust Surface ` +
+        "(SafeInstall policy, agent hooks, rules files, MCP configs). Agents must not modify it. " +
+        "If the user wants this change, they can make it themselves and approve it with `safeinstall trust approve`."
+    };
+  }
+
+  if (tool.length > 0 && (analysis.installs.length > 0 || analysis.runners.length > 0 || analysis.unanalyzable.length > 0)) {
+    const details = tool.map((finding) => `- ${finding.message}`).join("\n");
+    return {
+      action: "deny",
+      userMessage: "SafeInstall blocked installs: the agent tool surface (MCP config) changed without approval.",
+      agentMessage:
+        "SafeInstall guard: the MCP/tool configuration changed without approval, so package installs and " +
+        `runners are blocked until a human reviews it:\n${details}\n${TRUST_APPROVE_INSTRUCTION}`
+    };
+  }
+
+  // Warn-mode instruction drift and unpinned-MCP warnings do not change the
+  // verdict, but must not be silent: emit them to stderr (the guard's
+  // diagnostic channel; stdout stays the hook protocol).
+  if (status.instructionWarnings.length > 0) {
+    for (const warning of status.instructionWarnings) {
+      process.stderr.write(`safeinstall guard: trust-surface warning: ${warning}\n`);
+    }
+  }
+
+  return undefined;
+}
+
 export async function decideGuard(command: string, cwd: string = process.cwd()): Promise<GuardDecision> {
   const analysis = analyzeShellCommand(command);
+
+  const trustDecision = await decideTrustSurface(command, cwd, analysis);
+  if (trustDecision) {
+    return trustDecision;
+  }
 
   if (analysis.unanalyzable.length > 0) {
     const reasons = analysis.unanalyzable

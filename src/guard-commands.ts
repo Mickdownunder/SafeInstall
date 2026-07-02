@@ -54,6 +54,13 @@ export interface GuardCommandAnalysis {
   /** True when at least one segment already runs through `safeinstall`. */
   usesSafeInstall: boolean;
   /**
+   * File paths the command writes to or deletes, as far as the analysis can
+   * tell: redirection targets (`> file`) and arguments of common in-place
+   * writers and removers (tee, sed -i, rm, mv, cp). Used by the trust
+   * surface to intercept shell-level tampering with protected files.
+   */
+  writeTargets: string[];
+  /**
    * The full command with every raw install segment prefixed with
    * `safeinstall ` (and alias subcommands canonicalized). Only present when
    * there is at least one install and no unanalyzable segment, i.e. when the
@@ -85,6 +92,10 @@ interface ShellSegment {
 
 const SEGMENT_SEPARATORS = new Set(["&&", "||", ";", "|", "&", "\n"]);
 const REDIRECTION_OPERATORS = new Set([">", ">>", "<", "<<", "2>", "2>>", "&>", "&>>", ">&", "<<<"]);
+/** Redirections that write to (or truncate) their target file. */
+const WRITE_REDIRECTIONS = new Set([">", ">>", "2>", "2>>", "&>", "&>>", ">&"]);
+/** Executables whose non-flag arguments are files they write to or remove. */
+const FILE_WRITER_EXECUTABLES = new Set(["tee", "rm", "unlink", "mv", "cp", "truncate", "shred"]);
 const PACKAGE_MANAGERS = new Set<string>(["npm", "pnpm", "bun"]);
 const WRAPPER_COMMANDS = new Set(["sudo", "command", "nohup", "time", "env", "exec", "corepack"]);
 
@@ -448,6 +459,42 @@ interface SegmentFinding {
   runner?: GuardRunnerMatch;
   unanalyzable?: GuardUnanalyzableSegment;
   usesSafeInstall?: boolean;
+  writeTargets?: string[];
+}
+
+/**
+ * Collect the files a segment writes to or deletes: targets of write
+ * redirections plus the non-flag arguments of common file writers/removers
+ * (tee, sed -i, rm, mv, cp). Best effort — the reconciliation layer catches
+ * whatever slips past this interception layer.
+ */
+function collectWriteTargets(tokens: ShellToken[], commandIndex: number): string[] {
+  const targets: string[] = [];
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (WRITE_REDIRECTIONS.has(tokens[index].value)) {
+      const target = tokens[index + 1]?.value;
+      if (target && target !== "/dev/null") {
+        targets.push(target);
+      }
+      index += 1;
+    }
+  }
+
+  if (commandIndex >= 0 && commandIndex < tokens.length) {
+    const executable = basename(tokens[commandIndex].value);
+    const args = stripRedirections(tokens.slice(commandIndex + 1));
+    const isInPlaceSed = executable === "sed" && args.some((token) => token.value === "-i" || token.value.startsWith("-i"));
+    if (FILE_WRITER_EXECUTABLES.has(executable) || isInPlaceSed) {
+      for (const token of args) {
+        if (!token.value.startsWith("-")) {
+          targets.push(token.value);
+        }
+      }
+    }
+  }
+
+  return targets;
 }
 
 /**
@@ -499,6 +546,13 @@ function createRunnerFinding(
 }
 
 function analyzeSegment(segment: ShellSegment, command: string): SegmentFinding {
+  const finding = analyzeSegmentCore(segment, command);
+  const { index } = findCommandTokenIndex(segment.tokens);
+  const writeTargets = collectWriteTargets(segment.tokens, index);
+  return writeTargets.length > 0 ? { ...finding, writeTargets } : finding;
+}
+
+function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFinding {
   const segmentText = command.slice(segment.start, segment.end).trim();
   const { index: commandIndex, corepackToken } = findCommandTokenIndex(segment.tokens);
 
@@ -657,6 +711,7 @@ export function analyzeShellCommand(command: string): GuardCommandAnalysis {
   const installs: NonNullable<SegmentFinding["install"]>[] = [];
   const runners: GuardRunnerMatch[] = [];
   const unanalyzable: GuardUnanalyzableSegment[] = [];
+  const writeTargets: string[] = [];
   let usesSafeInstall = false;
 
   for (const segment of segments) {
@@ -669,6 +724,9 @@ export function analyzeShellCommand(command: string): GuardCommandAnalysis {
     }
     if (finding.unanalyzable) {
       unanalyzable.push(finding.unanalyzable);
+    }
+    if (finding.writeTargets) {
+      writeTargets.push(...finding.writeTargets);
     }
     if (finding.usesSafeInstall) {
       usesSafeInstall = true;
@@ -714,6 +772,7 @@ export function analyzeShellCommand(command: string): GuardCommandAnalysis {
     runners,
     unanalyzable,
     usesSafeInstall,
+    writeTargets,
     rewrittenCommand
   };
 }

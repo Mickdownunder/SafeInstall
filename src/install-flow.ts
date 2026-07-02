@@ -9,6 +9,7 @@ import { RegistryClient } from "./registry";
 import { throwIfAborted } from "./signals";
 import { buildInstallPlan, parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
+import { trustSurfacePrecheck } from "./trust-surface";
 import type { CliReason, CliResult, PackageEvaluation } from "./types";
 
 export interface InstallFlowOptions {
@@ -133,6 +134,30 @@ export async function runInstallFlow(
   const { config, path } = await loadConfig(invocation.effectiveCwd, options.configPath);
   const commandString = formatCommand("safeinstall", argv);
 
+  const trust = await trustSurfacePrecheck(invocation.effectiveCwd);
+  if (trust.reasons.length > 0) {
+    return {
+      mode: "install",
+      decision: "block",
+      exitCode: 2,
+      exitCodeMeaning: "Install was blocked because the Agent Trust Surface has drifted.",
+      command: argv,
+      commandString,
+      configPath: path,
+      configLabel: configLabel(path),
+      packageManager: rawPlan.manager,
+      reasons: trust.reasons,
+      summary: "Install blocked.",
+      warnings: trust.warnings,
+      infos: [],
+      affectedPackages: [],
+      execution: {
+        ranPackageManager: false
+      }
+    };
+  }
+  const trustWarnings = trust.warnings;
+
   if (hasAmbiguousWorkspaceFlags(rawPlan.manager, [...rawPlan.managerArgs, ...rawPlan.forwardedArgs])) {
     return {
       mode: "install",
@@ -152,7 +177,7 @@ export async function runInstallFlow(
         }
       ],
       summary: "Install blocked.",
-      warnings: [],
+      warnings: trustWarnings,
       infos: [],
       affectedPackages: [],
       execution: {
@@ -180,7 +205,7 @@ export async function runInstallFlow(
         }
       ],
       summary: "Install blocked.",
-      warnings: [],
+      warnings: trustWarnings,
       infos: [],
       affectedPackages: [],
       execution: {
@@ -208,7 +233,7 @@ export async function runInstallFlow(
       packageManager: plan.manager,
       reasons: issues,
       summary: "Install blocked.",
-      warnings: [],
+      warnings: trustWarnings,
       infos: [],
       affectedPackages: [],
       execution: {
@@ -235,7 +260,7 @@ export async function runInstallFlow(
         }
       ],
       summary: "Install failed: no packages found.",
-      warnings: [],
+      warnings: trustWarnings,
       infos: [],
       affectedPackages: [],
       execution: {
@@ -262,7 +287,11 @@ export async function runInstallFlow(
   });
 
   const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
-  const warnings = [...evaluations.flatMap((evaluation) => evaluation.warnings), ...transitive.warnings];
+  const warnings = [
+    ...trustWarnings,
+    ...evaluations.flatMap((evaluation) => evaluation.warnings),
+    ...transitive.warnings
+  ];
   const infos = evaluations.flatMap((evaluation) => evaluation.infos);
   const directBlockReasons = blocked.flatMap((evaluation) => evaluation.blockedReasons);
   const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons];
