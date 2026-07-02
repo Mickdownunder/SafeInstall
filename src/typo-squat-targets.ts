@@ -1,12 +1,12 @@
 /**
  * Curated list of popular npm package names that are frequent typo-squat
- * targets. The list is intentionally hand-maintained for the 0.2.0 release
- * so the shipped tarball has zero network dependencies at runtime.
+ * targets. The list ships with the package so the tarball has zero network
+ * dependencies at runtime.
  *
  * To refresh this list, run `node scripts/refresh-typo-squat-targets.mjs`
- * which pulls a fresh top-N from a known source and updates this file in
- * place. The refresh is run manually before each release, not at build
- * time, so the shipped package is deterministic.
+ * which pulls a fresh top-N from npm-high-impact and merges it into this
+ * file in place. The refresh is run manually before each release, not at
+ * build time, so the shipped package is deterministic.
  *
  * Package names are stored lowercase. Scoped packages are included with
  * their scope (e.g. `@types/node`). The list is intentionally focused on

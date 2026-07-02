@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Restored `scripts/refresh-typo-squat-targets.mjs`.** The script referenced from `src/typo-squat-targets.ts` was missing from the repository. It now fetches the top-N packages from `npm-high-impact` (pinned version, parsed as data only — no remote code execution) and merges them into the shipped target list without dropping curated entries.
 - **`SECURITY.md` supported-versions table** updated from the stale 0.2.x window to 0.8.x.
 
 ## 0.8.0 - 2026-06-23
