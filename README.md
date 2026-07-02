@@ -1,7 +1,7 @@
 <p align="center">
   <strong>SafeInstall</strong>
   <br />
-  <em>Stop risky package installs before they run.</em>
+  <em>Supply-chain security for the AI-agent era.</em>
 </p>
 
 <p align="center">
@@ -10,13 +10,24 @@
   <a href="https://github.com/Mickdownunder/SafeInstall"><img src="https://img.shields.io/github/stars/Mickdownunder/SafeInstall?style=flat-square" alt="stars" /></a>
   <a href="https://github.com/Mickdownunder/SafeInstall"><img src="https://img.shields.io/badge/TypeScript-strict-blue?style=flat-square" alt="TypeScript" /></a>
   <a href="https://safeinstall.dev"><img src="https://img.shields.io/badge/docs-safeinstall.dev-22c55e?style=flat-square" alt="docs" /></a>
+  <a href="https://github.com/Mickdownunder/SafeInstall/actions/workflows/safeinstall-trust.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mickdownunder/SafeInstall/safeinstall-trust.yml?branch=main&style=flat-square&label=trust%20surface&color=22c55e" alt="trust surface" /></a>
 </p>
 
 <p align="center">
-  Local-first CLI wrapper for <strong>npm</strong>, <strong>pnpm</strong>, and <strong>bun</strong>.<br />
+  The install gate for <strong>npm</strong>, <strong>pnpm</strong>, and <strong>bun</strong> — for the humans who type <code>install</code>, the AI agents that run it for them, and the config that programs those agents.<br />
   Policy runs first. Then your package manager. Not the other way around.<br /><br />
-  Open source · MIT licensed · Free forever
+  Local-first · No cloud · No account · MIT · Free forever
 </p>
+
+---
+
+## What it does
+
+SafeInstall runs your **policy before your package manager** — locally, blocking by default. One tool, three layers of defense:
+
+- 🧑‍💻 **For the humans who install** — prefix any command: `safeinstall pnpm add axios`. Policy runs, then pnpm. Release age, install scripts, untrusted sources, typo-squats, and cryptographic provenance are [checked before anything touches disk](#policy-defaults).
+- 🤖 **For the AI agents that install for you** — an [MCP tool](#mcp-server--ai-agents) agents can call, plus an [enforced shell guard](#agent-guard--enforcement-not-advice) that intercepts every install command in Claude Code and Cursor *before it runs* — whether or not the agent cooperates.
+- 🔒 **For the files that program the agents** — the [Agent Trust Surface](#agent-trust-surface--self-defending-policy): a committed hash baseline of your config, hooks, rules, and MCP files, reconciled locally and re-verified in CI, so a prompt-injected agent can't quietly weaken the rules and own every future session.
 
 ---
 
@@ -162,7 +173,7 @@ Release-age, typo-squat, and provenance are deliberately **not** run transitivel
 
 ### Typo-squat detection
 
-A new policy check in 0.2.0 that flags install requests whose package name is a close-but-not-exact match to a well-known popular package. It catches the most common supply-chain attack pattern: `lodsh` for `lodash`, `axois` for `axios`, `raect` for `react`, and so on.
+Flags install requests whose package name is a close-but-not-exact match to a well-known popular package — the most common supply-chain attack pattern: `lodsh` for `lodash`, `axois` for `axios`, `raect` for `react`, and so on.
 
 - **Algorithm:** Damerau-Levenshtein distance (transpositions count as a single edit)
 - **Target list:** curated set of popular ecosystem packages, embedded at build time (no runtime network fetch)
@@ -171,7 +182,7 @@ A new policy check in 0.2.0 that flags install requests whose package name is a 
 
 ### Provenance verification
 
-A new policy check in 0.2.0 that **cryptographically verifies** the npm provenance attestation for registry installs and optionally **pins the source repository** via per-package trusted publisher patterns.
+**Cryptographically verifies** the npm provenance attestation for registry installs and optionally **pins the source repository** via per-package trusted publisher patterns.
 
 - Fetches the attestation bundle from the npm registry's `/-/npm/v1/attestations/<pkg>@<version>` endpoint
 - Verifies the Sigstore bundle via the official `sigstore` package (signatures, Rekor transparency log, Sigstore public trust root)
