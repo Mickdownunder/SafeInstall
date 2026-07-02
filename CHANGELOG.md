@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **`SECURITY.md` supported-versions table** updated from the stale 0.2.x window to 0.8.x.
+
 ## 0.8.0 - 2026-06-23
 
 ### Added
