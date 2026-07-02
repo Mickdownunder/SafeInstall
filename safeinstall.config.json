@@ -1,0 +1,31 @@
+{
+  "minimumReleaseAgeHours": 72,
+  "registryUrl": "https://registry.npmjs.org",
+  "allowedScripts": {},
+  "allowedSources": ["registry", "workspace", "file", "directory"],
+  "allowedPackages": [],
+  "packageManagerDefaults": {
+    "npm": { "ignoreScripts": true },
+    "pnpm": { "ignoreScripts": true },
+    "bun": { "ignoreScripts": true }
+  },
+  "typoSquat": {
+    "mode": "warn",
+    "minNameLength": 4,
+    "ignore": []
+  },
+  "provenance": {
+    "mode": "warn",
+    "requireFor": [],
+    "trustedPublishers": {},
+    "offlineBehavior": "fail-closed"
+  },
+  "transitive": {
+    "mode": "warn",
+    "checks": ["install-script", "untrusted-source"]
+  },
+  "continuity": {
+    "mode": "warn",
+    "baselineSize": 5
+  }
+}

@@ -1,0 +1,8 @@
+# The Agent Trust Surface only enforces if changes to it require human review.
+# The automatic CI check (safeinstall-trust.yml) catches inconsistent
+# tampering; a fully consistent rewrite of the whole baseline in one PR is only
+# caught by a human reviewing these diffs. SafeInstall dogfoods its own advice.
+/.safeinstall/            @Mickdownunder
+/safeinstall.config.json  @Mickdownunder
+/.github/workflows/       @Mickdownunder
+/.github/CODEOWNERS       @Mickdownunder
