@@ -40,6 +40,16 @@ inputs:
       builds.
     required: false
     default: "latest"
+  verify-trust:
+    description: >
+      When "true", verify the Agent Trust Surface before running the
+      policy check: the committed .safeinstall/trust-surface.lock must
+      exist and match the repository state. This catches tampering with
+      SafeInstall config, agent hooks, rules files, and MCP configs —
+      even when the tampering happened on a fully compromised local
+      machine, because CI re-verifies the committed baseline.
+    required: false
+    default: "false"
 
 outputs:
   decision:
@@ -61,6 +71,25 @@ runs:
     - name: Install SafeInstall CLI
       shell: bash
       run: npm install -g "safeinstall-cli@${{ inputs.version }}"
+
+    - name: Verify trust surface
+      if: ${{ inputs.verify-trust == 'true' }}
+      shell: bash
+      run: |
+        set +e
+        OUTPUT=$(safeinstall trust status --require-lock --json 2>/dev/null)
+        EXIT_CODE=$?
+
+        if [ $EXIT_CODE -ne 0 ]; then
+          echo "### :x: SafeInstall — Trust surface drift" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          echo "$OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$OUTPUT"
+        fi
+
+        exit $EXIT_CODE
 
     - name: Run SafeInstall
       id: run
