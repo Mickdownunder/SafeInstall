@@ -16,6 +16,11 @@ describe("extractRequestedSpecs", () => {
   it("handles local file and directory install targets", () => {
     expect(extractRequestedSpecs(["file:../pkg.tgz", "./packages/a"])).toEqual(["file:../pkg.tgz", "./packages/a"]);
   });
+
+  it("treats tokens after -- as package specs so they cannot bypass evaluation", () => {
+    expect(extractRequestedSpecs(["axios", "--", "evil-pkg"])).toEqual(["axios", "evil-pkg"]);
+    expect(extractRequestedSpecs(["--", "evil-pkg"])).toEqual(["evil-pkg"]);
+  });
 });
 
 describe("buildInstallPlan", () => {

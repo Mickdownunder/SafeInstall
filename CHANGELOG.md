@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- **Policy bypass via `--` (security).** `safeinstall npm install -- evil-pkg` previously evaluated *nothing* (spec extraction stopped at `--`) while npm still installed the package, because package managers treat post-`--` tokens as positional package specs for install commands. Tokens after `--` are now extracted and evaluated like any other spec.
 - **GitHub Action `config-path` input now works.** The action documented a `config-path` input but never passed it to the CLI (and the CLI had no flag to receive it). The input is now forwarded as `--config` in both `check` and `install` modes.
 - **Restored `scripts/refresh-typo-squat-targets.mjs`.** The script referenced from `src/typo-squat-targets.ts` was missing from the repository. It now fetches the top-N packages from `npm-high-impact` (pinned version, parsed as data only — no remote code execution) and merges them into the shipped target list without dropping curated entries.
 - **`SECURITY.md` supported-versions table** updated from the stale 0.2.x window to 0.8.x.

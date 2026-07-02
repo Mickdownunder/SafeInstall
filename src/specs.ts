@@ -59,12 +59,23 @@ function isFlag(token: string): boolean {
 
 export function extractRequestedSpecs(args: string[]): string[] {
   const specs: string[] = [];
+  let positionalOnly = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
 
-    if (token === "--") {
-      break;
+    if (token === "--" && !positionalOnly) {
+      // Everything after `--` is positional. For install commands the
+      // package managers treat those tokens as package specs, so skipping
+      // them would let `npm install -- evil` bypass evaluation entirely
+      // while npm still installs the package.
+      positionalOnly = true;
+      continue;
+    }
+
+    if (positionalOnly) {
+      specs.push(token);
+      continue;
     }
 
     if (!isFlag(token)) {
