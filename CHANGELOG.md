@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Install-command aliases.** `safeinstall npm i axios`, `pnpm i`, `bun a zod`, `npm clean-install` and the other documented package-manager aliases now work; previously only the canonical `install`/`add`/`ci` spellings were accepted. `--dir`, `--workspace`, and `--lockfile-dir` are also recognized as value-taking flags, so their values are no longer mistaken for subcommands or package specs.
+
 - **`--config <path>` global flag.** All commands accept an explicit config file path (also as `--config=path`), skipping upward discovery. An explicit path that cannot be read is a hard error (exit 1), never a silent fallback to built-in defaults — CI cannot accidentally run with a weaker policy than intended.
 
 ### Fixed

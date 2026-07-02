@@ -2,21 +2,24 @@ import npa from "npm-package-arg";
 
 import type { InstallPlan, PackageManagerName, RequestedPackage, SourceType } from "./types";
 
-const FLAGS_WITH_VALUES = new Set([
+export const FLAGS_WITH_VALUES = new Set([
   "-C",
   "-c",
   "-w",
   "--cache",
   "--config",
   "--cwd",
+  "--dir",
   "--filter",
   "--global-dir",
+  "--lockfile-dir",
   "--prefix",
   "--registry",
   "--save-prefix",
   "--store-dir",
   "--tag",
-  "--userconfig"
+  "--userconfig",
+  "--workspace"
 ]);
 
 function classifySourceType(result: npa.Result): SourceType {
@@ -138,17 +141,52 @@ function parseRequestedPackage(raw: string): RequestedPackage {
   };
 }
 
-function isSupportedInstallCommand(manager: PackageManagerName, command: string): boolean {
+const NPM_INSTALL_ALIASES = new Set([
+  "install",
+  "i",
+  "add",
+  "in",
+  "ins",
+  "inst",
+  "insta",
+  "instal",
+  "isnt",
+  "isnta",
+  "isntal",
+  "isntall"
+]);
+const NPM_CI_ALIASES = new Set(["ci", "clean-install", "ic", "install-clean", "isntall-clean"]);
+
+/**
+ * Map a package-manager subcommand (including documented aliases like
+ * `npm i` or `bun a`) to its canonical install command, or undefined when
+ * the subcommand is not an install/add/ci flow SafeInstall gates.
+ */
+export function normalizeInstallCommand(
+  manager: PackageManagerName,
+  command: string
+): string | undefined {
   const normalized = command.toLowerCase();
+
   if (manager === "npm") {
-    return normalized === "install" || normalized === "ci";
+    if (NPM_INSTALL_ALIASES.has(normalized)) {
+      return "install";
+    }
+    if (NPM_CI_ALIASES.has(normalized)) {
+      return "ci";
+    }
+    return undefined;
   }
 
-  if (manager === "pnpm") {
-    return normalized === "install" || normalized === "add";
+  // pnpm and bun: `install`/`i` resolve the whole project, `add` (and bun's
+  // `a`) add new dependencies.
+  if (normalized === "install" || normalized === "i") {
+    return "install";
   }
-
-  return normalized === "install" || normalized === "add";
+  if (normalized === "add" || (manager === "bun" && normalized === "a")) {
+    return "add";
+  }
+  return undefined;
 }
 
 function splitManagerArgsAndCommand(argv: string[]): {
@@ -192,7 +230,8 @@ function splitManagerArgsAndCommand(argv: string[]): {
 export function buildInstallPlan(argv: string[]): InstallPlan {
   const { manager, managerArgs, command, forwardedArgs } = splitManagerArgsAndCommand(argv);
 
-  if (!isSupportedInstallCommand(manager, command)) {
+  const canonicalCommand = normalizeInstallCommand(manager, command);
+  if (!canonicalCommand) {
     throw new Error(`Unsupported command: ${manager} ${command}. SafeInstall supports install/add flows only.`);
   }
 
@@ -201,7 +240,7 @@ export function buildInstallPlan(argv: string[]): InstallPlan {
 
   return {
     manager,
-    command,
+    command: canonicalCommand,
     managerArgs,
     forwardedArgs,
     packages,

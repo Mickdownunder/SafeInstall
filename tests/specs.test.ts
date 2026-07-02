@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildInstallPlan, extractRequestedSpecs, parseManifestDependency } from "../src/specs";
+import {
+  buildInstallPlan,
+  extractRequestedSpecs,
+  normalizeInstallCommand,
+  parseManifestDependency
+} from "../src/specs";
 
 describe("extractRequestedSpecs", () => {
   it("extracts package specs from install args with flags", () => {
@@ -71,6 +76,44 @@ describe("buildInstallPlan", () => {
     expect(plan.managerArgs).toEqual(["-C", "packages/app"]);
     expect(plan.forwardedArgs).toEqual([]);
     expect(plan.projectInstall).toBe(true);
+  });
+
+  it("canonicalizes install aliases like npm i and bun a", () => {
+    expect(buildInstallPlan(["npm", "i", "axios"]).command).toBe("install");
+    expect(buildInstallPlan(["npm", "add", "axios"]).command).toBe("install");
+    expect(buildInstallPlan(["pnpm", "i"]).command).toBe("install");
+    expect(buildInstallPlan(["bun", "i"]).command).toBe("install");
+    expect(buildInstallPlan(["bun", "a", "zod"]).command).toBe("add");
+  });
+
+  it("still rejects non-install commands", () => {
+    expect(() => buildInstallPlan(["npm", "test"])).toThrow("Unsupported command");
+    expect(() => buildInstallPlan(["pnpm", "dlx", "create-app"])).toThrow("Unsupported command");
+  });
+});
+
+describe("normalizeInstallCommand", () => {
+  it("maps npm install aliases to install", () => {
+    for (const alias of ["install", "i", "add", "in", "isntall"]) {
+      expect(normalizeInstallCommand("npm", alias)).toBe("install");
+    }
+  });
+
+  it("maps npm ci aliases to ci", () => {
+    expect(normalizeInstallCommand("npm", "ci")).toBe("ci");
+    expect(normalizeInstallCommand("npm", "clean-install")).toBe("ci");
+  });
+
+  it("keeps pnpm add distinct from install", () => {
+    expect(normalizeInstallCommand("pnpm", "add")).toBe("add");
+    expect(normalizeInstallCommand("pnpm", "i")).toBe("install");
+    expect(normalizeInstallCommand("pnpm", "dlx")).toBeUndefined();
+  });
+
+  it("returns undefined for non-install commands", () => {
+    expect(normalizeInstallCommand("npm", "test")).toBeUndefined();
+    expect(normalizeInstallCommand("npm", "run")).toBeUndefined();
+    expect(normalizeInstallCommand("bun", "x")).toBeUndefined();
   });
 });
 
