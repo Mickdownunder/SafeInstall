@@ -79,9 +79,9 @@ runs:
         fi
 
         if [ "$SAFEINSTALL_MODE" = "install" ]; then
-          CMD="safeinstall --json $SAFEINSTALL_PM install $SAFEINSTALL_ARGS"
+          CMD="safeinstall --json $CONFIG_FLAG $SAFEINSTALL_PM install $SAFEINSTALL_ARGS"
         else
-          CMD="safeinstall check --json"
+          CMD="safeinstall check --json $CONFIG_FLAG"
         fi
 
         echo "::group::SafeInstall command"

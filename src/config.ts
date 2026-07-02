@@ -381,13 +381,36 @@ export function serializeConfig(config: SafeInstallConfig): string {
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 
-export async function loadConfig(startDir: string): Promise<{ config: SafeInstallConfig; path?: string }> {
-  const configPath = await findConfigFile(startDir);
-  if (!configPath) {
-    return { config: createDefaultConfig() };
+export async function loadConfig(
+  startDir: string,
+  explicitPath?: string
+): Promise<{ config: SafeInstallConfig; path?: string }> {
+  let configPath: string | undefined;
+
+  if (explicitPath) {
+    // An explicit path is a hard requirement: failing to read it must error
+    // rather than silently fall back to defaults, so CI cannot run with a
+    // weaker policy than the caller intended.
+    configPath = path.resolve(startDir, explicitPath);
+  } else {
+    configPath = await findConfigFile(startDir);
+    if (!configPath) {
+      return { config: createDefaultConfig() };
+    }
   }
 
-  const rawText = await readFile(configPath, "utf8");
+  let rawText: string;
+  try {
+    rawText = await readFile(configPath, "utf8");
+  } catch (error) {
+    if (explicitPath) {
+      throw new Error(
+        `Config error: cannot read config file at ${configPath} (${error instanceof Error ? error.message : String(error)}).`
+      );
+    }
+    throw error;
+  }
+
   const parsed = JSON.parse(rawText) as Partial<SafeInstallConfig>;
   return {
     config: mergeConfig(parsed),

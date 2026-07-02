@@ -14,6 +14,7 @@ import type { CliReason, CliResult, PackageEvaluation } from "./types";
 export interface InstallFlowOptions {
   jsonMode: boolean;
   signal?: AbortSignal;
+  configPath?: string;
 }
 
 function configLabel(configPath?: string): string {
@@ -129,7 +130,7 @@ export async function runInstallFlow(
 
   const rawPlan = buildInstallPlan(argv);
   const invocation = await resolveInvocationContext(cwd, [...rawPlan.managerArgs, ...rawPlan.forwardedArgs]);
-  const { config, path } = await loadConfig(invocation.effectiveCwd);
+  const { config, path } = await loadConfig(invocation.effectiveCwd, options.configPath);
   const commandString = formatCommand("safeinstall", argv);
 
   if (hasAmbiguousWorkspaceFlags(rawPlan.manager, [...rawPlan.managerArgs, ...rawPlan.forwardedArgs])) {

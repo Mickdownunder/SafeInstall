@@ -34,6 +34,8 @@ function printHelp(): void {
       "",
       "Global options:",
       "  --json       Emit machine-readable JSON output.",
+      "  --config <path>  Use an explicit safeinstall.config.json instead of",
+      "               discovering the nearest config by walking upward.",
       "  --help, -h   Show this help text.",
       "  --version, -v  Show the current SafeInstall version."
     ].join("\n") + "\n"
@@ -42,7 +44,17 @@ function printHelp(): void {
 
 async function main(): Promise<void> {
   const [, , ...rawArgv] = process.argv;
-  const { args: argv, json } = parseCliOptions(rawArgv);
+
+  let parsedOptions: ReturnType<typeof parseCliOptions>;
+  try {
+    parsedOptions = parseCliOptions(rawArgv);
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const { args: argv, json, configPath } = parsedOptions;
   const shutdown = createShutdownController();
 
   try {
@@ -70,7 +82,8 @@ async function main(): Promise<void> {
 
     if (argv[0] === "check") {
       result = await runCheckFlow(process.cwd(), argv, {
-        signal: shutdown.signal
+        signal: shutdown.signal,
+        configPath
       });
       writeCliResult(result, json);
       process.exitCode = result.exitCode;
@@ -88,7 +101,8 @@ async function main(): Promise<void> {
 
     result = await runInstallFlow(process.cwd(), argv, {
       jsonMode: json,
-      signal: shutdown.signal
+      signal: shutdown.signal,
+      configPath
     });
     writeCliResult(result, json);
     process.exitCode = result.exitCode;

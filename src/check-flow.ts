@@ -61,12 +61,12 @@ function createAffectedPackage(evaluation: PackageEvaluation) {
 export async function runCheckFlow(
   cwd: string,
   argv: string[],
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; configPath?: string } = {}
 ): Promise<CliResult> {
   throwIfAborted(options.signal);
 
   const invocation = await resolveInvocationContext(cwd, []);
-  const { config, path } = await loadConfig(invocation.effectiveCwd);
+  const { config, path } = await loadConfig(invocation.effectiveCwd, options.configPath);
   const projectTargets = await inferProjectInstallTargetsForCheck(
     invocation.effectiveCwd,
     invocation.packageDir

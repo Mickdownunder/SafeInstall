@@ -210,6 +210,9 @@ safeinstall --version
 
 # JSON output (CI/automation)
 safeinstall --json pnpm add axios
+
+# Explicit config file (skips upward discovery)
+safeinstall --config ./ci/safeinstall.config.json check
 ```
 
 ## Project installs
@@ -279,7 +282,7 @@ The MCP SDK ships as an **optional dependency**, lazily loaded only when `safein
 
 ## Configuration
 
-Optional `safeinstall.config.json` — discovered by walking upward from the project directory.
+Optional `safeinstall.config.json` — discovered by walking upward from the project directory, or passed explicitly with `--config <path>`. An explicit path that cannot be read is an error (exit 1), never a silent fallback to defaults.
 
 ```json
 {

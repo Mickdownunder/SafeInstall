@@ -234,4 +234,51 @@ describe("config", () => {
 
     await expect(loadConfig(cwd)).rejects.toThrow("unknown key");
   });
+
+  it("loads an explicit config path instead of discovering upward", async () => {
+    const cwd = await createTempDir("safeinstall-config-explicit-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ minimumReleaseAgeHours: 1 }, null, 2)
+    );
+    await writeFile(
+      path.join(cwd, "strict.config.json"),
+      JSON.stringify({ minimumReleaseAgeHours: 500 }, null, 2)
+    );
+
+    const { config, path: usedPath } = await loadConfig(cwd, "strict.config.json");
+
+    expect(config.minimumReleaseAgeHours).toBe(500);
+    expect(usedPath).toBe(path.join(cwd, "strict.config.json"));
+  });
+
+  it("resolves an explicit relative config path against the start directory", async () => {
+    const cwd = await createTempDir("safeinstall-config-explicit-rel-");
+    await writeFile(
+      path.join(cwd, "policy.json"),
+      JSON.stringify({ minimumReleaseAgeHours: 24 }, null, 2)
+    );
+
+    const { config } = await loadConfig(cwd, "./policy.json");
+
+    expect(config.minimumReleaseAgeHours).toBe(24);
+  });
+
+  it("fails when an explicit config path does not exist instead of falling back to defaults", async () => {
+    const cwd = await createTempDir("safeinstall-config-explicit-missing-");
+
+    await expect(loadConfig(cwd, "missing.config.json")).rejects.toThrow(
+      "Config error: cannot read config file"
+    );
+  });
+
+  it("still validates the schema of an explicit config file", async () => {
+    const cwd = await createTempDir("safeinstall-config-explicit-invalid-");
+    await writeFile(
+      path.join(cwd, "policy.json"),
+      JSON.stringify({ nonsenseKey: true }, null, 2)
+    );
+
+    await expect(loadConfig(cwd, "policy.json")).rejects.toThrow("unknown key");
+  });
 });

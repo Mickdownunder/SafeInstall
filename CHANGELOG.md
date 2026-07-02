@@ -2,8 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- **`--config <path>` global flag.** All commands accept an explicit config file path (also as `--config=path`), skipping upward discovery. An explicit path that cannot be read is a hard error (exit 1), never a silent fallback to built-in defaults — CI cannot accidentally run with a weaker policy than intended.
+
 ### Fixed
 
+- **GitHub Action `config-path` input now works.** The action documented a `config-path` input but never passed it to the CLI (and the CLI had no flag to receive it). The input is now forwarded as `--config` in both `check` and `install` modes.
 - **Restored `scripts/refresh-typo-squat-targets.mjs`.** The script referenced from `src/typo-squat-targets.ts` was missing from the repository. It now fetches the top-N packages from `npm-high-impact` (pinned version, parsed as data only — no remote code execution) and merges them into the shipped target list without dropping curated entries.
 - **`SECURITY.md` supported-versions table** updated from the stale 0.2.x window to 0.8.x.
 
