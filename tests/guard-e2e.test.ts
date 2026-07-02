@@ -141,7 +141,9 @@ describe("safeinstall guard install (e2e)", () => {
     };
     expect(payload.decision).toBe("allow");
     expect(payload.mode).toBe("guard");
-    expect(payload.infos).toHaveLength(2);
+    // Two client registrations plus the "run trust lock next" hint.
+    expect(payload.infos).toHaveLength(3);
+    expect(payload.infos.some((info) => info.includes("safeinstall trust lock"))).toBe(true);
 
     const claudeRaw = await readFile(path.join(cwd, ".claude", "settings.json"), "utf8");
     const cursorRaw = await readFile(path.join(cwd, ".cursor", "hooks.json"), "utf8");

@@ -1,13 +1,18 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { decideGuard, parseGuardEvent, renderGuardResponse } from "../src/guard-flow";
+import { runTrustLockFlow } from "../src/trust-flow";
 import { cleanupTempDirs, createTempDir } from "./cli-e2e-helpers";
 
 afterAll(async () => {
   await cleanupTempDirs();
+});
+
+beforeEach(async () => {
+  process.env.SAFEINSTALL_STATE_DIR = await createTempDir("safeinstall-state-");
 });
 
 describe("parseGuardEvent", () => {
@@ -158,6 +163,70 @@ describe("decideGuard", () => {
     const cwd = await createTempDir("safeinstall-guard-mixed-");
     const decision = await decideGuard("npm install axios && npx create-next-app", cwd);
     expect(decision.action).toBe("deny");
+  });
+});
+
+describe("decideGuard trust surface", () => {
+  async function lockedProject(): Promise<string> {
+    const root = await createTempDir("safeinstall-guard-trust-");
+    await writeFile(path.join(root, "safeinstall.config.json"), "{}\n");
+    await mkdir(path.join(root, ".cursor"), { recursive: true });
+    await writeFile(path.join(root, ".cursor", "hooks.json"), JSON.stringify({ version: 1 }));
+    await writeFile(path.join(root, "AGENTS.md"), "# rules\n");
+    await runTrustLockFlow(root, ["trust", "lock"]);
+    return root;
+  }
+
+  it("stays out of the way for unlocked projects", async () => {
+    const cwd = await createTempDir("safeinstall-guard-unlocked-");
+    expect(await decideGuard("git status", cwd)).toEqual({ action: "allow" });
+  });
+
+  it("locks down every command when an enforcement file drifted", async () => {
+    const root = await lockedProject();
+    await writeFile(path.join(root, ".cursor", "hooks.json"), JSON.stringify({ version: 1, tampered: true }));
+
+    const decision = await decideGuard("git status", root);
+    expect(decision.action).toBe("deny");
+    expect(decision.agentMessage).toContain("without approval");
+    expect(decision.agentMessage).toContain("safeinstall trust approve");
+  });
+
+  it("denies a shell write that targets a protected file", async () => {
+    const root = await lockedProject();
+    const decision = await decideGuard("echo evil > safeinstall.config.json", root);
+    expect(decision.action).toBe("deny");
+    expect(decision.userMessage).toContain("safeinstall.config.json");
+  });
+
+  it("denies sed -i tampering of an agent rules file", async () => {
+    const root = await lockedProject();
+    const decision = await decideGuard("sed -i 's/x/y/' AGENTS.md", root);
+    expect(decision.action).toBe("deny");
+  });
+
+  it("blocks installs when the MCP tool surface changed but leaves other commands alone", async () => {
+    const root = await createTempDir("safeinstall-guard-tool-");
+    await writeFile(path.join(root, "safeinstall.config.json"), "{}\n");
+    await mkdir(path.join(root, ".cursor"), { recursive: true });
+    await writeFile(
+      path.join(root, ".cursor", "mcp.json"),
+      JSON.stringify({ mcpServers: { gh: { command: "npx", args: ["-y", "gh-mcp@1.0.0"] } } })
+    );
+    await runTrustLockFlow(root, ["trust", "lock"]);
+
+    await writeFile(
+      path.join(root, ".cursor", "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          gh: { command: "npx", args: ["-y", "gh-mcp@1.0.0"] },
+          evil: { command: "npx", args: ["-y", "evil-mcp"] }
+        }
+      })
+    );
+
+    expect((await decideGuard("npm install axios", root)).action).toBe("deny");
+    expect(await decideGuard("git status", root)).toEqual({ action: "allow" });
   });
 });
 
