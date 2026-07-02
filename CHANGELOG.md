@@ -26,7 +26,9 @@
   - Hidden-Unicode detection extended to the implicit bidi mark `U+061C`, soft hyphen, line/paragraph separators, deprecated formatting controls, and interlinear annotation anchors (Trojan-Source class).
   - Unpinned-MCP detection now treats semver ranges (`^1`, `~1`, `1.x`, `*`, `>=1`), not only tags, as floating, and resolves the spec through `-p/--package` and value-taking runner flags. Unpinned servers are surfaced on every reconciliation (warning in warn mode, block in strict mode), not only at lock time.
   - New `safeinstall trust unlock` removes the lock, ledger, and head mirror — including clearing a stale mirror that would otherwise keep reporting `lock-removed`.
-  - The local head mirror is documented as a best-effort signal against naive/accidental history rewrites; a missing mirror is surfaced as a warning (a fresh clone legitimately has none) rather than silently ignored. The durable anchor is CI re-verification of the committed lock.
+  - The local head mirror is documented as a best-effort signal against naive/accidental history rewrites; a missing mirror self-heals from the verified head rather than nagging on every fresh clone. The durable anchor is CI re-verification of the committed lock.
+
+- **`safeinstall trust lock --ci github`** scaffolds the CI re-verification workflow (`.github/workflows/safeinstall-trust.yml`) that runs the SafeInstall Action with `verify-trust: true`, so the committed baseline is re-checked on every pull request on a machine the agent does not control. This closes the gap between "the guarantee lives in CI" and "did the user actually wire up CI". An existing workflow file is never overwritten.
 
 ## 0.9.0 - 2026-07-02
 

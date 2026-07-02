@@ -207,6 +207,7 @@ safeinstall init --force              # overwrite existing config
 safeinstall mcp                       # MCP server for AI coding agents
 safeinstall guard install             # register agent shell hooks (Claude Code, Cursor)
 safeinstall trust lock                # baseline the Agent Trust Surface
+safeinstall trust lock --ci github    # ...and scaffold the CI re-verification workflow
 safeinstall trust status              # reconcile the trust surface (exit 2 on drift; read-only)
 safeinstall trust approve             # review drift and re-baseline (interactive)
 safeinstall trust unlock              # remove the baseline (lock, ledger, head mirror)
@@ -333,12 +334,14 @@ The guard stops raw installs. But a prompt-injected agent does not have to fight
 `safeinstall trust lock` records a hash baseline of that surface. SafeInstall then reconciles the real state against it before guard decisions and before every install/check, and can re-verify it in CI.
 
 ```bash
-safeinstall guard install     # register the hooks
-safeinstall trust lock        # baseline the trust surface (commit .safeinstall/)
-safeinstall trust status      # reconcile — exit 2 on drift (use in CI); read-only
-safeinstall trust approve     # review drift and re-baseline (interactive only)
-safeinstall trust unlock      # remove the baseline (lock, ledger, head mirror)
+safeinstall guard install       # register the hooks
+safeinstall trust lock --ci github  # baseline the surface AND scaffold CI re-verification
+safeinstall trust status        # reconcile — exit 2 on drift (use in CI); read-only
+safeinstall trust approve       # review drift and re-baseline (interactive only)
+safeinstall trust unlock        # remove the baseline (lock, ledger, head mirror)
 ```
+
+`--ci github` writes `.github/workflows/safeinstall-trust.yml`, which re-verifies the committed baseline on every pull request. This is the step that turns the local reconciliation into a real guarantee — commit `.safeinstall/` and that workflow together. An existing workflow file is never overwritten.
 
 ### The three zones
 

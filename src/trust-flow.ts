@@ -4,6 +4,8 @@ import path from "node:path";
 import readline from "node:readline";
 
 import { formatCommand } from "./output";
+import { parseCiProvider, scaffoldCiWorkflow } from "./trust-ci";
+import type { CiProvider } from "./trust-ci";
 import {
   appendLedgerEntry,
   removeLedgerHeadMirror,
@@ -219,13 +221,26 @@ export async function runTrustLockFlow(cwd: string, argv: string[]): Promise<Cli
     });
   }
 
+  const ciProvider = parseCiProvider(argv.slice(2));
+  if (ciProvider instanceof Error) {
+    return baseResult(argv, {
+      decision: "error",
+      exitCode: 1,
+      exitCodeMeaning: "Invalid trust lock arguments.",
+      reasons: [{ code: "trust-invalid-arguments", message: ciProvider.message }],
+      summary: "Trust lock failed."
+    });
+  }
+
   const existing = await findTrustContext(cwd);
   if (existing) {
     const status = await checkTrustSurface(cwd);
     if (status.findings.length === 0 && status.instructionWarnings.length === 0) {
+      const ciInfos = ciProvider ? await scaffoldCi(existing.root, ciProvider) : [];
       return baseResult(argv, {
         exitCodeMeaning: "The trust surface is already locked and matches the baseline.",
-        summary: `Trust surface already locked (${trustLockPath(existing.root)}). Baseline unchanged.`
+        summary: `Trust surface already locked (${trustLockPath(existing.root)}). Baseline unchanged.`,
+        infos: ciInfos
       });
     }
     return baseResult(argv, {
@@ -274,14 +289,35 @@ export async function runTrustLockFlow(cwd: string, argv: string[]): Promise<Cli
   }
 
   await writeBaseline(root, mode, snapshot, "lock-created", true);
+  const ciInfos = ciProvider ? await scaffoldCi(root, ciProvider) : [];
 
   return baseResult(argv, {
     exitCodeMeaning: "The trust surface baseline was created.",
     summary: `Trust surface locked (${snapshot.files.length} file(s), ${snapshot.mcpServers.length} MCP server(s), mode: ${mode}). Commit ${TRUST_LOCK_RELATIVE_PATH} so CI can re-verify it.`,
-    infos: describeSnapshot(snapshot),
+    infos: [...describeSnapshot(snapshot), ...ciInfos],
     warnings: baselineWarnings(snapshot),
     details: { root, lockPath: trustLockPath(root) }
   });
+}
+
+/**
+ * Scaffold the CI re-verification workflow and describe the outcome. Kept
+ * non-fatal: a scaffolding hiccup must not fail an otherwise-successful lock.
+ */
+async function scaffoldCi(root: string, provider: CiProvider): Promise<string[]> {
+  try {
+    const result = await scaffoldCiWorkflow(root, provider);
+    if (result.status === "created") {
+      return [
+        `CI: wrote ${result.path}. Commit it — this workflow re-verifies the trust surface on every pull request, which is the durable anchor.`
+      ];
+    }
+    return [
+      `CI: ${result.path} already exists; left it untouched. Ensure it runs \`safeinstall trust status --require-lock\` (or the action with verify-trust: true).`
+    ];
+  } catch (error) {
+    return [`CI: could not write the workflow (${error instanceof Error ? error.message : String(error)}).`];
+  }
 }
 
 export interface TrustStatusOptions {

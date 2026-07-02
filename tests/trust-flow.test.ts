@@ -82,6 +82,28 @@ describe("runTrustLockFlow", () => {
     expect(result.decision).toBe("error");
     expect(result.reasons.some((reason) => reason.code === "trust-hidden-unicode")).toBe(true);
   });
+
+  it("scaffolds the CI workflow with --ci github and is idempotent", async () => {
+    const root = await seedProject();
+    const first = await runTrustLockFlow(root, ["trust", "lock", "--ci", "github"]);
+    expect(first.decision).toBe("allow");
+    expect(first.infos.some((info) => info.includes(".github/workflows/safeinstall-trust.yml"))).toBe(true);
+
+    const workflow = await readFile(path.join(root, ".github", "workflows", "safeinstall-trust.yml"), "utf8");
+    expect(workflow).toContain("verify-trust");
+
+    // Re-running on the already-locked, clean surface reports the file exists.
+    const second = await runTrustLockFlow(root, ["trust", "lock", "--ci", "github"]);
+    expect(second.decision).toBe("allow");
+    expect(second.infos.some((info) => info.toLowerCase().includes("already exists"))).toBe(true);
+  });
+
+  it("rejects an unsupported --ci provider", async () => {
+    const root = await seedProject();
+    const result = await runTrustLockFlow(root, ["trust", "lock", "--ci", "jenkins"]);
+    expect(result.decision).toBe("error");
+    expect(result.reasons[0].code).toBe("trust-invalid-arguments");
+  });
 });
 
 describe("P1 regression: lock forgery", () => {
