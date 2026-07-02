@@ -205,6 +205,7 @@ safeinstall check --json              # machine-readable
 safeinstall init                      # create starter config
 safeinstall init --force              # overwrite existing config
 safeinstall mcp                       # MCP server for AI coding agents
+safeinstall guard install             # register agent shell hooks (Claude Code, Cursor)
 safeinstall --help
 safeinstall --version
 
@@ -277,6 +278,47 @@ Then paste the rule from [`mcp/agent-rule.md`](mcp/agent-rule.md) into your `CLA
 When **no `safeinstall.config.json` is found**, the MCP server uses a **recommended secure preset** — the built-in defaults with `typoSquat` and `continuity` promoted to `"block"`, because the agent use case wants maximum signal. When a config file **is** found, it is respected exactly (same resolution as the CLI).
 
 The MCP SDK ships as an **optional dependency**, lazily loaded only when `safeinstall mcp` runs — CLI-only users never install it. If it is missing, the command prints an install hint and exits non-zero.
+
+---
+
+## Agent guard — enforcement, not advice
+
+The MCP tool is advisory: an agent *can* consult it. The **guard is enforcement**: it hooks into the agent's shell layer and intercepts every command *before it runs* — whether or not the agent knows SafeInstall exists.
+
+```bash
+safeinstall guard install          # registers hooks for Claude Code and Cursor
+safeinstall guard install --client cursor   # or just one client
+```
+
+This writes project-level hook configuration (merged non-destructively, idempotent on re-runs):
+
+- **Claude Code** — a `PreToolUse` hook on the `Bash` tool in `.claude/settings.json`
+- **Cursor** — a `beforeShellExecution` hook in `.cursor/hooks.json`, registered with `failClosed: true` so a crashed or timed-out guard blocks instead of silently allowing
+
+### How the guard decides
+
+The guard never evaluates policy itself — it detects package installs and routes them through the CLI, which owns the decision:
+
+| Agent runs | Guard response |
+|:---|:---|
+| `git status`, `npm test`, ... | Allowed — not an install |
+| `npm install axios` (also `npm i`, `pnpm add`, `bun a`, `npm ci`, `corepack pnpm add`, `pnpm --dir app add`, ...) | **Denied**, agent is told to run `safeinstall npm install axios` instead |
+| `cd app && npm i axios && npm test` | **Denied**, rewrite prefixes only the install segment |
+| `safeinstall npm install axios` | Allowed — already routed through the policy engine |
+| `npm install $(cat list.txt)`, `bash -c "npm install ..."` | **Denied** — cannot be analyzed safely (fail-closed) |
+| `yarn add axios` | **Denied** — SafeInstall cannot policy-check yarn |
+| `npx tsc` with `typescript` installed locally | Allowed — npx resolves the local binary, nothing is downloaded |
+| `npx create-next-app`, `pnpm dlx ...`, `bunx ...`, `yarn dlx ...` | **Ask** — downloads and executes registry code, so the user must approve |
+
+Routing through the CLI matters more than a simple allow/deny: a vetted-but-raw `npm install` would still execute lifecycle scripts. Through SafeInstall, the same install gets the full policy evaluation *and* runs with install scripts disabled.
+
+The deny message hands the agent the exact rewritten command, so a well-behaved agent self-corrects in one step — blocking becomes steering. The guard needs no network access and answers in milliseconds.
+
+### Guard limitations
+
+- The `safeinstall` binary must be on the agent's `PATH` (`npm install -g safeinstall-cli`).
+- `npx` and friends are gated with **ask**, not policy-checked: SafeInstall's engine evaluates installs, not one-off executions. The local-binary fast path mirrors the runners' own resolution (nearest `node_modules/.bin`), so approved project tooling never prompts.
+- A determined adversary can bypass shell-level analysis (e.g. by writing a script file first, or via `node -e`). The guard raises the bar as one layer of defense in depth — combine it with the MCP tool and CI checks.
 
 ---
 

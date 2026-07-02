@@ -2,6 +2,8 @@
 
 import { parseCliOptions } from "./cli-options";
 import { runCheckFlow } from "./check-flow";
+import { isGuardClient, runGuardHook } from "./guard-flow";
+import { parseGuardSetupClients, runGuardSetupFlow } from "./guard-setup";
 import { runInitFlow } from "./init-flow";
 import { runInstallFlow } from "./install-flow";
 import { runMcpServer } from "./mcp";
@@ -27,10 +29,17 @@ function printHelp(): void {
       "  safeinstall check",
       "  safeinstall init [--force]",
       "  safeinstall mcp",
+      "  safeinstall guard install [--client claude,cursor]",
+      "  safeinstall guard <claude|cursor>",
       "",
       "Commands:",
       "  mcp          Run the MCP server (stdio) so AI coding agents can call",
       "               the check_package tool before installing dependencies.",
+      "  guard install  Register SafeInstall as a pre-shell hook for Claude Code",
+      "               (.claude/settings.json) and Cursor (.cursor/hooks.json).",
+      "  guard <client>  Run as the hook itself: reads the hook event from stdin",
+      "               and denies raw package installs, pointing the agent at the",
+      "               equivalent safeinstall command instead.",
       "",
       "Global options:",
       "  --json       Emit machine-readable JSON output.",
@@ -67,6 +76,34 @@ async function main(): Promise<void> {
     if (isVersionRequest(argv)) {
       process.stdout.write(`${PACKAGE_VERSION}\n`);
       process.exitCode = 0;
+      return;
+    }
+
+    if (argv[0] === "guard") {
+      if (argv[1] === "install") {
+        const clients = parseGuardSetupClients(argv.slice(2));
+        if (clients instanceof Error) {
+          process.stderr.write(`${clients.message}\n`);
+          process.exitCode = 1;
+          return;
+        }
+        const result = await runGuardSetupFlow(process.cwd(), argv, { clients });
+        writeCliResult(result, json);
+        process.exitCode = result.exitCode;
+        return;
+      }
+
+      if (isGuardClient(argv[1])) {
+        // The guard hook owns stdio for the hook protocol; diagnostics go to
+        // stderr only, so it never flows through writeCliResult.
+        process.exitCode = await runGuardHook(argv[1]);
+        return;
+      }
+
+      process.stderr.write(
+        "Usage: safeinstall guard install [--client claude,cursor] | safeinstall guard <claude|cursor>\n"
+      );
+      process.exitCode = 1;
       return;
     }
 

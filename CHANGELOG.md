@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Agent guard: enforced install gating for AI coding agents.** The MCP tool is advisory — an agent *can* call it. The new guard is enforcement: `safeinstall guard install` registers SafeInstall as a pre-shell-execution hook for **Claude Code** (`PreToolUse`/`Bash` in `.claude/settings.json`) and **Cursor** (`beforeShellExecution` in `.cursor/hooks.json`, with `failClosed: true`), so every shell command an agent runs is intercepted before execution.
+
+  The guard (`safeinstall guard <claude|cursor>`) never evaluates policy itself. It detects package installs — including aliases (`npm i`, `bun a`, `npm ci`), env-var prefixes, wrappers like `sudo`/`env`, chained commands, pipes, and redirections — and **denies them with the exact rewritten command routed through the SafeInstall CLI** (`cd app && npm i axios && npm test` → "run `cd app && safeinstall npm install axios && npm test` instead"). Routing through the CLI matters more than a plain allow/deny: a vetted-but-raw `npm install` would still execute lifecycle scripts; through SafeInstall it gets the full policy evaluation *and* runs with scripts disabled. Blocking becomes steering: a well-behaved agent self-corrects in one step. The guard needs no network access and answers in milliseconds.
+
+  Fail-closed on the security-relevant path: install commands that cannot be analyzed with confidence (command substitution, variable expansion in arguments, installs hidden in nested shells, yarn) are denied with an explanation. Non-install commands and unparseable hook events produce no opinion, so the guard never bricks the agent's shell.
+
+  Package runners (`npx`, `pnpm dlx`, `bunx`, `yarn dlx`, `npm exec`) get a third verdict: **ask**. They download and execute registry code without install-time checks, so the user must approve — except when the runner would resolve a locally installed binary (nearest `node_modules/.bin`, mirroring the runners' own resolution), in which case nothing is downloaded and the command is allowed. `pnpm exec` is local-only and always allowed. Windows launcher extensions (`npm.cmd`) are recognized.
+
+  Hook config merging is conservative and idempotent: existing hooks are preserved, a malformed settings file is left untouched and reported, and re-running detects the existing registration.
+
 - **Install-command aliases.** `safeinstall npm i axios`, `pnpm i`, `bun a zod`, `npm clean-install` and the other documented package-manager aliases now work; previously only the canonical `install`/`add`/`ci` spellings were accepted. `--dir`, `--workspace`, and `--lockfile-dir` are also recognized as value-taking flags, so their values are no longer mistaken for subcommands or package specs.
 
 - **`--config <path>` global flag.** All commands accept an explicit config file path (also as `--config=path`), skipping upward discovery. An explicit path that cannot be read is a hard error (exit 1), never a silent fallback to built-in defaults — CI cannot accidentally run with a weaker policy than intended.
@@ -11,6 +21,7 @@
 ### Fixed
 
 - **Policy bypass via `--` (security).** `safeinstall npm install -- evil-pkg` previously evaluated *nothing* (spec extraction stopped at `--`) while npm still installed the package, because package managers treat post-`--` tokens as positional package specs for install commands. Tokens after `--` are now extracted and evaluated like any other spec.
+- **Guard fail-closed net for unknown flags.** A package-manager command whose subcommand position cannot be resolved but which contains an install alias elsewhere (the signature of an unknown value-taking flag) is denied by the guard instead of allowed — unless the subcommand is a known non-install command like `run`, which owns its arguments.
 - **GitHub Action `config-path` input now works.** The action documented a `config-path` input but never passed it to the CLI (and the CLI had no flag to receive it). The input is now forwarded as `--config` in both `check` and `install` modes.
 - **Restored `scripts/refresh-typo-squat-targets.mjs`.** The script referenced from `src/typo-squat-targets.ts` was missing from the repository. It now fetches the top-N packages from `npm-high-impact` (pinned version, parsed as data only — no remote code execution) and merges them into the shipped target list without dropping curated entries.
 - **`SECURITY.md` supported-versions table** updated from the stale 0.2.x window to 0.8.x.
