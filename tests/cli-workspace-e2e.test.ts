@@ -11,15 +11,23 @@ import {
   mkdirp,
   readLoggedArgs,
   runCli,
+  startRegistryFixture,
   writeDefaultConfig,
-  writeJson
+  writeJson,
+  type RegistryFixture
 } from "./cli-e2e-helpers";
+
+let registry: RegistryFixture;
 
 beforeAll(async () => {
   await ensureBuiltCli();
+  registry = await startRegistryFixture();
+  process.env.SAFEINSTALL_TEST_REGISTRY = registry.url;
 });
 
 afterAll(async () => {
+  delete process.env.SAFEINSTALL_TEST_REGISTRY;
+  await registry?.close();
   await cleanupTempDirs();
 });
 

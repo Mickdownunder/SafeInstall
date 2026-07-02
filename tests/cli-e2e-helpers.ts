@@ -1,10 +1,95 @@
 import { execFile, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * A stable, old publish date served by the registry fixture. Old enough that
+ * any minimumReleaseAgeHours check passes, so age is deterministic.
+ */
+const FIXTURE_PUBLISH_DATE = "Mon, 01 Jan 2018 00:00:00 GMT";
+
+export interface RegistryFixture {
+  url: string;
+  close: () => Promise<void>;
+}
+
+/**
+ * A local stand-in for the npm registry so end-to-end install tests never
+ * touch the network (the real registry is the flake source). It serves any
+ * package/version generically: a packument with a couple of versions, a
+ * version manifest with no lifecycle scripts, and a tarball HEAD carrying an
+ * old last-modified date. Set as the config's registryUrl via
+ * SAFEINSTALL_TEST_REGISTRY (loopback http, which the CLI allows without a
+ * warning, so stderr assertions still hold).
+ */
+export async function startRegistryFixture(): Promise<RegistryFixture> {
+  const server: Server = createServer((req, res) => {
+    const requestUrl = decodeURIComponent((req.url ?? "/").split("?")[0]);
+
+    // Tarball request (HEAD or GET): only the last-modified header matters.
+    if (requestUrl.includes("/-/")) {
+      res.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "last-modified": FIXTURE_PUBLISH_DATE
+      });
+      res.end();
+      return;
+    }
+
+    const segments = requestUrl.split("/").filter(Boolean);
+    const name = segments[0];
+    const version = segments[1];
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    if (name && version) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          version,
+          dist: { tarball: `${base}/${name}/-/${name}-${version}.tgz` },
+          scripts: {}
+        })
+      );
+      return;
+    }
+
+    if (name) {
+      const versions = ["1.13.2", "1.14.0"];
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          "dist-tags": { latest: "1.14.0" },
+          versions: Object.fromEntries(
+            versions.map((entry) => [
+              entry,
+              { version: entry, dist: { tarball: `${base}/${name}/-/${name}-${entry}.tgz` } }
+            ])
+          ),
+          time: Object.fromEntries(versions.map((entry) => [entry, "2018-01-01T00:00:00.000Z"]))
+        })
+      );
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () =>
+      new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+  };
+}
 
 export const projectRoot = path.resolve(__dirname, "..");
 export const cliPath = path.join(projectRoot, "dist", "cli.js");
@@ -226,7 +311,9 @@ export async function writeDefaultConfig(
 ): Promise<void> {
   await writeJson(path.join(cwd, "safeinstall.config.json"), {
     minimumReleaseAgeHours: 0,
-    registryUrl: "https://registry.npmjs.org",
+    // Default to the local fixture when a test started one (hermetic, no
+    // network); fall back to the public registry otherwise.
+    registryUrl: process.env.SAFEINSTALL_TEST_REGISTRY ?? "https://registry.npmjs.org",
     allowedScripts: {},
     allowedSources: ["registry"],
     allowedPackages: [],

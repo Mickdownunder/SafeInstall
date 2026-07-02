@@ -13,16 +13,27 @@ import {
   readLoggedArgs,
   runCli,
   spawnCli,
+  startRegistryFixture,
   waitForStderr,
   writeDefaultConfig,
-  writeJson
+  writeJson,
+  type RegistryFixture
 } from "./cli-e2e-helpers";
+
+let registry: RegistryFixture;
 
 beforeAll(async () => {
   await ensureBuiltCli();
+  // Serve package metadata locally so install tests never touch the real npm
+  // registry — a network dependency there is a flake source. writeDefaultConfig
+  // picks this up via SAFEINSTALL_TEST_REGISTRY.
+  registry = await startRegistryFixture();
+  process.env.SAFEINSTALL_TEST_REGISTRY = registry.url;
 });
 
 afterAll(async () => {
+  delete process.env.SAFEINSTALL_TEST_REGISTRY;
+  await registry?.close();
   await cleanupTempDirs();
 });
 
