@@ -236,11 +236,24 @@ export async function runTrustLockFlow(cwd: string, argv: string[]): Promise<Cli
   if (existing) {
     const status = await checkTrustSurface(cwd);
     if (status.findings.length === 0 && status.instructionWarnings.length === 0) {
-      const ciInfos = ciProvider ? await scaffoldCi(existing.root, ciProvider) : [];
+      // Adding CI to an already-locked, clean surface: scaffold the workflow,
+      // then re-baseline so the new (tracked) workflow file is part of the
+      // baseline instead of showing up as "added" enforcement drift. This is
+      // safe — the clean check above already proved nothing else drifted, and
+      // an agent-smuggled change would have failed that check.
+      if (ciProvider && status.mode) {
+        const ciInfos = await scaffoldCi(existing.root, ciProvider);
+        const rebaselined = await snapshotTrustSurface(existing.root);
+        await writeBaseline(existing.root, status.mode, rebaselined, "approved", false);
+        return baseResult(argv, {
+          exitCodeMeaning: "The trust surface is already locked; CI re-verification was added.",
+          summary: `Trust surface already locked (${trustLockPath(existing.root)}). Added CI re-verification.`,
+          infos: ciInfos
+        });
+      }
       return baseResult(argv, {
         exitCodeMeaning: "The trust surface is already locked and matches the baseline.",
-        summary: `Trust surface already locked (${trustLockPath(existing.root)}). Baseline unchanged.`,
-        infos: ciInfos
+        summary: `Trust surface already locked (${trustLockPath(existing.root)}). Baseline unchanged.`
       });
     }
     return baseResult(argv, {
@@ -259,8 +272,8 @@ export async function runTrustLockFlow(cwd: string, argv: string[]): Promise<Cli
   }
 
   const root = cwd;
-  const snapshot = await snapshotTrustSurface(root);
-  if (snapshot.files.length === 0 && snapshot.mcpServers.length === 0) {
+  const preScaffold = await snapshotTrustSurface(root);
+  if (preScaffold.files.length === 0 && preScaffold.mcpServers.length === 0) {
     return baseResult(argv, {
       decision: "error",
       exitCode: 1,
@@ -277,7 +290,8 @@ export async function runTrustLockFlow(cwd: string, argv: string[]): Promise<Cli
     });
   }
 
-  const tainted = hiddenUnicodeReasons(snapshot);
+  // Refuse before scaffolding so a failed lock never leaves an orphan workflow.
+  const tainted = hiddenUnicodeReasons(preScaffold);
   if (tainted.length > 0) {
     return baseResult(argv, {
       decision: "error",
@@ -288,8 +302,13 @@ export async function runTrustLockFlow(cwd: string, argv: string[]): Promise<Cli
     });
   }
 
-  await writeBaseline(root, mode, snapshot, "lock-created", true);
+  // Scaffold the CI workflow BEFORE the baseline snapshot so the workflow file
+  // — part of the tracked enforcement surface — is captured in this baseline
+  // rather than appearing as drift on the next status run.
   const ciInfos = ciProvider ? await scaffoldCi(root, ciProvider) : [];
+  const snapshot = ciProvider ? await snapshotTrustSurface(root) : preScaffold;
+
+  await writeBaseline(root, mode, snapshot, "lock-created", true);
 
   return baseResult(argv, {
     exitCodeMeaning: "The trust surface baseline was created.",
@@ -309,11 +328,11 @@ async function scaffoldCi(root: string, provider: CiProvider): Promise<string[]>
     const result = await scaffoldCiWorkflow(root, provider);
     if (result.status === "created") {
       return [
-        `CI: wrote ${result.path}. Commit it — this workflow re-verifies the trust surface on every pull request, which is the durable anchor.`
+        `CI: wrote ${result.path} (pins safeinstall-cli@${result.pinnedVersion}). Commit it, and make it a required status check with review of .safeinstall/ — only then does the re-verification actually gate merges.`
       ];
     }
     return [
-      `CI: ${result.path} already exists; left it untouched. Ensure it runs \`safeinstall trust status --require-lock\` (or the action with verify-trust: true).`
+      `CI: ${result.path} already exists; left it untouched. Ensure it runs \`safeinstall trust status --require-lock\` on a version that has the trust command.`
     ];
   } catch (error) {
     return [`CI: could not write the workflow (${error instanceof Error ? error.message : String(error)}).`];

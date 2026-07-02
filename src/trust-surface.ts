@@ -46,8 +46,21 @@ export const TRUST_LEDGER_FILE = "ledger.jsonl";
 export const TRUST_LOCK_RELATIVE_PATH = `${TRUST_DIR}/${TRUST_LOCK_FILE}`;
 export const TRUST_LEDGER_RELATIVE_PATH = `${TRUST_DIR}/${TRUST_LEDGER_FILE}`;
 
+/**
+ * The CI re-verification workflow scaffolded by `trust lock --ci github`. It
+ * IS the durable anchor, so it is part of the enforcement surface: flipping
+ * `verify-trust`/`--require-lock` off or deleting the file is drift, and the
+ * guard denies raw shell writes to it.
+ */
+export const CI_TRUST_WORKFLOW_RELATIVE_PATH = ".github/workflows/safeinstall-trust.yml";
+
 /** Zone 1 — files that configure enforcement itself. Any drift locks down. */
-const ENFORCEMENT_FILES = ["safeinstall.config.json", ".claude/settings.json", ".cursor/hooks.json"];
+const ENFORCEMENT_FILES = [
+  "safeinstall.config.json",
+  ".claude/settings.json",
+  ".cursor/hooks.json",
+  CI_TRUST_WORKFLOW_RELATIVE_PATH
+];
 
 /**
  * Zone 2 — files that instruct the agent. Hidden Unicode is always a hard

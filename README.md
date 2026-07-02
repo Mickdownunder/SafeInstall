@@ -341,13 +341,18 @@ safeinstall trust approve       # review drift and re-baseline (interactive only
 safeinstall trust unlock        # remove the baseline (lock, ledger, head mirror)
 ```
 
-`--ci github` writes `.github/workflows/safeinstall-trust.yml`, which re-verifies the committed baseline on every pull request. This is the step that turns the local reconciliation into a real guarantee — commit `.safeinstall/` and that workflow together. An existing workflow file is never overwritten.
+`--ci github` writes `.github/workflows/safeinstall-trust.yml`, which re-verifies the committed baseline on every pull request by running `safeinstall trust status --require-lock` with the CLI pinned to an exact version. Commit `.safeinstall/` and that workflow together. An existing workflow file is never overwritten, and the workflow file is itself part of the tracked surface, so disabling it is detected as drift.
+
+Two things you must do for the check to actually enforce, because a CLI cannot set them for you:
+
+- Make the workflow a **required status check** in your branch protection — otherwise a red check does not block a merge.
+- Require review of changes to `.safeinstall/` and `.github/workflows/` (e.g. via `CODEOWNERS`). The automatic check catches *inconsistent* tampering; a fully consistent rewrite of the whole baseline in one PR is only caught by a human reviewing the `.safeinstall/` diff.
 
 ### The three zones
 
 | Zone | Files | On drift |
 |:---|:---|:---|
-| **Enforcement** | `safeinstall.config.json`, `.claude/settings.json`, `.cursor/hooks.json`, `.safeinstall/` | Every agent command is denied until a human approves |
+| **Enforcement** | `safeinstall.config.json`, `.claude/settings.json`, `.cursor/hooks.json`, `.github/workflows/safeinstall-trust.yml`, `.safeinstall/` | Every agent command is denied until a human approves |
 | **Instruction** | `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.cursor/rules/**`, `.github/copilot-instructions.md` | Hidden Unicode is always blocked; content drift warns (blocks in `--mode strict`) |
 | **Tool** | `.mcp.json`, `.cursor/mcp.json`, MCP blocks in `.claude/settings.json` | Installs and runners are denied until a human approves; unpinned MCP servers are flagged |
 
@@ -355,7 +360,7 @@ Instruction content drift only warns by default because Claude Code writes to `C
 
 ### How it defends itself
 
-- **CI as the real anchor.** Commit `.safeinstall/`, add the Action with `verify-trust: true`, and every pull request re-hashes the trust surface against the committed lock on a machine the agent does not control. This is the durable guarantee: tampering that happened on a compromised local machine does not survive review.
+- **CI as the real anchor.** Run `safeinstall trust lock --ci github` to scaffold a workflow that re-hashes the trust surface against the committed lock on every pull request, on a machine the agent does not control, with the CLI pinned to an exact version. This is the durable guarantee: tampering that happened on a compromised local machine does not survive review. (Wiring the Action directly also works — but pin its `version:` input; the default `latest` floats.)
 - **Reconciliation on top of interception.** The guard is the fast layer; every `safeinstall` install/check also reconciles against the baseline. Deleting the hook to silence the guard, or editing a protected file, shows up as drift on the next SafeInstall run locally — and, regardless, fails CI re-verification.
 - **Human-gated changes.** Both commands that relax enforcement require a human: `safeinstall trust approve` reads its confirmation from the controlling terminal (`/dev/tty`), never from stdin, and `trust unlock` likewise requires a controlling terminal — both refuse to run in CI or known agent-hook contexts, so an agent cannot silently re-baseline or remove the surface. `trust status` is read-only (safe in CI, never mutates the repo).
 - **Hash-chained ledger.** Baseline decisions are chained in `.safeinstall/ledger.jsonl`; the lock binds to a ledger entry (including its enforcement `mode`), so editing the committed lock to drop a file or downgrade strict→warn breaks the binding. A local head mirror under `~/.safeinstall/` catches naive/accidental history rewrites; a vanished mirror is self-healed from the verified head on the next clean run, so a fresh clone establishes it automatically without noise.

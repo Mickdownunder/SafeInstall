@@ -83,19 +83,43 @@ describe("runTrustLockFlow", () => {
     expect(result.reasons.some((reason) => reason.code === "trust-hidden-unicode")).toBe(true);
   });
 
-  it("scaffolds the CI workflow with --ci github and is idempotent", async () => {
+  it("scaffolds the CI workflow with --ci github, captures it in the baseline, and stays clean", async () => {
     const root = await seedProject();
     const first = await runTrustLockFlow(root, ["trust", "lock", "--ci", "github"]);
     expect(first.decision).toBe("allow");
     expect(first.infos.some((info) => info.includes(".github/workflows/safeinstall-trust.yml"))).toBe(true);
 
     const workflow = await readFile(path.join(root, ".github", "workflows", "safeinstall-trust.yml"), "utf8");
-    expect(workflow).toContain("verify-trust");
+    expect(workflow).toContain("safeinstall trust status --require-lock");
 
-    // Re-running on the already-locked, clean surface reports the file exists.
-    const second = await runTrustLockFlow(root, ["trust", "lock", "--ci", "github"]);
-    expect(second.decision).toBe("allow");
-    expect(second.infos.some((info) => info.toLowerCase().includes("already exists"))).toBe(true);
+    // The workflow the lock just wrote must be part of the baseline, not
+    // reported as "added" enforcement drift on the next status.
+    const status = await runTrustStatusFlow(root, ["trust", "status"]);
+    expect(status.decision).toBe("allow");
+  });
+
+  it("protects the CI workflow itself: flipping it off is enforcement drift", async () => {
+    const root = await seedProject();
+    await runTrustLockFlow(root, ["trust", "lock", "--ci", "github"]);
+
+    const workflowPath = path.join(root, ".github", "workflows", "safeinstall-trust.yml");
+    await writeFile(workflowPath, "name: neutered\non: [] \n");
+
+    const status = await runTrustStatusFlow(root, ["trust", "status"]);
+    expect(status.decision).toBe("block");
+    expect(status.reasons.some((reason) => reason.code === "trust-enforcement-drift")).toBe(true);
+  });
+
+  it("adds CI to an already-locked clean surface without leaving drift", async () => {
+    const root = await seedProject();
+    await runTrustLockFlow(root, ["trust", "lock"]);
+
+    const added = await runTrustLockFlow(root, ["trust", "lock", "--ci", "github"]);
+    expect(added.decision).toBe("allow");
+    expect(added.infos.some((info) => info.includes("safeinstall-trust.yml"))).toBe(true);
+
+    const status = await runTrustStatusFlow(root, ["trust", "status"]);
+    expect(status.decision).toBe("allow");
   });
 
   it("rejects an unsupported --ci provider", async () => {

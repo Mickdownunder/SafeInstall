@@ -205,6 +205,7 @@ describe("isTrustSurfacePath", () => {
     expect(isTrustSurfacePath(root, "/project/safeinstall.config.json")).toBe(true);
     expect(isTrustSurfacePath(root, "/project/.cursor/hooks.json")).toBe(true);
     expect(isTrustSurfacePath(root, "/project/.cursor/rules/x.md")).toBe(true);
+    expect(isTrustSurfacePath(root, "/project/.github/workflows/safeinstall-trust.yml")).toBe(true);
     expect(isTrustSurfacePath(root, "/project/.safeinstall/trust-surface.lock")).toBe(true);
     expect(isTrustSurfacePath(root, "/project/src/index.ts")).toBe(false);
     expect(isTrustSurfacePath(root, "/etc/passwd")).toBe(false);
