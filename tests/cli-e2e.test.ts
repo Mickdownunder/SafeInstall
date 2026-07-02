@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -39,12 +39,18 @@ describe("CLI end-to-end", () => {
   });
 
   it("prints the current SafeInstall version", async () => {
+    // The single source of truth for the version is package.json; the
+    // release-metadata test pins the concrete release number.
+    const { version } = JSON.parse(
+      await readFile(path.join(projectRoot, "package.json"), "utf8")
+    ) as { version: string };
+
     const result = await runCli(["--version"], {
       cwd: projectRoot
     });
 
     expect(result.code).toBe(0);
-    expect(result.stdout.trim()).toBe("0.8.0");
+    expect(result.stdout.trim()).toBe(version);
     expect(result.stderr).toBe("");
   });
 
