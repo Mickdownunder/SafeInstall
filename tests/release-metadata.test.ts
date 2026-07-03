@@ -18,12 +18,35 @@ describe("release metadata", () => {
       scripts?: Record<string, string>;
       license?: string;
       publishConfig?: Record<string, string>;
+      dependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      peerDependenciesMeta?: Record<string, { optional?: boolean }>;
     };
 
     expect(packageJson.private).not.toBe(true);
     expect(packageJson.name).toBe("safeinstall-cli");
-    expect(packageJson.version).toBe("0.10.0");
+    expect(packageJson.version).toBe("0.10.1");
     expect(packageJson.license).toBe("MIT");
+
+    // The heavy, capability-rich deps (sigstore, MCP SDK) must NOT be installed
+    // for consumers by default. optionalDependencies ARE installed by default
+    // (they only skip on failure), which would pull ~125 extra packages and
+    // contradict the "3 runtime dependencies, loads on demand" promise. They
+    // belong in peerDependencies marked optional, so a default install stays
+    // lean and the code lazy-loads them when the feature is used.
+    expect(Object.keys(packageJson.dependencies ?? {})).toEqual([
+      "npm-package-arg",
+      "semver",
+      "yaml"
+    ]);
+    expect(packageJson.optionalDependencies ?? {}).toEqual({});
+    expect(packageJson.peerDependencies).toMatchObject({
+      "@modelcontextprotocol/sdk": expect.any(String),
+      sigstore: expect.any(String)
+    });
+    expect(packageJson.peerDependenciesMeta?.["@modelcontextprotocol/sdk"]?.optional).toBe(true);
+    expect(packageJson.peerDependenciesMeta?.sigstore?.optional).toBe(true);
     expect(packageJson.bin).toMatchObject({
       safeinstall: "dist/cli.js"
     });

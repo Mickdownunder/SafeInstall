@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.1 - 2026-07-03
+
+### Fixed
+
+- **Default install no longer pulls sigstore and the MCP SDK (supply-chain footprint).** `sigstore` and `@modelcontextprotocol/sdk` were declared as `optionalDependencies`, which npm installs by default (they are only skipped when installation *fails*). That pulled ~130 packages into a normal `npm install safeinstall-cli` — carrying eval/network/shell/URL capability signals in the transitive tree — and contradicted the "3 runtime dependencies, loads on demand" promise. They are now `peerDependencies` marked optional in `peerDependenciesMeta`, so a default install pulls only the three real runtime dependencies (`npm-package-arg`, `semver`, `yaml`); a fresh install drops from ~130 packages to a handful. The lazy-import paths are unchanged: enabling `provenance.mode` or running `safeinstall mcp` without the package still prints a clear install hint. A release-metadata test now guards against regressing these back into installed dependencies.
+
 ## 0.10.0 - 2026-07-02
 
 ### Added
