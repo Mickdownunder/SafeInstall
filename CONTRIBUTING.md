@@ -90,3 +90,5 @@ If you discover a security vulnerability, please report it privately via email t
 ## License
 
 By contributing, you agree that your contributions will be licensed under the [MIT License](./LICENSE).
+
+Last verified: 2026-07-09

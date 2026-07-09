@@ -624,7 +624,7 @@ To enforce policy during the actual install step (not just a check):
 - **Trust downgrade detection** requires prior install state in `node_modules`
 - **`bun install`** uses manifest-only analysis (lockfile parity not yet implemented); transitive evaluation is npm/pnpm only
 - **Typo-squat target list** is curated and refreshed manually between releases; brand new packages published in the last day may not yet appear
-- **Provenance verification** supports GitHub Actions trusted publishers on the public Sigstore root only (GitLab CI, self-hosted Sigstore out of scope for 0.2.0)
+- **Provenance verification** supports GitHub Actions trusted publishers on the public Sigstore root only (GitLab CI, self-hosted Sigstore currently out of scope)
 - **Git sources** are identified by URL for allowlist purposes, not by inferred package name — conflating registry `axios` with `github:any-fork/axios` would be dangerous
 - Ambiguous metadata blocks instead of guessing — by design
 
@@ -665,6 +665,8 @@ MIT — see [LICENSE](./LICENSE).
 ## Disclaimer
 
 SafeInstall is provided as-is under the MIT license. It is a policy tool that enforces configurable rules on package installs. It does not guarantee the safety of any package, does not detect all supply-chain attacks, and does not replace professional security review. Use at your own risk. The authors are not liable for any damages arising from the use of this software.
+
+Last verified: 2026-07-09
 
 ---
 
