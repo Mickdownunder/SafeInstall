@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "safeinstall guard claude",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

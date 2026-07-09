@@ -2,7 +2,30 @@
 # The automatic CI check (safeinstall-trust.yml) catches inconsistent
 # tampering; a fully consistent rewrite of the whole baseline in one PR is only
 # caught by a human reviewing these diffs. SafeInstall dogfoods its own advice.
-/.safeinstall/            @Mickdownunder
-/safeinstall.config.json  @Mickdownunder
-/.github/workflows/       @Mickdownunder
-/.github/CODEOWNERS       @Mickdownunder
+#
+# Order matters: the last matching pattern wins, so the default comes first
+# and the trust-critical paths below stay explicit even if the default ever
+# changes.
+
+# Default: everything needs review.
+*                                     @Mickdownunder
+
+# Trust surface baseline and policy config (the files the lock protects).
+/.safeinstall/                        @Mickdownunder
+/safeinstall.config.json              @Mickdownunder
+/.claude/settings.json                @Mickdownunder
+/.cursor/hooks.json                   @Mickdownunder
+
+# CI re-verification anchor and this review map itself.
+/.github/workflows/                   @Mickdownunder
+/.github/CODEOWNERS                   @Mickdownunder
+
+# Trust-surface and guard source: the code that computes the baseline,
+# verifies the ledger, scaffolds CI, and enforces the guard hooks.
+/src/trust-surface.ts                 @Mickdownunder
+/src/trust-flow.ts                    @Mickdownunder
+/src/trust-ledger.ts                  @Mickdownunder
+/src/trust-ci.ts                      @Mickdownunder
+/src/guard-flow.ts                    @Mickdownunder
+/src/guard-setup.ts                   @Mickdownunder
+/src/guard-commands.ts                @Mickdownunder
