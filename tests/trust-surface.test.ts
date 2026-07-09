@@ -6,6 +6,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   computeTrustSurfaceDrift,
   detectHiddenUnicode,
+  findTrustContext,
   isTrustSurfacePath,
   normalizeHiddenUnicode,
   parseMcpServers,
@@ -209,5 +210,52 @@ describe("isTrustSurfacePath", () => {
     expect(isTrustSurfacePath(root, "/project/.safeinstall/trust-surface.lock")).toBe(true);
     expect(isTrustSurfacePath(root, "/project/src/index.ts")).toBe(false);
     expect(isTrustSurfacePath(root, "/etc/passwd")).toBe(false);
+  });
+});
+
+describe("findTrustContext", () => {
+  async function lockAt(root: string): Promise<void> {
+    await mkdir(path.join(root, ".safeinstall"), { recursive: true });
+    await writeFile(path.join(root, ".safeinstall", "trust-surface.lock"), "{}\n");
+  }
+
+  it("finds a lock at the repository root from a subdirectory", async () => {
+    const repo = await createTempDir("safeinstall-ctx-");
+    await mkdir(path.join(repo, ".git"), { recursive: true });
+    await lockAt(repo);
+    const sub = path.join(repo, "packages", "app");
+    await mkdir(sub, { recursive: true });
+
+    const context = await findTrustContext(sub);
+    expect(context).toEqual({ root: repo, hasLock: true });
+  });
+
+  it("does not inherit the trust context of an enclosing checkout (.git directory)", async () => {
+    const outer = await createTempDir("safeinstall-ctx-");
+    await lockAt(outer);
+    const nested = path.join(outer, "vendor", "nested-repo");
+    await mkdir(path.join(nested, ".git"), { recursive: true });
+
+    expect(await findTrustContext(nested)).toBeUndefined();
+  });
+
+  it("does not inherit the trust context of an enclosing checkout (.git file, worktree layout)", async () => {
+    const outer = await createTempDir("safeinstall-ctx-");
+    await lockAt(outer);
+    const worktree = path.join(outer, ".claude", "worktrees", "wt");
+    await mkdir(worktree, { recursive: true });
+    await writeFile(path.join(worktree, ".git"), "gitdir: /elsewhere\n");
+
+    expect(await findTrustContext(worktree)).toBeUndefined();
+  });
+
+  it("still finds a lock in an enclosing directory when no repo boundary intervenes", async () => {
+    const outer = await createTempDir("safeinstall-ctx-");
+    await lockAt(outer);
+    const sub = path.join(outer, "some", "plain", "dir");
+    await mkdir(sub, { recursive: true });
+
+    const context = await findTrustContext(sub);
+    expect(context).toEqual({ root: outer, hasLock: true });
   });
 });
