@@ -1,11 +1,23 @@
 {
   "schemaVersion": 1,
-  "mode": "warn",
+  "mode": "strict",
   "files": [
+    {
+      "path": ".claude/settings.json",
+      "kind": "enforcement",
+      "sha256": "d3aee47443d87a8b7f54e6aef81ad1389354e0dd5f65a7b723d9c8a565dc9066",
+      "hiddenUnicode": []
+    },
+    {
+      "path": ".cursor/hooks.json",
+      "kind": "enforcement",
+      "sha256": "5b80ec6dd7c8f9926b58bb2db9156cfb6a21c3890975b12448f020a8034776e7",
+      "hiddenUnicode": []
+    },
     {
       "path": ".github/workflows/safeinstall-trust.yml",
       "kind": "enforcement",
-      "sha256": "7891a083162fb361a01ca83c9f18e5f89a44421c81bae69fc08f3b84c06cd453",
+      "sha256": "15f403b3ef0da696377a228878c9ecda24c3f9b809c3bf304815dd322c54e954",
       "hiddenUnicode": []
     },
     {
@@ -16,6 +28,6 @@
     }
   ],
   "mcpServers": [],
-  "approvedAt": "2026-07-02T19:56:00.893Z",
-  "ledgerHead": "3aac6a9b0de62f920ac2ed3044f320412604985aa084d7c1744cd435d5cca603"
+  "approvedAt": "2026-07-09T21:38:45.217Z",
+  "ledgerHead": "2aba5ce0b89d69568c9658d180e4f85bb47a16ba67b15744c2d4ccc90ec55022"
 }
