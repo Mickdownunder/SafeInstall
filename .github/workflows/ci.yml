@@ -11,13 +11,17 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
@@ -28,3 +32,14 @@ jobs:
       - run: pnpm test
 
       - run: pnpm build
+
+  # Stable aggregate check for branch protection: require "ci-ok" instead of
+  # per-OS matrix job names, which change when the matrix changes.
+  ci-ok:
+    needs: [test]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Fail if the test matrix did not succeed
+        if: needs.test.result != 'success'
+        run: exit 1

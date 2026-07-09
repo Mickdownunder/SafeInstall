@@ -1,0 +1,18 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Actions are SHA-pinned with a `# vX.Y.Z` comment; Dependabot updates
+    # both the SHA and the comment together.
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # Security-sensitive CLI: review every bump, no grouped majors.
+    versioning-strategy: increase-if-necessary
