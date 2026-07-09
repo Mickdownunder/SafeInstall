@@ -141,7 +141,7 @@ packages:
       cwd,
       env: {
         ...process.env,
-        PATH: `${stub.dir}:${process.env.PATH ?? ""}`
+        PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
       }
     });
 
@@ -166,7 +166,7 @@ packages:
       cwd,
       env: {
         ...process.env,
-        PATH: `${stub.dir}:${process.env.PATH ?? ""}`
+        PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
       }
     });
 
@@ -255,7 +255,7 @@ packages:
       cwd,
       env: {
         ...process.env,
-        PATH: `${stub.dir}:${process.env.PATH ?? ""}`
+        PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
       }
     });
 
@@ -315,7 +315,7 @@ packages:
       cwd: nestedDir,
       env: {
         ...process.env,
-        PATH: `${stub.dir}:${process.env.PATH ?? ""}`
+        PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
       }
     });
 
@@ -376,7 +376,7 @@ packages:
       cwd: nestedDir,
       env: {
         ...process.env,
-        PATH: `${stub.dir}:${process.env.PATH ?? ""}`
+        PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
       }
     });
 
@@ -424,7 +424,7 @@ packages:
       cwd,
       env: {
         ...process.env,
-        PATH: `${stub.dir}:${process.env.PATH ?? ""}`
+        PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
       }
     });
 
@@ -448,42 +448,53 @@ packages:
     });
   });
 
-  it("exits cleanly on SIGINT while the wrapped package manager is running", async () => {
-    const cwd = await createTempDir("safeinstall-e2e-sigint-");
-    const stub = await createStubPackageManager("pnpm", {
-      script: `#!/bin/sh
-trap 'exit 0' INT TERM
-while true
-do
-  sleep 1
-done
+  // Windows has no way to deliver a catchable console interrupt to one child
+  // process: `child.kill("SIGINT")` maps to TerminateProcess in libuv, so the
+  // CLI's SIGINT handler never runs and "clean exit with code 130" is not
+  // defined behavior there. The wrapper-level shutdown contract IS covered on
+  // Windows by the package-managers.test.ts signal test, which exercises the
+  // abort path without requiring the CLI process itself to receive a signal.
+  it.skipIf(process.platform === "win32")(
+    "exits cleanly on SIGINT while the wrapped package manager is running",
+    async () => {
+      const cwd = await createTempDir("safeinstall-e2e-sigint-");
+      const stub = await createStubPackageManager("pnpm", {
+        // Node equivalent of the previous sh stub (`trap 'exit 0' INT TERM` +
+        // spin): exit 0 on SIGINT/SIGTERM, otherwise keep the event loop
+        // alive. The deadman timer guarantees the stub cannot outlive the
+        // test run as an orphan if the signal is ever lost.
+        script: `process.on("SIGINT", () => process.exit(0));
+process.on("SIGTERM", () => process.exit(0));
+setInterval(() => {}, 1000);
+setTimeout(() => process.exit(97), 15000);
 `
-    });
+      });
 
-    await writeDefaultConfig(cwd, {
-      allowedSources: ["registry", "workspace", "file", "directory"]
-    });
-    await mkdirp(path.join(cwd, "packages", "local"));
+      await writeDefaultConfig(cwd, {
+        allowedSources: ["registry", "workspace", "file", "directory"]
+      });
+      await mkdirp(path.join(cwd, "packages", "local"));
 
-    const { child, result } = await spawnCli(["pnpm", "add", "./packages/local"], {
-      cwd,
-      env: {
-        ...process.env,
-        PATH: `${stub.dir}:${process.env.PATH ?? ""}`
-      }
-    });
+      const { child, result } = await spawnCli(["pnpm", "add", "./packages/local"], {
+        cwd,
+        env: {
+          ...process.env,
+          PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+        }
+      });
 
-    // Wait for evidence that the CLI has finished its startup phase and
-    // registered its signal handlers, rather than sleeping a fixed amount.
-    // `Allowed: policy checks passed.` is printed right before the package
-    // manager is spawned — by this point the signal handler is definitely
-    // active and we are mid-install, which is exactly the state under test.
-    await waitForStderr(child, "Allowed: policy checks passed.", 5000);
-    child.kill("SIGINT");
+      // Wait for evidence that the CLI has finished its startup phase and
+      // registered its signal handlers, rather than sleeping a fixed amount.
+      // `Allowed: policy checks passed.` is printed right before the package
+      // manager is spawned — by this point the signal handler is definitely
+      // active and we are mid-install, which is exactly the state under test.
+      await waitForStderr(child, "Allowed: policy checks passed.", 5000);
+      child.kill("SIGINT");
 
-    const interrupted = await result;
-    expect(interrupted.code).toBe(130);
-    expect(interrupted.signal).toBeNull();
-    expect(interrupted.stderr).toContain("Interrupted by SIGINT.");
-  });
+      const interrupted = await result;
+      expect(interrupted.code).toBe(130);
+      expect(interrupted.signal).toBeNull();
+      expect(interrupted.stderr).toContain("Interrupted by SIGINT.");
+    }
+  );
 });

@@ -51,7 +51,7 @@ describe("CLI workspace/root edge cases", () => {
       cwd: nestedDir,
       env: {
         ...process.env,
-        PATH: `${stub.dir}:${process.env.PATH ?? ""}`
+        PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
       }
     });
 
@@ -79,7 +79,7 @@ describe("CLI workspace/root edge cases", () => {
       cwd,
       env: {
         ...process.env,
-        PATH: `${stub.dir}:${process.env.PATH ?? ""}`
+        PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
       }
     });
 
@@ -221,13 +221,15 @@ packages:
       cwd: packageDir,
       env: {
         ...process.env,
-        PATH: `${stub.dir}:${process.env.PATH ?? ""}`
+        PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
       }
     });
 
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Using config:");
-    expect(result.stderr).toContain("packages/app/safeinstall.config.json");
+    // The CLI prints the config path with native separators (backslashes on
+    // Windows), so build the expected fragment with path.join.
+    expect(result.stderr).toContain(path.join("packages", "app", "safeinstall.config.json"));
     expect(result.stderr).toContain("Blocked: release too new");
   });
 });

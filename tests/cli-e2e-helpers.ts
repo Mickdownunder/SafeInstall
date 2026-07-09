@@ -208,31 +208,64 @@ export async function spawnCli(
   return { child, result };
 }
 
+/**
+ * Write a stub executable named `name` in `dir` whose behavior is the given
+ * Node script body, launched with the same Node binary that runs the tests
+ * (absolute path — no reliance on `node` being in the child's PATH).
+ *
+ * - POSIX: `<dir>/<name>` is a `#!/bin/sh` wrapper that execs the script.
+ * - Windows: `<dir>/<name>.cmd` is a batch wrapper (found via PATHEXT).
+ *   `%*` forwards all arguments verbatim, and `EXIT /B %ERRORLEVEL%`
+ *   propagates the Node exit code — cmd parses batch lines one at a time,
+ *   so `%ERRORLEVEL%` expands after the Node line has completed.
+ */
+export async function writeStubExecutable(dir: string, name: string, nodeScript: string): Promise<void> {
+  const scriptPath = path.join(dir, `${name}-stub.js`);
+  await writeFile(scriptPath, nodeScript);
+
+  if (process.platform === "win32") {
+    const wrapperPath = path.join(dir, `${name}.cmd`);
+    await writeFile(
+      wrapperPath,
+      `@ECHO OFF\r\n"${process.execPath}" "${scriptPath}" %*\r\nEXIT /B %ERRORLEVEL%\r\n`
+    );
+    await stat(wrapperPath);
+    return;
+  }
+
+  const wrapperPath = path.join(dir, name);
+  await writeFile(wrapperPath, `#!/bin/sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`, {
+    mode: 0o755
+  });
+  await stat(wrapperPath);
+}
+
 export async function createStubPackageManager(
   name: "npm" | "pnpm",
   behavior?: {
     stdout?: string;
     stderr?: string;
     exitCode?: number;
+    /** Node script body that replaces the default stub logic entirely. */
     script?: string;
   }
 ): Promise<{ dir: string; logPath: string }> {
   const dir = await createTempDir(`safeinstall-stub-${name}-`);
   const logPath = path.join(dir, `${name}.args.log`);
-  const scriptPath = path.join(dir, name);
   const stdout = behavior?.stdout ?? "";
   const stderr = behavior?.stderr ?? "";
   const exitCode = behavior?.exitCode ?? 0;
 
+  // Mirrors the previous `printf '%s\n' "$@" > log` sh stub: one argument per
+  // line with a trailing newline (a bare newline when there are no arguments).
   const script =
     behavior?.script ??
-    `#!/bin/sh
-printf '%s\n' "$@" > "${logPath}"
-${stdout ? `printf '%s\\n' ${JSON.stringify(stdout)}\n` : ""}${stderr ? `printf '%s\\n' ${JSON.stringify(stderr)} >&2\n` : ""}exit ${exitCode}
+    `const args = process.argv.slice(2);
+require("node:fs").writeFileSync(${JSON.stringify(logPath)}, args.length > 0 ? args.join("\\n") + "\\n" : "\\n");
+${stdout ? `process.stdout.write(${JSON.stringify(`${stdout}\n`)});\n` : ""}${stderr ? `process.stderr.write(${JSON.stringify(`${stderr}\n`)});\n` : ""}process.exit(${exitCode});
 `;
 
-  await writeFile(scriptPath, script, { mode: 0o755 });
-  await stat(scriptPath);
+  await writeStubExecutable(dir, name, script);
 
   return { dir, logPath };
 }

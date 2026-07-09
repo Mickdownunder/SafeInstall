@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildPackageManagerCommand, runPackageManager } from "../src/package-managers";
 import { ShutdownSignalError } from "../src/signals";
 import type { SafeInstallConfig } from "../src/types";
+import { writeStubExecutable } from "./cli-e2e-helpers";
 
 const config: SafeInstallConfig = {
   minimumReleaseAgeHours: 72,
@@ -105,21 +106,31 @@ describe("runPackageManager", () => {
     ).rejects.toThrow('Package manager "pnpm" was not found in PATH.');
   });
 
+  // This test runs on Windows too, with a deliberate semantic difference:
+  // on POSIX the abort handler forwards a real SIGINT that the stub traps and
+  // exits from gracefully; on Windows `child.kill("SIGINT")` terminates the
+  // spawned process forcefully (TerminateProcess — there is no catchable
+  // per-child SIGINT). In BOTH cases the wrapper's contract is the same and
+  // is what this test asserts: once the shutdown AbortSignal fires,
+  // runPackageManager kills the child and rejects with the interrupt error
+  // instead of reporting a normal exit.
   it("forwards shutdown signals to the child process and rejects with an interrupt error", async () => {
     const stubDir = await createTempDir("safeinstall-signal-stub-");
     const logPath = path.join(stubDir, "pnpm.args.log");
 
-    await writeFile(
-      path.join(stubDir, "pnpm"),
-      `#!/bin/sh
-printf '%s\n' "$@" > "${logPath}"
-trap 'exit 0' INT TERM
-while true
-do
-  sleep 1
-done
-`,
-      { mode: 0o755 }
+    // Node equivalent of the previous sh stub (arg logging + `trap 'exit 0'
+    // INT TERM` + spin). The deadman timer guarantees the stub cannot outlive
+    // the test run as an orphan — relevant on Windows, where terminating the
+    // cmd.exe wrapper does not terminate this grandchild process.
+    await writeStubExecutable(
+      stubDir,
+      "pnpm",
+      `require("node:fs").writeFileSync(${JSON.stringify(logPath)}, process.argv.slice(2).join("\\n") + "\\n");
+process.on("SIGINT", () => process.exit(0));
+process.on("SIGTERM", () => process.exit(0));
+setInterval(() => {}, 1000);
+setTimeout(() => process.exit(97), 15000);
+`
     );
 
     const controller = new AbortController();
@@ -131,7 +142,7 @@ done
       config,
       env: {
         ...process.env,
-        PATH: `${stubDir}:${process.env.PATH ?? ""}`
+        PATH: `${stubDir}${path.delimiter}${process.env.PATH ?? ""}`
       },
       signal: controller.signal,
       stdio: "pipe"
