@@ -1,0 +1,17 @@
+{
+  "id": "case-wrapper-sudo",
+  "category": "case-sensitivity",
+  "severity": "bypass",
+  "input": "SUDO npm install evil-pkg",
+  "shellBehavior": "Uppercase wrapper name. basename(\"SUDO\") is not in WRAPPER_COMMANDS, so the parser treats SUDO as the (unknown) command and never looks past it to npm install.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "Same case-folding gap, on the wrapper set.",
+  "discoveredBy": "manual+fuzz"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "case-bun-title",
+  "category": "case-sensitivity",
+  "severity": "bypass",
+  "input": "Bun add evil-pkg",
+  "shellBehavior": "Title-case bun; installs on case-insensitive filesystems.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "See case-npm-upper.",
+  "discoveredBy": "manual+fuzz"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "wrapper-env-split-string",
+  "category": "wrapper-flag",
+  "severity": "bypass",
+  "input": "env -S 'npm install evil-pkg'",
+  "shellBehavior": "GNU env parses the -S value into a command and arguments, then executes npm install evil-pkg. Treating the value as inert wrapper data hides the effective command.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 0,
+    "runners": 0,
+    "unanalyzable": 1,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "Split-string values contain a second command language. SafeInstall fails closed rather than duplicating env's parsing semantics.",
+  "discoveredBy": "manual-adversarial-review"
+}

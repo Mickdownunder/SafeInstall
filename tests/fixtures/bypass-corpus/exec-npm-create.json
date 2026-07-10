@@ -1,0 +1,17 @@
+{
+  "id": "exec-npm-create",
+  "category": "remote-exec-subcommand",
+  "severity": "suspicious",
+  "input": "npm create vite@latest",
+  "shellBehavior": "npm create downloads and executes create-vite from the registry, like npx, but 'create' is in NON_INSTALL_SUBCOMMANDS so the parser returns no finding and the guard allows it with no confirmation. npx/pnpm dlx would prompt (ask).",
+  "parserToday": {
+    "decision": "ask",
+    "installs": 0,
+    "runners": 1,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "ask",
+  "note": "This is a runner-coverage gap, not an install bypass: 'create' (and 'init <pkg>') execute registry code. Consider routing create/init through the runner 'ask' path.",
+  "discoveredBy": "manual+fuzz"
+}

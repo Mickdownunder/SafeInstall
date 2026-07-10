@@ -1,0 +1,17 @@
+{
+  "id": "exec-yarn-create",
+  "category": "remote-exec-subcommand",
+  "severity": "suspicious",
+  "input": "yarn create foo",
+  "shellBehavior": "yarn create foo executes create-foo from the registry; 'create' is not treated as an install/runner for yarn, so it is allowed with no confirmation.",
+  "parserToday": {
+    "decision": "ask",
+    "installs": 0,
+    "runners": 1,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "ask",
+  "note": "See exec-npm-create.",
+  "discoveredBy": "manual+fuzz"
+}

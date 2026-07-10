@@ -1,0 +1,17 @@
+{
+  "id": "wrapper-env-ignore",
+  "category": "wrapper-flag",
+  "severity": "bypass",
+  "input": "env -i npm install evil-pkg",
+  "shellBehavior": "env -i (empty environment) before the install; same root cause.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "See wrapper-sudo-user.",
+  "discoveredBy": "manual+fuzz"
+}

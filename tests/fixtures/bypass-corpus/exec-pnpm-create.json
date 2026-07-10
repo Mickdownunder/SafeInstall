@@ -1,0 +1,17 @@
+{
+  "id": "exec-pnpm-create",
+  "category": "remote-exec-subcommand",
+  "severity": "suspicious",
+  "input": "pnpm create vite",
+  "shellBehavior": "pnpm create vite executes create-vite from the registry; allowed with no confirmation.",
+  "parserToday": {
+    "decision": "ask",
+    "installs": 0,
+    "runners": 1,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "ask",
+  "note": "See exec-npm-create.",
+  "discoveredBy": "manual+fuzz"
+}

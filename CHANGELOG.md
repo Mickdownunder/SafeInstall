@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.2 - 2026-07-10
+
+### Security
+
+- **Hardened the agent guard against shell-parser bypasses.** Package-manager and wrapper names are now normalized case-insensitively, leading file-descriptor redirections are analyzed before command classification, wrapper options are parsed conservatively, and ambiguous `env --split-string` forms fail closed. Remote project scaffolding through package runners follows the runner approval path, while path-qualified package-manager invocations are rewritten consistently through SafeInstall.
+- **Added a permanent adversarial regression corpus and property-based fuzzing.** Captured bypass classes now run in the normal test suite alongside an independent reference detector, and the standalone harness supports million-command campaigns for deeper parser validation.
+
+### Changed
+
+- Split the guard parser into command analysis, shell normalization, and shared types so security-critical review no longer depends on a single oversized module. The CLI and hook contracts are unchanged.
+
 ## 0.10.1 - 2026-07-03
 
 ### Fixed

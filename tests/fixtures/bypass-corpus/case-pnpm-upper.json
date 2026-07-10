@@ -1,0 +1,17 @@
+{
+  "id": "case-pnpm-upper",
+  "category": "case-sensitivity",
+  "severity": "bypass",
+  "input": "PNPM add evil-pkg",
+  "shellBehavior": "Uppercase pnpm; installs on case-insensitive filesystems.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "See case-npm-upper.",
+  "discoveredBy": "manual+fuzz"
+}

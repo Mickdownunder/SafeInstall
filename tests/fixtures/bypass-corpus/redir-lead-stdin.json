@@ -1,0 +1,17 @@
+{
+  "id": "redir-lead-stdin",
+  "category": "redirection-prefix",
+  "severity": "bypass",
+  "input": "< in npm install evil-pkg",
+  "shellBehavior": "A redirection before the command is valid shell: stdin is read from file 'in' and npm install evil-pkg runs. findCommandTokenIndex() stops at the '<' redirection token and reports it as the command position, so the install is missed.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "findCommandTokenIndex() skips env-assignments and wrappers but not leading redirection operators + their targets. A ~5-line skip of REDIRECTION_OPERATORS tokens (and one target token) there would likely close it, but it changes a security-critical shared function and needs full regression validation, so it is deferred to the decomposition phase.",
+  "discoveredBy": "manual+fuzz"
+}

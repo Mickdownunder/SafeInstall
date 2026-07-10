@@ -1,0 +1,17 @@
+{
+  "id": "wrapper-sudo-preserve",
+  "category": "wrapper-flag",
+  "severity": "bypass",
+  "input": "sudo -E npm install evil-pkg",
+  "shellBehavior": "sudo -E (preserve env) before the install; same root cause as wrapper-sudo-user.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "See wrapper-sudo-user.",
+  "discoveredBy": "manual+fuzz"
+}

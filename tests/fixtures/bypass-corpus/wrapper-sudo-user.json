@@ -1,0 +1,17 @@
+{
+  "id": "wrapper-sudo-user",
+  "category": "wrapper-flag",
+  "severity": "bypass",
+  "input": "sudo -u root npm install evil-pkg",
+  "shellBehavior": "sudo -u root runs npm install evil-pkg as root. The parser skips the wrapper name 'sudo' but then treats the wrapper's own option '-u' as the command position and stops, missing the install.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "findCommandTokenIndex() skips wrapper NAMES but has no model of wrapper OPTION flags (sudo -u/-E/-H, env -i/-C/-u, command -p, time -p). Each wrapper has different flag/value semantics, so a correct skip is non-trivial and is deferred.",
+  "discoveredBy": "manual+fuzz"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "redir-lead-variable-fd",
+  "category": "redirection-prefix",
+  "severity": "bypass",
+  "input": "{audit}>out npm install evil-pkg",
+  "shellBehavior": "Bash treats {audit}>out as a variable file-descriptor redirection and then executes npm install evil-pkg. A tokenizer that recognizes only numeric file descriptors mistakes {audit} for the command.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "Variable file-descriptor prefixes must be kept with their adjacent redirection operator so the following package manager remains in command position.",
+  "discoveredBy": "manual-adversarial-review"
+}

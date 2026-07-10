@@ -59,6 +59,41 @@ describe("safeinstall guard (hook mode)", () => {
     expect(response.hookSpecificOutput.permissionDecisionReason).toContain("safeinstall npm install axios");
   });
 
+  it.each([
+    ["case-insensitive manager", "NPM install evil-pkg"],
+    ["leading fd redirection", "2>err npm install evil-pkg"],
+    ["wrapper value option", "sudo -u root npm install evil-pkg"]
+  ])("denies the previously bypassable %s form", async (_label, command) => {
+    const event = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command }
+    });
+
+    const result = await runGuardHook("claude", event);
+    expect(result.code).toBe(0);
+    const response = JSON.parse(result.stdout) as {
+      hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+    };
+    expect(response.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(response.hookSpecificOutput.permissionDecisionReason).toContain("safeinstall");
+  });
+
+  it("asks before npm create downloads and executes a template", async () => {
+    const event = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "npm create vite@latest" }
+    });
+
+    const result = await runGuardHook("claude", event);
+    const response = JSON.parse(result.stdout) as {
+      hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+    };
+    expect(response.hookSpecificOutput.permissionDecision).toBe("ask");
+    expect(response.hookSpecificOutput.permissionDecisionReason).toContain("fetch and execute");
+  });
+
   it("stays silent for a harmless Claude Code command", async () => {
     const event = JSON.stringify({
       hook_event_name: "PreToolUse",

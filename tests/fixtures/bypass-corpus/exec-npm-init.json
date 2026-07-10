@@ -1,0 +1,17 @@
+{
+  "id": "exec-npm-init",
+  "category": "remote-exec-subcommand",
+  "severity": "suspicious",
+  "input": "npm init foo",
+  "shellBehavior": "npm init foo executes create-foo from the registry; allowed with no confirmation. Same gap as exec-npm-create.",
+  "parserToday": {
+    "decision": "ask",
+    "installs": 0,
+    "runners": 1,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "ask",
+  "note": "See exec-npm-create.",
+  "discoveredBy": "manual+fuzz"
+}

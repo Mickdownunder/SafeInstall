@@ -1,0 +1,17 @@
+{
+  "id": "case-npm-title",
+  "category": "case-sensitivity",
+  "severity": "bypass",
+  "input": "Npm install evil-pkg",
+  "shellBehavior": "Title-case manager name; same root cause as case-npm-upper.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "See case-npm-upper.",
+  "discoveredBy": "manual+fuzz"
+}

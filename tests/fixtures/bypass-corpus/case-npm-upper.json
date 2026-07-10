@@ -1,0 +1,17 @@
+{
+  "id": "case-npm-upper",
+  "category": "case-sensitivity",
+  "severity": "bypass",
+  "input": "NPM install evil-pkg",
+  "shellBehavior": "On case-insensitive filesystems (macOS, Windows) the shell resolves NPM to the npm binary and installs evil-pkg. The parser compares the executable basename case-sensitively (PACKAGE_MANAGERS holds only lowercase names), so it never recognises the manager.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "guard-commands.ts basename() does not fold case before the PACKAGE_MANAGERS/WRAPPER_COMMANDS/RUNNER/NESTED_SHELLS lookups. A correct fix must also lowercase the manager in the rewrite (safeinstall rejects a non-lowercase manager), so it is not a one-line change.",
+  "discoveredBy": "manual+fuzz"
+}

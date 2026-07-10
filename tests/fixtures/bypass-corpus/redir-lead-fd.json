@@ -1,0 +1,17 @@
+{
+  "id": "redir-lead-fd",
+  "category": "redirection-prefix",
+  "severity": "bypass",
+  "input": "2>err npm install evil-pkg",
+  "shellBehavior": "Leading fd-2 redirection; same root cause.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "See redir-lead-stdin.",
+  "discoveredBy": "manual+fuzz"
+}

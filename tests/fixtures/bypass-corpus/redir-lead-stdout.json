@@ -1,0 +1,17 @@
+{
+  "id": "redir-lead-stdout",
+  "category": "redirection-prefix",
+  "severity": "bypass",
+  "input": "> out npm install evil-pkg",
+  "shellBehavior": "Leading stdout redirection; same root cause as redir-lead-stdin.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "See redir-lead-stdin.",
+  "discoveredBy": "manual+fuzz"
+}

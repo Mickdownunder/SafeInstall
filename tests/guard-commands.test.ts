@@ -142,6 +142,42 @@ describe("analyzeShellCommand", () => {
       expect(analyzeShellCommand("env npm install axios").installs).toHaveLength(1);
     });
 
+    it("sees through value-taking and boolean wrapper options", () => {
+      expect(analyzeShellCommand("sudo -u root npm install evil-pkg").rewrittenCommand).toBe(
+        "sudo -u root safeinstall npm install evil-pkg"
+      );
+      expect(analyzeShellCommand("sudo -E npm install evil-pkg").installs).toHaveLength(1);
+      expect(analyzeShellCommand("env -i npm install evil-pkg").installs).toHaveLength(1);
+      expect(analyzeShellCommand("env -u NODE_OPTIONS npm install evil-pkg").installs).toHaveLength(1);
+      expect(analyzeShellCommand("time -p npm install evil-pkg").installs).toHaveLength(1);
+      expect(analyzeShellCommand("command -p npm install evil-pkg").installs).toHaveLength(1);
+    });
+
+    it("fails closed when env split-string embeds a package-manager command", () => {
+      for (const command of [
+        "env -S 'npm install evil-pkg'",
+        "env --split-string='pnpm add evil-pkg'"
+      ]) {
+        const analysis = analyzeShellCommand(command);
+        expect(analysis.installs, command).toEqual([]);
+        expect(analysis.unanalyzable, command).toHaveLength(1);
+        expect(analysis.unanalyzable[0].reason, command).toContain("split-string");
+      }
+    });
+
+    it("fails closed on unknown wrapper options before an install", () => {
+      const analysis = analyzeShellCommand("sudo --future-option value npm install evil-pkg");
+      expect(analysis.installs).toEqual([]);
+      expect(analysis.unanalyzable).toHaveLength(1);
+      expect(analysis.unanalyzable[0].reason).toContain("wrapper option");
+    });
+
+    it("does not mistake command lookup mode for command execution", () => {
+      const analysis = analyzeShellCommand("command -v npm");
+      expect(analysis.installs).toEqual([]);
+      expect(analysis.unanalyzable).toEqual([]);
+    });
+
     it("sees through corepack and drops it from the rewrite", () => {
       const plain = analyzeShellCommand("corepack pnpm add axios");
       expect(plain.installs).toHaveLength(1);
@@ -162,7 +198,7 @@ describe("analyzeShellCommand", () => {
     it("resolves path-qualified package manager binaries", () => {
       const analysis = analyzeShellCommand("/usr/local/bin/npm install axios");
       expect(analysis.installs).toHaveLength(1);
-      expect(analysis.rewrittenCommand).toBe("safeinstall /usr/local/bin/npm install axios");
+      expect(analysis.rewrittenCommand).toBe("safeinstall npm install axios");
     });
 
     it("resolves Windows launcher extensions", () => {
@@ -184,6 +220,28 @@ describe("analyzeShellCommand", () => {
       const analysis = analyzeShellCommand("npm install axios > install.log 2>&1");
       expect(analysis.installs).toHaveLength(1);
       expect(analysis.rewrittenCommand).toBe("safeinstall npm install axios > install.log 2>&1");
+    });
+
+    it("detects installs after leading redirections, including numeric file descriptors", () => {
+      expect(analyzeShellCommand(">out npm install evil-pkg").rewrittenCommand).toBe(
+        ">out safeinstall npm install evil-pkg"
+      );
+      expect(analyzeShellCommand("< in pnpm add evil-pkg").installs).toHaveLength(1);
+      expect(analyzeShellCommand("2>err npm install evil-pkg").rewrittenCommand).toBe(
+        "2>err safeinstall npm install evil-pkg"
+      );
+      expect(analyzeShellCommand("{audit}>out npm install evil-pkg").rewrittenCommand).toBe(
+        "{audit}>out safeinstall npm install evil-pkg"
+      );
+    });
+
+    it("normalizes case-insensitive manager and wrapper names in safe rewrites", () => {
+      expect(analyzeShellCommand("NPM install evil-pkg").rewrittenCommand).toBe(
+        "safeinstall npm install evil-pkg"
+      );
+      expect(analyzeShellCommand("SUDO PNPM add evil-pkg").rewrittenCommand).toBe(
+        "SUDO safeinstall pnpm add evil-pkg"
+      );
     });
 
     it("handles pipes", () => {
@@ -248,6 +306,22 @@ describe("analyzeShellCommand", () => {
     it("ignores non-install yarn commands", () => {
       const analysis = analyzeShellCommand("yarn run build");
       expect(analysis.unanalyzable).toEqual([]);
+    });
+
+    it("classifies create/init subcommands that fetch templates as remote runners", () => {
+      for (const command of [
+        "npm create vite@latest",
+        "npm init foo",
+        "pnpm create vite",
+        "yarn create foo",
+        "bun create react-app"
+      ]) {
+        const analysis = analyzeShellCommand(command);
+        expect(analysis.runners, command).toHaveLength(1);
+        expect(analysis.runners[0].fetchesRemote, command).toBe(true);
+      }
+
+      expect(analyzeShellCommand("npm init").runners).toEqual([]);
     });
 
     it("flags install aliases hidden behind unknown value-taking flags", () => {

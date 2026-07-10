@@ -1,0 +1,17 @@
+{
+  "id": "wrapper-command-p",
+  "category": "wrapper-flag",
+  "severity": "bypass",
+  "input": "command -p npm install evil-pkg",
+  "shellBehavior": "command -p (default PATH) before the install; same root cause.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "See wrapper-sudo-user.",
+  "discoveredBy": "manual+fuzz"
+}
