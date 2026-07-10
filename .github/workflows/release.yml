@@ -25,7 +25,14 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - run: npm install -g npm@latest
+      # Pin the publish-time npm to an exact version — never a moving @latest in
+      # the OIDC/provenance publish path (a compromised or behavior-changed
+      # npm@latest would run with publish privileges). 11.18.0 is the current
+      # npm 11.x line (engines: ^20.17.0 || >=22.9.0), so it stays compatible
+      # with the Node 22 pinned above; npm 12.x requires Node ^22.22.2 and would
+      # break on the runner's 22.x. Registry versions are immutable, so this pin
+      # is deterministic. Bump deliberately after re-checking engines + provenance.
+      - run: npm install -g npm@11.18.0
 
       - run: pnpm install --frozen-lockfile
 
