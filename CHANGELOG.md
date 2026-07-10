@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Codex is now a first-class guard client.** `safeinstall guard install` non-destructively registers a project-level `PreToolUse`/`Bash` hook in `.codex/hooks.json`, and `safeinstall guard codex` implements Codex's current hook protocol. Raw package-manager installs are rewritten in-place through the SafeInstall CLI with `updatedInput`; unanalysable commands and trust-surface drift are denied. Registry runners fail closed because Codex `PreToolUse` does not currently support an approval (`ask`) decision. Users must review and trust the installed project hook with Codex `/hooks`.
+
+### Security
+
+- **Codex hook controls are part of the Agent Trust Surface.** Both `.codex/hooks.json` and `.codex/config.toml` are enforcement-zone files, so deleting the guard, changing its command, or disabling hooks through project config produces lockdown drift. The Codex guard has real process-level E2E coverage for ordinary installs, the permanent parser bypass corpus, remote scaffolding, and trust-surface tampering.
+
 ## 0.10.2 - 2026-07-10
 
 ### Security

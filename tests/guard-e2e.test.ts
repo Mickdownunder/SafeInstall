@@ -106,6 +106,88 @@ describe("safeinstall guard (hook mode)", () => {
     expect(result.stdout).toBe("");
   });
 
+  it("rewrites a raw install through SafeInstall from a Codex event", async () => {
+    const event = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "npm install axios" },
+      cwd: "/tmp/project"
+    });
+
+    const result = await runGuardHook("codex", event);
+    expect(result.code).toBe(0);
+    const response = JSON.parse(result.stdout) as {
+      hookSpecificOutput: { permissionDecision: string; updatedInput: { command: string } };
+    };
+    expect(response.hookSpecificOutput.permissionDecision).toBe("allow");
+    expect(response.hookSpecificOutput.updatedInput.command).toBe("safeinstall npm install axios");
+  });
+
+  it.each([
+    ["case-insensitive manager", "NPM.CMD install evil-pkg"],
+    ["leading fd redirection", "2>err npm install evil-pkg"],
+    ["wrapper value option", "sudo -u root npm install evil-pkg"]
+  ])("rewrites the previously bypassable %s form for Codex", async (_label, command) => {
+    const event = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command },
+      cwd: "/tmp/project"
+    });
+
+    const result = await runGuardHook("codex", event);
+    expect(result.code).toBe(0);
+    const response = JSON.parse(result.stdout) as {
+      hookSpecificOutput: { permissionDecision: string; updatedInput: { command: string } };
+    };
+    expect(response.hookSpecificOutput.permissionDecision).toBe("allow");
+    expect(response.hookSpecificOutput.updatedInput.command).toContain("safeinstall");
+  });
+
+  it("fails closed before Codex runs a remote registry scaffold", async () => {
+    const event = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "npm create vite@latest" },
+      cwd: "/tmp/project"
+    });
+
+    const result = await runGuardHook("codex", event);
+    const response = JSON.parse(result.stdout) as {
+      hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+    };
+    expect(response.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(response.hookSpecificOutput.permissionDecisionReason).toContain("cannot request approval yet");
+  });
+
+  it("denies a mixed install and registry-runner command instead of partially rewriting it", async () => {
+    const event = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "npm install axios && npx create-next-app" },
+      cwd: "/tmp/project"
+    });
+
+    const result = await runGuardHook("codex", event);
+    const response = JSON.parse(result.stdout) as {
+      hookSpecificOutput: { permissionDecision: string; updatedInput?: { command: string } };
+    };
+    expect(response.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(response.hookSpecificOutput.updatedInput).toBeUndefined();
+  });
+
+  it("stays silent for a harmless Codex Bash command", async () => {
+    const event = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "git status" }
+    });
+
+    const result = await runGuardHook("codex", event);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("");
+  });
+
   it("denies a raw pnpm add from a Cursor event", async () => {
     const event = JSON.stringify({
       hook_event_name: "beforeShellExecution",
@@ -176,13 +258,31 @@ describe("safeinstall guard install (e2e)", () => {
     };
     expect(payload.decision).toBe("allow");
     expect(payload.mode).toBe("guard");
-    // Two client registrations plus the "run trust lock next" hint.
-    expect(payload.infos).toHaveLength(3);
+    // Three client registrations plus the "run trust lock next" hint.
+    expect(payload.infos).toHaveLength(4);
     expect(payload.infos.some((info) => info.includes("safeinstall trust lock"))).toBe(true);
 
     const claudeRaw = await readFile(path.join(cwd, ".claude", "settings.json"), "utf8");
+    const codexRaw = await readFile(path.join(cwd, ".codex", "hooks.json"), "utf8");
     const cursorRaw = await readFile(path.join(cwd, ".cursor", "hooks.json"), "utf8");
     expect(claudeRaw).toContain("safeinstall guard claude");
+    expect(codexRaw).toContain("safeinstall guard codex");
     expect(cursorRaw).toContain("safeinstall guard cursor");
+  });
+
+  it("installs the Codex hook idempotently through the real CLI", async () => {
+    const cwd = await createTempDir("safeinstall-guard-install-codex-e2e-");
+
+    const first = await runCli(["guard", "install", "--client", "codex", "--json"], { cwd });
+    const second = await runCli(["guard", "install", "--client", "codex", "--json"], { cwd });
+
+    expect(first.code).toBe(0);
+    expect(second.code).toBe(0);
+    const payload = JSON.parse(second.stdout) as { infos: string[]; warnings: string[] };
+    expect(payload.infos.join(" ")).toContain("already registered");
+    expect(payload.warnings.join(" ")).toContain("/hooks");
+
+    const raw = await readFile(path.join(cwd, ".codex", "hooks.json"), "utf8");
+    expect(raw.match(/safeinstall guard codex/g)).toHaveLength(1);
   });
 });

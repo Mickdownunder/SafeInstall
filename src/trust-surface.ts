@@ -58,6 +58,8 @@ export const CI_TRUST_WORKFLOW_RELATIVE_PATH = ".github/workflows/safeinstall-tr
 const ENFORCEMENT_FILES = [
   "safeinstall.config.json",
   ".claude/settings.json",
+  ".codex/hooks.json",
+  ".codex/config.toml",
   ".cursor/hooks.json",
   CI_TRUST_WORKFLOW_RELATIVE_PATH
 ];

@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import {
   mergeClaudeSettings,
+  mergeCodexHooks,
   mergeCursorHooks,
   parseGuardSetupClients,
   runGuardSetupFlow
@@ -20,17 +21,22 @@ async function readJson(filePath: string): Promise<Record<string, unknown>> {
 }
 
 describe("parseGuardSetupClients", () => {
-  it("defaults to both clients", () => {
-    expect(parseGuardSetupClients([])).toEqual(["claude", "cursor"]);
+  it("defaults to all clients", () => {
+    expect(parseGuardSetupClients([])).toEqual(["claude", "codex", "cursor"]);
   });
 
   it("accepts a single client", () => {
     expect(parseGuardSetupClients(["--client", "cursor"])).toEqual(["cursor"]);
+    expect(parseGuardSetupClients(["--client", "codex"])).toEqual(["codex"]);
     expect(parseGuardSetupClients(["--client=claude"])).toEqual(["claude"]);
   });
 
   it("accepts a comma-separated list", () => {
-    expect(parseGuardSetupClients(["--client", "claude,cursor"])).toEqual(["claude", "cursor"]);
+    expect(parseGuardSetupClients(["--client", "claude,codex,cursor"])).toEqual([
+      "claude",
+      "codex",
+      "cursor"
+    ]);
   });
 
   it("rejects unknown clients", () => {
@@ -39,6 +45,56 @@ describe("parseGuardSetupClients", () => {
 
   it("rejects a missing value", () => {
     expect(parseGuardSetupClients(["--client"])).toBeInstanceOf(Error);
+  });
+});
+
+describe("mergeCodexHooks", () => {
+  it("adds the Codex PreToolUse Bash hook", () => {
+    const merged = mergeCodexHooks({});
+    expect(merged).toEqual({
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Bash",
+            hooks: [
+              {
+                type: "command",
+                command: "safeinstall guard codex",
+                timeout: 60,
+                statusMessage: "Checking package safety"
+              }
+            ]
+          }
+        ]
+      }
+    });
+  });
+
+  it("preserves existing Codex hooks and is idempotent", () => {
+    const existing = {
+      hooks: {
+        Stop: [{ hooks: [{ type: "command", command: "./hooks/verify.sh" }] }],
+        PreToolUse: [{ matcher: "apply_patch", hooks: [{ type: "command", command: "check-edits" }] }]
+      }
+    };
+    const merged = mergeCodexHooks(existing);
+    const hooks = merged?.hooks as Record<string, unknown[]>;
+    expect(hooks.Stop).toEqual(existing.hooks.Stop);
+    expect(hooks.PreToolUse).toHaveLength(2);
+    expect(mergeCodexHooks(merged as Record<string, unknown>)).toBeUndefined();
+  });
+
+  it("does not mistake another client's SafeInstall hook for the Codex guard", () => {
+    const existing = {
+      hooks: {
+        PreToolUse: [
+          { matcher: "Bash", hooks: [{ type: "command", command: "safeinstall guard claude" }] }
+        ]
+      }
+    };
+    const merged = mergeCodexHooks(existing);
+    const hooks = (merged?.hooks as Record<string, unknown[]>).PreToolUse;
+    expect(hooks).toHaveLength(2);
   });
 });
 
@@ -117,18 +173,20 @@ describe("mergeCursorHooks", () => {
 });
 
 describe("runGuardSetupFlow", () => {
-  it("creates both config files in a fresh project", async () => {
+  it("creates all config files in a fresh project", async () => {
     const cwd = await createTempDir("safeinstall-guard-setup-");
     const result = await runGuardSetupFlow(cwd, ["guard", "install"], {
-      clients: ["claude", "cursor"]
+      clients: ["claude", "codex", "cursor"]
     });
 
     expect(result.decision).toBe("allow");
     expect(result.exitCode).toBe(0);
 
     const claude = await readJson(path.join(cwd, ".claude", "settings.json"));
+    const codex = await readJson(path.join(cwd, ".codex", "hooks.json"));
     const cursor = await readJson(path.join(cwd, ".cursor", "hooks.json"));
     expect(JSON.stringify(claude)).toContain("safeinstall guard claude");
+    expect(JSON.stringify(codex)).toContain("safeinstall guard codex");
     expect(JSON.stringify(cursor)).toContain("safeinstall guard cursor");
   });
 
@@ -159,6 +217,26 @@ describe("runGuardSetupFlow", () => {
     const claude = await readJson(path.join(cwd, ".claude", "settings.json"));
     expect(claude.permissions).toEqual({ allow: ["Bash(git *)"] });
     expect(JSON.stringify(claude)).toContain("safeinstall guard claude");
+  });
+
+  it("merges Codex hooks non-destructively and stays idempotent", async () => {
+    const cwd = await createTempDir("safeinstall-guard-setup-codex-");
+    await mkdir(path.join(cwd, ".codex"), { recursive: true });
+    const configPath = path.join(cwd, ".codex", "hooks.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "./done.sh" }] }] } }, null, 2)
+    );
+
+    const first = await runGuardSetupFlow(cwd, ["guard", "install"], { clients: ["codex"] });
+    const second = await runGuardSetupFlow(cwd, ["guard", "install"], { clients: ["codex"] });
+
+    expect(first.decision).toBe("allow");
+    expect(second.infos.join(" ")).toContain("already registered");
+    const codex = await readJson(configPath);
+    const hooks = codex.hooks as Record<string, unknown[]>;
+    expect(hooks.Stop).toHaveLength(1);
+    expect(hooks.PreToolUse).toHaveLength(1);
   });
 
   it("fails without touching a malformed settings file", async () => {

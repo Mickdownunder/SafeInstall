@@ -29,6 +29,9 @@ async function seedProject(): Promise<string> {
   await writeFile(path.join(root, "safeinstall.config.json"), "{}\n");
   await mkdir(path.join(root, ".cursor"), { recursive: true });
   await writeFile(path.join(root, ".cursor", "hooks.json"), JSON.stringify({ version: 1 }));
+  await mkdir(path.join(root, ".codex"), { recursive: true });
+  await writeFile(path.join(root, ".codex", "hooks.json"), JSON.stringify({ hooks: {} }));
+  await writeFile(path.join(root, ".codex", "config.toml"), "[features]\nhooks = true\n");
   await writeFile(path.join(root, "AGENTS.md"), "# rules\n");
   return root;
 }
@@ -340,6 +343,17 @@ describe("runTrustStatusFlow", () => {
     const root = await seedProject();
     await runTrustLockFlow(root, ["trust", "lock"]);
     await writeFile(path.join(root, ".cursor", "hooks.json"), JSON.stringify({ version: 1, tampered: true }));
+
+    const result = await runTrustStatusFlow(root, ["trust", "status"]);
+    expect(result.decision).toBe("block");
+    expect(result.exitCode).toBe(2);
+    expect(result.reasons.some((reason) => reason.code === "trust-enforcement-drift")).toBe(true);
+  });
+
+  it("blocks when Codex project config disables hooks", async () => {
+    const root = await seedProject();
+    await runTrustLockFlow(root, ["trust", "lock"]);
+    await writeFile(path.join(root, ".codex", "config.toml"), "[features]\nhooks = false\n");
 
     const result = await runTrustStatusFlow(root, ["trust", "status"]);
     expect(result.decision).toBe("block");

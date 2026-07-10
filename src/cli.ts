@@ -30,8 +30,8 @@ function printHelp(): void {
       "  safeinstall check",
       "  safeinstall init [--force]",
       "  safeinstall mcp",
-      "  safeinstall guard install [--client claude,cursor]",
-      "  safeinstall guard <claude|cursor>",
+      "  safeinstall guard install [--client claude,codex,cursor]",
+      "  safeinstall guard <claude|codex|cursor>",
       "  safeinstall trust lock [--mode warn|strict] [--ci github]",
       "  safeinstall trust status [--require-lock]",
       "  safeinstall trust approve",
@@ -41,10 +41,11 @@ function printHelp(): void {
       "  mcp          Run the MCP server (stdio) so AI coding agents can call",
       "               the check_package tool before installing dependencies.",
       "  guard install  Register SafeInstall as a pre-shell hook for Claude Code",
-      "               (.claude/settings.json) and Cursor (.cursor/hooks.json).",
+      "               (.claude/settings.json), Codex (.codex/hooks.json), and",
+      "               Cursor (.cursor/hooks.json).",
       "  guard <client>  Run as the hook itself: reads the hook event from stdin",
-      "               and denies raw package installs, pointing the agent at the",
-      "               equivalent safeinstall command instead.",
+      "               and routes or denies raw package installs using the",
+      "               client's supported hook protocol.",
       "  trust lock   Create the Agent Trust Surface baseline: hash the files",
       "               that configure SafeInstall and your AI agents (policy,",
       "               hooks, rules files, MCP configs). Pass --ci github to also",
@@ -115,7 +116,7 @@ async function main(): Promise<void> {
       }
 
       process.stderr.write(
-        "Usage: safeinstall guard install [--client claude,cursor] | safeinstall guard <claude|cursor>\n"
+        "Usage: safeinstall guard install [--client claude,codex,cursor] | safeinstall guard <claude|codex|cursor>\n"
       );
       process.exitCode = 1;
       return;

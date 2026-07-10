@@ -7,7 +7,7 @@ import { checkTrustSurface, isTrustSurfacePath, partitionTrustFindings } from ".
 import type { TrustSurfaceStatus } from "./trust-surface";
 
 /**
- * `safeinstall guard <claude|cursor>` — a pre-shell-execution hook for AI
+ * `safeinstall guard <claude|codex|cursor>` — a pre-shell-execution hook for AI
  * coding agents. It reads the hook event from stdin, detects package-install
  * commands, and answers in the client's hook protocol.
  *
@@ -27,10 +27,12 @@ import type { TrustSurfaceStatus } from "./trust-surface";
  *   with confidence are denied (fail-closed on the security-relevant path).
  */
 
-export type GuardClient = "claude" | "cursor";
+export type GuardClient = "claude" | "codex" | "cursor";
 
 export interface GuardDecision {
   action: "allow" | "deny" | "ask";
+  /** SafeInstall-routed replacement used by clients that support input rewriting. */
+  updatedCommand?: string;
   /** Short, human-facing explanation (shown in the client UI). */
   userMessage?: string;
   /** Detailed instruction fed back to the model. */
@@ -49,7 +51,7 @@ export function parseGuardEvent(rawEvent: unknown, client: GuardClient): GuardEv
 
   const event = rawEvent as Record<string, unknown>;
 
-  if (client === "claude") {
+  if (client === "claude" || client === "codex") {
     if (event.hook_event_name !== undefined && event.hook_event_name !== "PreToolUse") {
       return { kind: "not-applicable", reason: `Ignoring hook event ${String(event.hook_event_name)}.` };
     }
@@ -215,15 +217,25 @@ export async function decideGuard(command: string, cwd: string = process.cwd()):
 
   if (analysis.installs.length > 0) {
     const rewritten = analysis.rewrittenCommand ?? command;
+    const mixedWithRunner = analysis.runners.length > 0;
     return {
       action: "deny",
-      userMessage: "SafeInstall requires package installs to run through the SafeInstall CLI.",
-      agentMessage:
-        "SafeInstall guard: package installs must run through the SafeInstall CLI so supply-chain policy " +
-        "(release age, install scripts, untrusted sources, provenance) is enforced and lifecycle scripts stay disabled. " +
-        "Run this command instead:\n\n" +
-        `${rewritten}\n\n` +
-        "If SafeInstall blocks it, report the block reasons to the user instead of working around them."
+      // Codex can apply a rewrite directly. Keep that optimization limited to
+      // pure install commands: a mixed `npm install && npx ...` tool call must
+      // be denied so the registry runner cannot survive inside updatedInput.
+      updatedCommand: analysis.runners.length === 0 ? rewritten : undefined,
+      userMessage: mixedWithRunner
+        ? "SafeInstall blocked a command that mixes a package install with registry execution."
+        : "SafeInstall requires package installs to run through the SafeInstall CLI.",
+      agentMessage: mixedWithRunner
+        ? "SafeInstall guard blocked this command because it mixes a package install with a package runner. " +
+          "Split the operations: route the install through the SafeInstall CLI and handle the registry runner " +
+          "separately. Do not retry the combined command or work around the guard."
+        : "SafeInstall guard: package installs must run through the SafeInstall CLI so supply-chain policy " +
+          "(release age, install scripts, untrusted sources, provenance) is enforced and lifecycle scripts stay disabled. " +
+          "Run this command instead:\n\n" +
+          `${rewritten}\n\n` +
+          "If SafeInstall blocks it, report the block reasons to the user instead of working around them."
     };
   }
 
@@ -258,6 +270,45 @@ interface GuardResponse {
 }
 
 export function renderGuardResponse(decision: GuardDecision, client: GuardClient): GuardResponse {
+  if (client === "codex") {
+    if (decision.action === "allow") {
+      // No hook opinion: Codex still applies its normal sandbox and approval policy.
+      return { exitCode: 0 };
+    }
+
+    if (decision.action === "deny" && decision.updatedCommand) {
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "allow",
+            updatedInput: { command: decision.updatedCommand },
+            additionalContext:
+              "SafeInstall routed this package-manager command through its policy-enforcing CLI."
+          }
+        })
+      };
+    }
+
+    const reason =
+      decision.action === "ask"
+        ? `${decision.userMessage ?? decision.agentMessage ?? "Registry execution requires approval."} ` +
+          "Codex PreToolUse hooks cannot request approval yet, so SafeInstall blocked the command. " +
+          "Do not retry or bypass the guard."
+        : decision.agentMessage ?? decision.userMessage ?? "Blocked by SafeInstall guard.";
+    return {
+      exitCode: 0,
+      stdout: JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: reason
+        }
+      })
+    };
+  }
+
   if (client === "claude") {
     if (decision.action === "allow") {
       // No output means "no opinion": the normal permission flow applies.
@@ -304,7 +355,7 @@ async function readStream(stream: NodeJS.ReadableStream): Promise<string> {
 }
 
 export function isGuardClient(value: string | undefined): value is GuardClient {
-  return value === "claude" || value === "cursor";
+  return value === "claude" || value === "codex" || value === "cursor";
 }
 
 /**
