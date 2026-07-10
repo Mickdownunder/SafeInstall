@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`safeinstall init` is now one-command onboarding.** One run takes a project from zero to protected: write the starter policy config, register guard hooks for the agents actually present (`.claude/`, `CLAUDE.md`, `.codex/`, `AGENTS.md`, `.cursor/`, `.cursorrules` — or an explicit `--client claude,codex,cursor`), then lock the Agent Trust Surface over the result, in that order so the baseline covers the hooks just written. Idempotent and fail-closed on re-runs: an existing config is kept (`--force` overwrites; previously init errored), existing guard entries are skipped, and an existing lock is never re-baselined — drift aborts init with the trust findings instead of blessing a tampered surface. New flags: `--client`, `--no-guard`, `--no-lock`, `--mode warn|strict`.
+
 - **Codex is now a first-class guard client.** `safeinstall guard install` non-destructively registers a project-level `PreToolUse`/`Bash` hook in `.codex/hooks.json`, and `safeinstall guard codex` implements Codex's current hook protocol. Raw package-manager installs are rewritten in-place through the SafeInstall CLI with `updatedInput`; unanalysable commands and trust-surface drift are denied. Registry runners fail closed because Codex `PreToolUse` does not currently support an approval (`ask`) decision. Users must review and trust the installed project hook with Codex `/hooks`.
 
 ### Security

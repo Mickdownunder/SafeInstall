@@ -65,17 +65,23 @@ describe("CLI end-to-end", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("creates a starter config and blocks overwrite without --force", async () => {
+  it("creates a starter config, keeps it on re-run, and overwrites with --force", async () => {
     const cwd = await createTempDir("safeinstall-e2e-init-");
+    // --no-guard --no-lock keeps this a pure config e2e: without them init
+    // would write a trust-lock mirror into the host's real state dir.
+    const initArgs = ["init", "--no-guard", "--no-lock"];
 
-    const firstRun = await runCli(["init"], { cwd });
+    const firstRun = await runCli(initArgs, { cwd });
     expect(firstRun.code).toBe(0);
-    expect(firstRun.stderr).toContain("Starter config created.");
+    expect(firstRun.stderr).toContain("config: created");
 
-    const secondRun = await runCli(["init"], { cwd });
-    expect(secondRun.code).toBe(1);
-    expect(secondRun.stderr).toContain("Config already exists");
-    expect(secondRun.stderr).toContain("--force");
+    const secondRun = await runCli(initArgs, { cwd });
+    expect(secondRun.code).toBe(0);
+    expect(secondRun.stderr).toContain("config: kept");
+
+    const forcedRun = await runCli(["init", "--force", "--no-guard", "--no-lock"], { cwd });
+    expect(forcedRun.code).toBe(0);
+    expect(forcedRun.stderr).toContain("config: overwritten");
   });
 
   it("emits stable json for blocked installs", async () => {

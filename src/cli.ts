@@ -4,7 +4,7 @@ import { parseCliOptions } from "./cli-options";
 import { runCheckFlow } from "./check-flow";
 import { isGuardClient, runGuardHook } from "./guard-flow";
 import { parseGuardSetupClients, runGuardSetupFlow } from "./guard-setup";
-import { runInitFlow } from "./init-flow";
+import { parseInitOptions, runInitFlow } from "./init-flow";
 import { runInstallFlow } from "./install-flow";
 import { runMcpServer } from "./mcp";
 import { formatCommand, writeCliResult } from "./output";
@@ -28,7 +28,7 @@ function printHelp(): void {
       "Usage:",
       "  safeinstall <npm|pnpm|bun> <install-command> [...args]",
       "  safeinstall check",
-      "  safeinstall init [--force]",
+      "  safeinstall init [--force] [--client claude,codex,cursor] [--no-guard] [--no-lock] [--mode warn|strict]",
       "  safeinstall mcp",
       "  safeinstall guard install [--client claude,codex,cursor]",
       "  safeinstall guard <claude|codex|cursor>",
@@ -38,6 +38,13 @@ function printHelp(): void {
       "  safeinstall trust unlock",
       "",
       "Commands:",
+      "  init         One-command onboarding: write the starter policy config,",
+      "               register guard hooks for the agents detected in the project",
+      "               (.claude/, CLAUDE.md, .codex/, AGENTS.md, .cursor/,",
+      "               .cursorrules), and lock the",
+      "               Agent Trust Surface over the result. Idempotent: existing",
+      "               config, hooks, and a clean lock are kept; a drifted lock",
+      "               stops init instead of re-baselining it.",
       "  mcp          Run the MCP server (stdio) so AI coding agents can call",
       "               the check_package tool before installing dependencies.",
       "  guard install  Register SafeInstall as a pre-shell hook for Claude Code",
@@ -157,9 +164,13 @@ async function main(): Promise<void> {
     }
 
     if (argv[0] === "init") {
-      result = await runInitFlow(process.cwd(), argv, {
-        force: argv.includes("--force")
-      });
+      const initOptions = parseInitOptions(argv);
+      if (initOptions instanceof Error) {
+        process.stderr.write(`${initOptions.message}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      result = await runInitFlow(process.cwd(), argv, initOptions);
       writeCliResult(result, json);
       process.exitCode = result.exitCode;
       return;
