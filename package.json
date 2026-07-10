@@ -1,5 +1,6 @@
 {
   "name": "safeinstall-cli",
+  "mcpName": "io.github.mickdownunder/safeinstall",
   "version": "0.11.0",
   "description": "Local-first CLI that blocks risky npm, pnpm, and bun installs before they run. Open source.",
   "packageManager": "pnpm@10.17.0",
@@ -56,8 +57,12 @@
     "sigstore": "^4.1.1"
   },
   "peerDependenciesMeta": {
-    "@modelcontextprotocol/sdk": { "optional": true },
-    "sigstore": { "optional": true }
+    "@modelcontextprotocol/sdk": {
+      "optional": true
+    },
+    "sigstore": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
