@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { formatCommand } from "./output";
 import { fileExists } from "./project-discovery";
+import { findTrustContext } from "./trust-surface";
 import type { CliReason, CliResult } from "./types";
 
 /**
@@ -247,6 +248,7 @@ export async function runGuardSetupFlow(
   options: GuardSetupOptions
 ): Promise<CliResult> {
   const commandString = formatCommand("safeinstall", argv);
+  const existingTrustContext = await findTrustContext(cwd);
   const results: GuardSetupTargetResult[] = [];
   const failures: CliReason[] = [];
 
@@ -280,6 +282,15 @@ export async function runGuardSetupFlow(
     };
   }
 
+  const guardChanged = results.some((result) => result.status !== "already-installed");
+  const trustNextStep = !existingTrustContext
+    ? "Next: run `safeinstall trust lock` to baseline the Agent Trust Surface, so hook and policy tampering is detected."
+    : !existingTrustContext.hasLock
+      ? "The project has a recorded Trust Surface but its lock is missing. Run `safeinstall trust status` and restore the lock before continuing."
+      : guardChanged
+        ? "The guard changed an existing Trust Surface. Review all drift with `safeinstall trust status`; if every change is intentional, approve the new baseline with `safeinstall trust approve`."
+        : "The guard was already registered. Run `safeinstall trust status` to verify the existing baseline; no re-baseline is needed unless drift is reported.";
+
   return {
     mode: "guard",
     decision: "allow",
@@ -297,7 +308,7 @@ export async function runGuardSetupFlow(
     ],
     infos: [
       ...infos,
-      "Next: run `safeinstall trust lock` to baseline the Agent Trust Surface, so hook and policy tampering is detected."
+      trustNextStep
     ],
     affectedPackages: [],
     details: { results: results.map(({ client, configPath, status }) => ({ client, configPath, status })) }

@@ -276,6 +276,20 @@ describe("safeinstall guard install (e2e)", () => {
     expect(cursorRaw).toContain("safeinstall guard cursor");
   });
 
+  it("directs an existing locked project to review and approve the new hook", async () => {
+    const cwd = await createTempDir("safeinstall-guard-install-locked-e2e-");
+    const initialized = await runCli(["init", "--no-guard", "--json"], { cwd });
+    expect(initialized.code).toBe(0);
+
+    const result = await runCli(["guard", "install", "--client", "codex", "--json"], { cwd });
+    expect(result.code).toBe(0);
+
+    const payload = JSON.parse(result.stdout) as { infos: string[] };
+    expect(payload.infos.join(" ")).toContain("safeinstall trust status");
+    expect(payload.infos.join(" ")).toContain("safeinstall trust approve");
+    expect(payload.infos.join(" ")).not.toContain("safeinstall trust lock");
+  });
+
   it("installs the Codex hook idempotently through the real CLI", async () => {
     const cwd = await createTempDir("safeinstall-guard-install-codex-e2e-");
 

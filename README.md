@@ -315,6 +315,8 @@ This writes project-level hook configuration (merged non-destructively, idempote
 - **Codex** — a [`PreToolUse` hook](https://learn.chatgpt.com/docs/hooks#pretooluse) on `Bash` in `.codex/hooks.json`; raw installs are rewritten in-place through the SafeInstall CLI via Codex `updatedInput`. Open `/hooks` in Codex after installation and trust the new project hook before expecting it to run.
 - **Cursor** — a `beforeShellExecution` hook in `.cursor/hooks.json`, registered with `failClosed: true` so a crashed or timed-out guard blocks instead of silently allowing
 
+After registration, the CLI reports the Trust Surface step that matches the project state. A project without a baseline is directed to `safeinstall trust lock`. If a baseline already exists and the guard changed it, review the complete drift with `safeinstall trust status` and run `safeinstall trust approve` only when every change is intentional. Re-running an already-registered guard does not require re-approval unless status reports drift.
+
 ### How the guard decides
 
 The guard never evaluates policy itself — it detects package installs and routes them through the CLI, which owns the decision:
