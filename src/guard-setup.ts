@@ -22,10 +22,23 @@ export type GuardSetupClient = "claude" | "codex" | "cursor";
 
 export const GUARD_HOOK_TIMEOUT_SECONDS = 60;
 
-interface GuardSetupTargetResult {
+export interface GuardSetupTargetResult {
   client: GuardSetupClient;
   configPath: string;
   status: "created" | "updated" | "already-installed";
+}
+
+/** Human-readable line for one guard target, shared with `safeinstall init`. */
+export function describeGuardTarget(result: GuardSetupTargetResult): string {
+  const label = CLIENT_FILES[result.client].label;
+  switch (result.status) {
+    case "created":
+      return `${label}: hook registered in new file ${result.configPath}.`;
+    case "updated":
+      return `${label}: hook added to existing file ${result.configPath}.`;
+    case "already-installed":
+      return `${label}: SafeInstall guard already registered in ${result.configPath}.`;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -248,17 +261,7 @@ export async function runGuardSetupFlow(
     }
   }
 
-  const infos = results.map((result) => {
-    const label = CLIENT_FILES[result.client].label;
-    switch (result.status) {
-      case "created":
-        return `${label}: hook registered in new file ${result.configPath}.`;
-      case "updated":
-        return `${label}: hook added to existing file ${result.configPath}.`;
-      case "already-installed":
-        return `${label}: SafeInstall guard already registered in ${result.configPath}.`;
-    }
-  });
+  const infos = results.map(describeGuardTarget);
 
   if (failures.length > 0) {
     return {
