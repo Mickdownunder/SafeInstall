@@ -18,7 +18,13 @@ async function runGuardHook(
   client: string,
   stdinPayload: string
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  // The guard resolves its policy and trust context from cwd. Spawn every
+  // hook in a fresh temp dir so these tests never read the host repo's
+  // config or trust-surface state (a drifted dev checkout must not change
+  // test outcomes).
+  const cwd = await createTempDir("safeinstall-guard-e2e-");
   const child = spawn(process.execPath, [cliPath, "guard", client], {
+    cwd,
     stdio: ["pipe", "pipe", "pipe"]
   });
 

@@ -85,8 +85,14 @@ describe("CLI end-to-end", () => {
   });
 
   it("emits stable json for blocked installs", async () => {
+    // Isolated fixture with the starter config: running against projectRoot
+    // made the outcome depend on the host repo's trust-surface state.
+    const cwd = await createTempDir("safeinstall-e2e-blocked-");
+    const init = await runCli(["init", "--no-guard", "--no-lock"], { cwd });
+    expect(init.code).toBe(0);
+
     const result = await runCli(["--json", "npm", "install", "github:axios/axios"], {
-      cwd: projectRoot
+      cwd
     });
 
     expect(result.code).toBe(2);
