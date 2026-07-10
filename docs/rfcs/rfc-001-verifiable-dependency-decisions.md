@@ -1,6 +1,6 @@
 # RFC-001: Verifiable Dependency Decisions
 
-- **Status:** Draft R1 — adversarial security review complete, **three CRITICAL findings open** (see §13). Not implementation-ready; the criticals force design decisions that are the owner's to make.
+- **Status:** Draft R1 — adversarial security review complete; the owner decision the criticals forced is **recorded** (see §13 "Decision (owner, 2026-07-10)"): external SHA-pinned verifier + hash-pinned CLI + code-owner review scoped to trust-surface paths. Implementation has not started; R2 is to be drafted against that model.
 - **Author:** SafeInstall maintainers
 - **Created:** 2026-07-09
 - **Revised:** 2026-07-10 (folded in the §13 security review)
@@ -427,6 +427,24 @@ change the ruleset autonomously because each has a real cost:
 My recommendation: **(3) now + (2) as the R2 design target**, because (1)'s
 per-PR friction on a solo project trains you to bypass your own gate, which is
 worse than an honestly-scoped weaker claim.
+
+### Decision (owner, 2026-07-10)
+
+The strongest coherent variant is chosen and is the R2 foundation:
+
+- **(2) in full:** trust verification moves to a source outside PR mutation —
+  a separate, CODEOWNERS-locked verifier repository, referenced from this
+  repo's workflow by commit SHA, with the verifier CLI pinned by hash (not
+  just version). Closes K1.
+- **plus (1), scoped:** code-owner review required exactly on the
+  trust-surface paths (`.github/workflows/**`, `.safeinstall/**`,
+  `safeinstall.config.json`, `.gitattributes`), not on every PR. Closes
+  K2/K3 at the human layer for the rare PRs that touch them.
+- **Interim honesty:** until both land, SECURITY.md documents the weaker
+  guarantee in the (3) wording. No claim ships ahead of its enforcement.
+
+R2 must be drafted against this model; H1's "cryptographic façade" objection
+is thereby resolved by construction, not by wording.
 
 ## Appendix A: Phase 1 empirical findings feeding this spec
 
