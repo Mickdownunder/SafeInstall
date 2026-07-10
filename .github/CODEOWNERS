@@ -3,8 +3,9 @@
 # branch ruleset requires code-owner review. As of this writing the ruleset
 # requires status checks but NOT code-owner review, so this file documents the
 # intended review ownership rather than a gate that is currently enforced.
-# Enforcing it is a maintainer decision (on a solo repo it forces self-approval
-# on every PR) — see RFC-001 §13.
+# Enforcing it needs a second trusted reviewer: GitHub does not let a PR author
+# approve their own change. Until one is added, `trust-base` is the automated
+# boundary and this file makes the remaining human-review requirement explicit.
 #
 # Why this matters: the automatic CI check (safeinstall-trust.yml) catches
 # inconsistent tampering, but a fully consistent rewrite of the whole baseline

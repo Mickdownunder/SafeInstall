@@ -1,0 +1,25 @@
+name: SafeInstall Trust Transition
+
+# Temporary compatibility gate for the PR that introduces the trusted-base
+# workflow. `pull_request_target` workflows only become active after they exist
+# on main. Remove this file after the first successful trust-base validation and
+# switch the branch ruleset from `trust` to `trust-base`.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  trust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - run: npm install -g safeinstall-cli@0.10.1
+      - run: safeinstall trust status --require-lock

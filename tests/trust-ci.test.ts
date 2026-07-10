@@ -53,6 +53,16 @@ describe("scaffoldCiWorkflow", () => {
     // Least privilege.
     expect(content).toContain("permissions:");
     expect(content).toContain("contents: read");
+    // The verifier definition comes from the protected base branch. Candidate
+    // files are checked out without credentials and are never executed.
+    expect(content).toContain("pull_request_target:");
+    expect(content).toContain("trust-base:");
+    expect(content).toContain("persist-credentials: false");
+    expect(content).toContain("working-directory: candidate");
+    expect(content).not.toMatch(/^  pull_request:\s*$/m);
+    // Every third-party action is immutable, not a moving major tag.
+    expect(content).not.toContain("actions/checkout@v4");
+    expect(content).not.toContain("actions/setup-node@v4");
   });
 
   it("emits a workflow pinned to the exact running version, never @latest (no silent no-op)", async () => {
