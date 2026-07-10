@@ -89,7 +89,7 @@ npm install -g safeinstall-cli
 ## Quickstart
 
 ```bash
-safeinstall init                      # create safeinstall.config.json
+safeinstall init                      # config + agent guard hooks + trust lock, in one command
 safeinstall pnpm add axios            # policy runs, then pnpm
 safeinstall npm install               # lockfile-aware project install
 safeinstall check                     # audit direct deps against policy
@@ -213,8 +213,11 @@ safeinstall npm --prefix packages/app ci
 # Utilities
 safeinstall check                     # direct dependency audit
 safeinstall check --json              # machine-readable
-safeinstall init                      # create starter config
-safeinstall init --force              # overwrite existing config
+safeinstall init                      # one-command onboarding: config, guard hooks for
+                                      # detected agents (.claude/, .codex/, .cursor/), trust lock
+safeinstall init --force              # overwrite an existing config (hooks/lock stay idempotent)
+safeinstall init --client codex       # force specific agents instead of detection
+safeinstall init --no-guard --no-lock # config only (the old behavior)
 safeinstall mcp                       # MCP server for AI coding agents
 safeinstall guard install             # register agent shell hooks (Claude Code, Codex, Cursor)
 safeinstall trust lock                # baseline the Agent Trust Surface

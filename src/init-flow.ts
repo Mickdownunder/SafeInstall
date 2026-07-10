@@ -66,7 +66,7 @@ export function parseInitOptions(argv: string[]): InitOptions | Error {
       modeValue = token.slice("--mode=".length);
     } else {
       return new Error(
-        `Unknown init option ${JSON.stringify(token)}. Supported: --force, --client <claude,cursor>, --no-guard, --no-lock, --mode <warn|strict>.`
+        `Unknown init option ${JSON.stringify(token)}. Supported: --force, --client <claude,codex,cursor>, --no-guard, --no-lock, --mode <warn|strict>.`
       );
     }
 
@@ -75,8 +75,8 @@ export function parseInitOptions(argv: string[]): InitOptions | Error {
         return new Error("--client requires a value (claude, cursor, or a comma-separated list).");
       }
       for (const entry of clientValue.split(",").map((part) => part.trim()).filter(Boolean)) {
-        if (entry !== "claude" && entry !== "cursor") {
-          return new Error(`Unsupported --client value ${JSON.stringify(entry)}. Supported: claude, cursor.`);
+        if (entry !== "claude" && entry !== "codex" && entry !== "cursor") {
+          return new Error(`Unsupported --client value ${JSON.stringify(entry)}. Supported: claude, codex, cursor.`);
         }
         if (!clients.includes(entry)) {
           clients.push(entry);
@@ -103,6 +103,7 @@ export function parseInitOptions(argv: string[]): InitOptions | Error {
  */
 const AGENT_MARKERS: Record<GuardSetupClient, string[]> = {
   claude: [".claude", "CLAUDE.md"],
+  codex: [".codex", "AGENTS.md"],
   cursor: [".cursor", ".cursorrules"]
 };
 
@@ -170,7 +171,7 @@ export async function runInitFlow(cwd: string, argv: string[], options: InitOpti
     const clients = options.clients ?? (await detectClients(cwd));
     if (clients.length === 0) {
       state.infos.push(
-        "Guard: no agent configuration detected (.claude/, CLAUDE.md, .cursor/, .cursorrules) — skipped. Force with `safeinstall init --client claude,cursor`."
+        "Guard: no agent configuration detected (.claude/, CLAUDE.md, .codex/, AGENTS.md, .cursor/, .cursorrules) — skipped. Force with `safeinstall init --client claude,codex,cursor`."
       );
       guardSummary = "no agent detected";
     } else {
