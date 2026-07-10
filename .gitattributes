@@ -1,0 +1,6 @@
+# The trust surface hashes locked files byte-for-byte (sha256 in
+# .safeinstall/trust-surface.lock). A CRLF checkout on Windows would change
+# those bytes and report false drift on every clone, so all text files
+# materialize with LF on every platform. All 102 tracked files were already
+# LF in the index when this was added; no renormalization was needed.
+* text=auto eol=lf

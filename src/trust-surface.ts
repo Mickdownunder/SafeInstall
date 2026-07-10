@@ -581,6 +581,14 @@ export interface TrustSurfaceStatus {
  * ledger-head mirror exists in the user's state dir but whose lock file is
  * gone was tampered with: deleting the lock must not silently disable the
  * trust surface.
+ *
+ * The walk never leaves the repository that contains `startDir`: a `.git`
+ * entry (directory in a normal checkout, file in a worktree or submodule)
+ * marks the boundary. Without this stop, a nested checkout — a git worktree
+ * under the main checkout's tree, a submodule, a vendored repo — would
+ * silently inherit the trust context of the enclosing checkout, and its
+ * lock, approvals, and guard decisions would be governed by a baseline it
+ * does not own.
  */
 export async function findTrustContext(
   startDir: string
@@ -593,6 +601,9 @@ export async function findTrustContext(
     }
     if ((await readLedgerHeadMirror(currentDir)) !== undefined) {
       return { root: currentDir, hasLock: false };
+    }
+    if (await fileExists(path.join(currentDir, ".git"))) {
+      return undefined;
     }
 
     const parentDir = path.dirname(currentDir);

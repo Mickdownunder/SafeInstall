@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "safeinstall guard cursor",
+        "timeout": 60,
+        "failClosed": true
+      }
+    ]
+  },
+  "version": 1
+}

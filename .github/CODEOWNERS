@@ -1,8 +1,40 @@
-# The Agent Trust Surface only enforces if changes to it require human review.
-# The automatic CI check (safeinstall-trust.yml) catches inconsistent
-# tampering; a fully consistent rewrite of the whole baseline in one PR is only
-# caught by a human reviewing these diffs. SafeInstall dogfoods its own advice.
-/.safeinstall/            @Mickdownunder
-/safeinstall.config.json  @Mickdownunder
-/.github/workflows/       @Mickdownunder
-/.github/CODEOWNERS       @Mickdownunder
+# CODEOWNERS assigns reviewers to the trust-critical paths below. Assignment
+# alone does not block a merge: it becomes an enforced boundary only when the
+# branch ruleset requires code-owner review. As of this writing the ruleset
+# requires status checks but NOT code-owner review, so this file documents the
+# intended review ownership rather than a gate that is currently enforced.
+# Enforcing it needs a second trusted reviewer: GitHub does not let a PR author
+# approve their own change. Until one is added, `trust-base` is the automated
+# boundary and this file makes the remaining human-review requirement explicit.
+#
+# Why this matters: the automatic CI check (safeinstall-trust.yml) catches
+# inconsistent tampering, but a fully consistent rewrite of the whole baseline
+# in one PR is only caught by a human reviewing these diffs — which is exactly
+# the review this file is meant to gate once the ruleset enforces it.
+#
+# Order matters: the last matching pattern wins, so the default comes first
+# and the trust-critical paths below stay explicit even if the default ever
+# changes.
+
+# Default: everything needs review.
+*                                     @Mickdownunder
+
+# Trust surface baseline and policy config (the files the lock protects).
+/.safeinstall/                        @Mickdownunder
+/safeinstall.config.json              @Mickdownunder
+/.claude/settings.json                @Mickdownunder
+/.cursor/hooks.json                   @Mickdownunder
+
+# CI re-verification anchor and this review map itself.
+/.github/workflows/                   @Mickdownunder
+/.github/CODEOWNERS                   @Mickdownunder
+
+# Trust-surface and guard source: the code that computes the baseline,
+# verifies the ledger, scaffolds CI, and enforces the guard hooks.
+/src/trust-surface.ts                 @Mickdownunder
+/src/trust-flow.ts                    @Mickdownunder
+/src/trust-ledger.ts                  @Mickdownunder
+/src/trust-ci.ts                      @Mickdownunder
+/src/guard-flow.ts                    @Mickdownunder
+/src/guard-setup.ts                   @Mickdownunder
+/src/guard-commands.ts                @Mickdownunder
