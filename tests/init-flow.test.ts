@@ -124,7 +124,8 @@ describe("runInitFlow", () => {
     expect(hookCommands).toContain("safeinstall guard claude");
 
     const lockText = await readFile(path.join(cwd, ".safeinstall", "trust-surface.lock"), "utf8");
-    expect(lockText).toContain(path.join(".claude", "settings.json"));
+    // The lock stores paths normalized to forward slashes on every platform.
+    expect(lockText).toContain(".claude/settings.json");
   });
 
   it("detects Codex via AGENTS.md and writes its hook file before locking", async () => {
@@ -138,7 +139,7 @@ describe("runInitFlow", () => {
     const hooks = JSON.parse(await readFile(path.join(cwd, ".codex", "hooks.json"), "utf8"));
     expect(JSON.stringify(hooks.hooks.PreToolUse)).toContain("safeinstall guard codex");
     const lockText = await readFile(path.join(cwd, ".safeinstall", "trust-surface.lock"), "utf8");
-    expect(lockText).toContain(path.join(".codex", "hooks.json"));
+    expect(lockText).toContain(".codex/hooks.json");
   });
 
   it("honors an explicit --client list instead of detection", async () => {
