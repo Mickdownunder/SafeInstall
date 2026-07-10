@@ -9,6 +9,12 @@
       "hiddenUnicode": []
     },
     {
+      "path": ".codex/hooks.json",
+      "kind": "enforcement",
+      "sha256": "829fc72c0f9f59c2dea4398325aaca5f0914789900bfc36e62f2ee1e1da92a0e",
+      "hiddenUnicode": []
+    },
+    {
       "path": ".cursor/hooks.json",
       "kind": "enforcement",
       "sha256": "5b80ec6dd7c8f9926b58bb2db9156cfb6a21c3890975b12448f020a8034776e7",
@@ -28,6 +34,6 @@
     }
   ],
   "mcpServers": [],
-  "approvedAt": "2026-07-10T18:10:42.476Z",
-  "ledgerHead": "3bcfb6914e820fa77935d904dd8ca56358b9ab9d81c88a86593e161d9915f38d"
+  "approvedAt": "2026-07-10T19:59:11.082Z",
+  "ledgerHead": "0fa4001a0cf9f44cb2ca7a2366ddc81951d8b904bbd2eefa0089494400ca1b04"
 }

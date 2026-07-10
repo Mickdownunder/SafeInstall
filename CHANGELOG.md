@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Guard setup now gives the correct Trust Surface next step.** Fresh projects are directed to create a baseline with `safeinstall trust lock`; projects that already have a baseline are told to review drift with `safeinstall trust status` and intentionally re-baseline guard changes with `safeinstall trust approve`; an idempotent re-run no longer asks for unnecessary approval.
+
 ## 0.11.0 - 2026-07-10
 
 ### Added

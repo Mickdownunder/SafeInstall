@@ -188,6 +188,23 @@ describe("runGuardSetupFlow", () => {
     expect(JSON.stringify(claude)).toContain("safeinstall guard claude");
     expect(JSON.stringify(codex)).toContain("safeinstall guard codex");
     expect(JSON.stringify(cursor)).toContain("safeinstall guard cursor");
+    expect(result.infos.join(" ")).toContain("safeinstall trust lock");
+    expect(result.infos.join(" ")).not.toContain("safeinstall trust approve");
+  });
+
+  it("requires review and approval when a guard changes an existing trust surface", async () => {
+    const cwd = await createTempDir("safeinstall-guard-setup-locked-");
+    await mkdir(path.join(cwd, ".safeinstall"), { recursive: true });
+    await writeFile(path.join(cwd, ".safeinstall", "trust-surface.lock"), "{}\n", "utf8");
+
+    const result = await runGuardSetupFlow(cwd, ["guard", "install", "--client", "codex"], {
+      clients: ["codex"]
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.infos.join(" ")).toContain("safeinstall trust status");
+    expect(result.infos.join(" ")).toContain("safeinstall trust approve");
+    expect(result.infos.join(" ")).not.toContain("safeinstall trust lock");
   });
 
   it("is idempotent on a second run", async () => {
@@ -201,6 +218,24 @@ describe("runGuardSetupFlow", () => {
     const cursor = await readJson(path.join(cwd, ".cursor", "hooks.json"));
     const hooks = (cursor.hooks as Record<string, unknown[]>).beforeShellExecution;
     expect(hooks).toHaveLength(1);
+  });
+
+  it("does not request re-baselining when a locked guard is already installed", async () => {
+    const cwd = await createTempDir("safeinstall-guard-setup-locked-idem-");
+    await runGuardSetupFlow(cwd, ["guard", "install", "--client", "codex"], {
+      clients: ["codex"]
+    });
+    await mkdir(path.join(cwd, ".safeinstall"), { recursive: true });
+    await writeFile(path.join(cwd, ".safeinstall", "trust-surface.lock"), "{}\n", "utf8");
+
+    const result = await runGuardSetupFlow(cwd, ["guard", "install", "--client", "codex"], {
+      clients: ["codex"]
+    });
+
+    expect(result.infos.join(" ")).toContain("already registered");
+    expect(result.infos.join(" ")).toContain("safeinstall trust status");
+    expect(result.infos.join(" ")).toContain("no re-baseline is needed");
+    expect(result.infos.join(" ")).not.toContain("safeinstall trust approve");
   });
 
   it("merges into an existing settings file without losing content", async () => {

@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "safeinstall guard codex",
+            "timeout": 60,
+            "statusMessage": "Checking package safety"
+          }
+        ]
+      }
+    ]
+  }
+}
