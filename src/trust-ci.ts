@@ -93,7 +93,7 @@ jobs:
     steps:
       - name: Check out pull request candidate as data
         if: github.event_name == 'pull_request_target'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: \${{ github.event.pull_request.head.repo.full_name }}
           ref: \${{ github.event.pull_request.head.sha }}
@@ -102,12 +102,12 @@ jobs:
 
       - name: Check out protected main revision
         if: github.event_name == 'push'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: candidate
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
 
