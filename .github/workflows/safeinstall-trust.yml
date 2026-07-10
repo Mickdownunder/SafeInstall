@@ -36,7 +36,7 @@ jobs:
         with:
           node-version: 22
 
-      - run: npm install -g safeinstall-cli@0.10.1
+      - run: npm install -g safeinstall-cli@0.10.2
 
       - run: safeinstall trust status --require-lock
         working-directory: candidate
