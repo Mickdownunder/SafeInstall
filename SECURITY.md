@@ -4,8 +4,8 @@
 
 | Version | Supported |
 |:---|:---|
-| 0.10.x | Yes |
-| < 0.10 | No (upgrade to the latest 0.10.x release) |
+| 0.11.x | Yes |
+| < 0.11 | No (upgrade to the latest 0.11.x release) |
 
 ## Reporting a vulnerability
 
