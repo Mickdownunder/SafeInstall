@@ -36,7 +36,16 @@ jobs:
         with:
           node-version: 22
 
-      - run: npm install -g safeinstall-cli@0.10.2
+      # The verifier is pinned by content hash, not just version (RFC-001 §13
+      # decision, K1(b)): a registry that serves different bytes for the same
+      # version cannot swap the verification logic. The digest is the sha512 of
+      # the v0.11.0 tarball, cross-checked against a local byte-identical
+      # rebuild from the v0.11.0 tag before it was recorded here.
+      - name: Install integrity-pinned verifier
+        run: |
+          curl -fsSL "https://registry.npmjs.org/safeinstall-cli/-/safeinstall-cli-0.11.0.tgz" -o /tmp/safeinstall-cli-0.11.0.tgz
+          echo "f7d978aa2462b6b5c4f3d40a0fb00ca62c76837d5b25ca861ddd86af2b90f17bfc06efc21f4805f15e7c164a0ee3538cddee72664986406d23a60137498e291f  /tmp/safeinstall-cli-0.11.0.tgz" | sha512sum -c -
+          npm install -g /tmp/safeinstall-cli-0.11.0.tgz
 
       - run: safeinstall trust status --require-lock
         working-directory: candidate
