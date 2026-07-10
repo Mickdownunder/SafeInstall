@@ -75,4 +75,4 @@ jobs:
         run: |
           node -e 'const fs=require("node:fs"); const tag=process.env.GITHUB_REF_NAME; if(!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error(`Invalid release tag: ${tag}`); const expected=`safeinstall-cli-${tag.slice(1)}.tgz`; const files=fs.readdirSync("release-artifact"); if(files.length!==1 || files[0]!==expected) throw new Error(`Expected only ${expected}, received ${files.join(", ")}`); fs.renameSync(`release-artifact/${expected}`, "release-artifact/package.tgz");'
 
-      - run: npm publish release-artifact/package.tgz --ignore-scripts --provenance --access public
+      - run: npm publish ./release-artifact/package.tgz --ignore-scripts --provenance --access public
