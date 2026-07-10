@@ -1,9 +1,10 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  createTtyHumanGate,
   runTrustApproveFlow,
   runTrustLockFlow,
   runTrustStatusFlow,
@@ -441,5 +442,49 @@ describe("runTrustApproveFlow", () => {
     const approve = await runTrustApproveFlow(root, ["trust", "approve"], { humanGate: noTty });
     expect(approve.decision).toBe("block");
     expect(approve.reasons[0].code).toBe("trust-approve-not-interactive");
+  });
+});
+
+describe("createTtyHumanGate agent-context refusal", () => {
+  const markers = ["CI", "CLAUDECODE", "CODEX_SHELL", "CURSOR_AGENT"];
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const name of markers) {
+      saved[name] = process.env[name];
+      delete process.env[name];
+    }
+  });
+
+  afterEach(() => {
+    for (const name of markers) {
+      if (saved[name] === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = saved[name];
+      }
+    }
+  });
+
+  for (const name of markers) {
+    it(`refuses to approve when ${name} is set`, async () => {
+      process.env[name] = "1";
+      await expect(createTtyHumanGate().ensureInteractive()).rejects.toThrow(
+        `safeinstall trust approve refuses to run here (${name} is set).`
+      );
+    });
+  }
+
+  it("ignores markers that are explicitly falsy", async () => {
+    // "0"/"false"/"" mean the marker is present but disabled — the gate must
+    // fall through to the TTY check rather than refuse on the name alone.
+    // Whether a controlling TTY exists in this vitest process is environment-
+    // dependent; the assertion is only that the marker error never fires.
+    process.env.CODEX_SHELL = "0";
+    try {
+      await createTtyHumanGate().ensureInteractive();
+    } catch (error) {
+      expect((error as Error).message).not.toContain("CODEX_SHELL is set");
+    }
   });
 });
