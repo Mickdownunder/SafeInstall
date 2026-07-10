@@ -41,8 +41,14 @@ import type { CliReason, CliResult } from "./types";
 
 type TrustSubcommand = "lock" | "status" | "approve" | "unlock";
 
-/** Environment markers of contexts where a human is not at the keyboard. */
-const NON_HUMAN_ENV_MARKERS = ["CI", "CLAUDECODE", "CURSOR_AGENT"];
+/**
+ * Environment markers of contexts where a human is not at the keyboard.
+ * CODEX_SHELL is set by Codex in every shell it spawns (verified empirically
+ * against a live Codex session); CODEX_HOME is deliberately NOT listed — a
+ * human's own shell may export it for configuration, and a false refusal
+ * there would train users to bypass the gate.
+ */
+const NON_HUMAN_ENV_MARKERS = ["CI", "CLAUDECODE", "CODEX_SHELL", "CURSOR_AGENT"];
 
 export interface HumanGate {
   /** Throws with an explanation when no interactive human context exists. */
