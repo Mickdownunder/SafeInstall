@@ -1,7 +1,7 @@
 {
   "name": "safeinstall-cli",
   "mcpName": "io.github.mickdownunder/safeinstall",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Local-first CLI that blocks risky npm, pnpm, and bun installs before they run. Open source.",
   "packageManager": "pnpm@10.17.0",
   "license": "MIT",
@@ -39,7 +39,7 @@
     "dev": "pnpm build && node dist/cli.js",
     "prepack": "pnpm build",
     "pack:smoke": "node scripts/pack-smoke.mjs",
-    "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm pack:smoke",
+    "release:check": "pnpm typecheck && pnpm build && pnpm test && pnpm pack:smoke",
     "replay": "pnpm build && node demo/replay/run.cjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"

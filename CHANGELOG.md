@@ -1,10 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.11.1 - 2026-07-10
+
+### Security
+
+- **`safeinstall trust approve` now refuses Codex sessions.** The human-approval gate blocked `CI`, `CLAUDECODE`, and `CURSOR_AGENT` contexts but had no marker for Codex, so a Codex session on the user's terminal could approve its own trust-surface changes. `CODEX_SHELL` (set by Codex in every shell it spawns) joins the refusal list, and the marker-refusal path gained its first direct tests.
 
 ### Fixed
 
 - **Guard setup now gives the correct Trust Surface next step.** Fresh projects are directed to create a baseline with `safeinstall trust lock`; projects that already have a baseline are told to review drift with `safeinstall trust status` and intentionally re-baseline guard changes with `safeinstall trust approve`; an idempotent re-run no longer asks for unnecessary approval.
+
+### Changed
+
+- Declared the package's official MCP registry name (`mcpName: io.github.mickdownunder/safeinstall`) so the MCP server can be published to registry.modelcontextprotocol.io.
+- `release:check` builds before testing, so the e2e suites always run against the current sources instead of a stale `dist/`.
 
 ## 0.11.0 - 2026-07-10
 

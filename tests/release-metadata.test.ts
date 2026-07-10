@@ -26,7 +26,7 @@ describe("release metadata", () => {
 
     expect(packageJson.private).not.toBe(true);
     expect(packageJson.name).toBe("safeinstall-cli");
-    expect(packageJson.version).toBe("0.11.0");
+    expect(packageJson.version).toBe("0.11.1");
     expect(packageJson.license).toBe("MIT");
 
     // The heavy, capability-rich deps (sigstore, MCP SDK) must NOT be installed
@@ -61,7 +61,9 @@ describe("release metadata", () => {
     expect(packageJson.scripts).toMatchObject({
       prepack: "pnpm build",
       "pack:smoke": "node scripts/pack-smoke.mjs",
-      "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm pack:smoke"
+      // Build before test: the e2e suites run dist/cli.js via ensureBuiltCli,
+      // which skips rebuilding an existing (possibly stale) dist.
+      "release:check": "pnpm typecheck && pnpm build && pnpm test && pnpm pack:smoke"
     });
     expect(packageJson.publishConfig).toMatchObject({
       access: "public"
