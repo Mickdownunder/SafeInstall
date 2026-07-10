@@ -32,6 +32,7 @@ describe("GitHub workflow security boundaries", () => {
     expect(publishJob).toContain("id-token: write");
     expect(publishJob).not.toContain("actions/checkout@");
     expect(publishJob).not.toContain("pnpm install");
-    expect(publishJob).toContain("npm publish release-artifact/package.tgz --ignore-scripts --provenance");
+    expect(publishJob).toContain("npm publish ./release-artifact/package.tgz --ignore-scripts --provenance");
+    expect(publishJob).not.toContain("npm publish release-artifact/package.tgz");
   });
 });
