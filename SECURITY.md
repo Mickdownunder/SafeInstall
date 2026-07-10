@@ -41,6 +41,31 @@ The following are explicitly out of scope:
 - Social engineering attacks that require the user to intentionally misconfigure SafeInstall
 - Denial-of-service through extremely large lockfiles or dependency trees (SafeInstall inherits the performance characteristics of the underlying package manager)
 
+## Trust surface guarantee (current scope)
+
+The Agent Trust Surface (`safeinstall trust lock` / `trust status`) currently
+provides the following, stated precisely so nobody relies on more than it
+delivers:
+
+- **Enforced automatically:** inconsistent tampering. Any change to a locked
+  file (policy config, agent hook files, `.safeinstall/`) that does not also
+  consistently rewrite the lock and ledger is detected locally before guard
+  decisions and installs, and in CI on every pull request.
+- **Requires human review:** a fully consistent rewrite. An attacker who can
+  edit a pull request can today rewrite the policy, the lock, the ledger, and
+  the verification workflow together; the committed baseline has no reference
+  outside the repository yet. The real security boundary for that case is
+  human review of the trust-surface diff.
+
+This gap is a known finding from the adversarial review in
+[RFC-001 §13](docs/rfcs/rfc-001-verifiable-dependency-decisions.md) (K1–K3).
+The decided fix (2026-07-10, in progress): trust verification will run from a
+source outside pull-request mutation — a separate, code-owner-locked verifier
+repository referenced by commit SHA, with the verifier CLI pinned by hash —
+combined with code-owner review required on trust-surface paths. Until that
+lands, treat the automatic guarantee as tamper-evidence against inconsistent
+changes, not tamper-proofing against a fully consistent rewrite.
+
 ## Provenance
 
 SafeInstall is published to npm with [Sigstore provenance attestations](https://docs.npmjs.com/generating-provenance-statements) via GitHub Actions trusted publishing. Every release is cryptographically traceable to a specific commit and workflow run.
