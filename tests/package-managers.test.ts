@@ -50,7 +50,14 @@ async function createTempDir(prefix: string): Promise<string> {
 }
 
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((tempDir) => rm(tempDir, { recursive: true, force: true })));
+  // On Windows the signal test's stub grandchild can briefly outlive the
+  // aborted cmd.exe wrapper and hold handles inside the temp dir, so a
+  // single rm attempt races into ENOTEMPTY. Retry until the handles close.
+  await Promise.all(
+    tempDirs
+      .splice(0)
+      .map((tempDir) => rm(tempDir, { recursive: true, force: true, maxRetries: 25, retryDelay: 200 }))
+  );
 });
 
 describe("buildPackageManagerCommand", () => {
@@ -121,7 +128,10 @@ describe("runPackageManager", () => {
     // Node equivalent of the previous sh stub (arg logging + `trap 'exit 0'
     // INT TERM` + spin). The deadman timer guarantees the stub cannot outlive
     // the test run as an orphan — relevant on Windows, where terminating the
-    // cmd.exe wrapper does not terminate this grandchild process.
+    // cmd.exe wrapper does not terminate this grandchild process. It fires
+    // 2s after spawn: far beyond the 50ms abort below, but short enough that
+    // the surviving Windows grandchild releases its temp-dir handles while
+    // the afterEach cleanup is still retrying.
     await writeStubExecutable(
       stubDir,
       "pnpm",
@@ -129,7 +139,7 @@ describe("runPackageManager", () => {
 process.on("SIGINT", () => process.exit(0));
 process.on("SIGTERM", () => process.exit(0));
 setInterval(() => {}, 1000);
-setTimeout(() => process.exit(97), 15000);
+setTimeout(() => process.exit(97), 2000);
 `
     );
 
