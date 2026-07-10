@@ -26,8 +26,8 @@
 SafeInstall runs your **policy before your package manager** — locally, blocking by default. One tool, three layers of defense:
 
 - 🧑‍💻 **For the humans who install** — prefix any command: `safeinstall pnpm add axios`. Policy runs, then pnpm. Release age, install scripts, untrusted sources, typo-squats, and cryptographic provenance are [checked before anything touches disk](#policy-defaults).
-- 🤖 **For the AI agents that install for you** — an [MCP tool](#mcp-server--ai-agents) agents can call, plus an [enforced shell guard](#agent-guard--enforcement-not-advice) that intercepts every install command in Claude Code and Cursor *before it runs* — whether or not the agent cooperates.
-- 🔒 **For the files that program the agents** — the [Agent Trust Surface](#agent-trust-surface--self-defending-policy): a committed hash baseline of your config, hooks, rules, and MCP files, reconciled locally and re-verified in CI, so a prompt-injected agent can't quietly weaken the rules and own every future session.
+- 🤖 **For the AI agents that install for you** — an [MCP tool](#mcp-server--ai-agents) agents can call, plus a [shell guard](#agent-guard--enforcement-not-advice) that intercepts install commands in Claude Code and Cursor *before they run*. Best-effort shell interception — one defense layer that fires even when the agent isn't cooperating, not a lossless guarantee.
+- 🔒 **For the files that program the agents** — the [Agent Trust Surface](#agent-trust-surface--self-defending-policy): a committed hash baseline of your config, hooks, rules, and MCP files, reconciled locally and re-verified in CI, so tampering with the rules surfaces as drift instead of silently owning every future session — with a fully consistent rewrite caught by human review of the diff, not the automated check alone.
 
 ---
 
@@ -299,7 +299,7 @@ The MCP SDK ships as an **optional dependency**, lazily loaded only when `safein
 
 ## Agent guard — enforcement, not advice
 
-The MCP tool is advisory: an agent *can* consult it. The **guard is enforcement**: it hooks into the agent's shell layer and intercepts every command *before it runs* — whether or not the agent knows SafeInstall exists.
+The MCP tool is advisory: an agent *can* consult it. The guard is a stronger layer: it hooks into the agent's shell layer and screens commands *before they run*, firing even when the agent doesn't know SafeInstall exists. This is best-effort shell interception — one layer of defense in depth, not a complete boundary; its command parsing is not exhaustive (see [Guard limitations](#guard-limitations)).
 
 ```bash
 safeinstall guard install          # registers hooks for Claude Code and Cursor
@@ -334,7 +334,7 @@ The deny message hands the agent the exact rewritten command, so a well-behaved 
 
 - The `safeinstall` binary must be on the agent's `PATH` (`npm install -g safeinstall-cli`).
 - `npx` and friends are gated with **ask**, not policy-checked: SafeInstall's engine evaluates installs, not one-off executions. The local-binary fast path mirrors the runners' own resolution (nearest `node_modules/.bin`), so approved project tooling never prompts.
-- A determined adversary can bypass shell-level analysis (e.g. by writing a script file first, or via `node -e`). The guard raises the bar as one layer of defense in depth — combine it with the MCP tool and CI checks.
+- A determined adversary can bypass shell-level analysis — installs can run out of band (a script file written first, `node -e`, and similar), and command-line parsing itself is not exhaustive. Do not rely on the shell layer alone: it raises the bar as one layer of defense in depth — combine it with the MCP tool and CI checks.
 
 ---
 
@@ -352,7 +352,7 @@ safeinstall trust approve       # review drift and re-baseline (interactive only
 safeinstall trust unlock        # remove the baseline (lock, ledger, head mirror)
 ```
 
-`--ci github` writes `.github/workflows/safeinstall-trust.yml`, which re-verifies the committed baseline on every pull request by running `safeinstall trust status --require-lock` with the CLI pinned to an exact version. Commit `.safeinstall/` and that workflow together. An existing workflow file is never overwritten, and the workflow file is itself part of the tracked surface, so disabling it is detected as drift.
+`--ci github` writes `.github/workflows/safeinstall-trust.yml`, which re-verifies the committed baseline on every pull request by running `safeinstall trust status --require-lock` with the CLI pinned to an exact version. Commit `.safeinstall/` and that workflow together. An existing workflow file is never overwritten, and the workflow file is itself part of the tracked surface, so *inconsistent* tampering with it shows up as drift — but a consistent rewrite of the workflow and the lock together is caught by human review of the diff, not the automated check (see the CODEOWNERS note below).
 
 Two things you must do for the check to actually enforce, because a CLI cannot set them for you:
 
@@ -371,14 +371,14 @@ Instruction content drift only warns by default because Claude Code writes to `C
 
 ### How it defends itself
 
-- **CI as the real anchor.** Run `safeinstall trust lock --ci github` to scaffold a workflow that re-hashes the trust surface against the committed lock on every pull request, on a machine the agent does not control, with the CLI pinned to an exact version. This is the durable guarantee: tampering that happened on a compromised local machine does not survive review. (Wiring the Action directly also works — but pin its `version:` input; the default `latest` floats.)
+- **CI raises the bar; human review of the diff is the anchor.** Run `safeinstall trust lock --ci github` to scaffold a workflow that re-hashes the trust surface against the committed lock on every pull request, on a machine the agent does not control, with the CLI pinned to an exact version. Honest boundary: that workflow runs `on: pull_request`, so GitHub executes the workflow *definition from the PR head ref* — the same PR can change it. It reliably catches *inconsistent* tampering; a PR that consistently rewrites the workflow, the lock, and the config together is caught only by a human reviewing the trust-surface diff. Treat the CI check as a strong tripwire layered under required human review of that diff, not as a standalone guarantee. (Wiring the Action directly also works — but pin its `version:` input; the default `latest` floats.)
 - **Reconciliation on top of interception.** The guard is the fast layer; every `safeinstall` install/check also reconciles against the baseline. Deleting the hook to silence the guard, or editing a protected file, shows up as drift on the next SafeInstall run locally — and, regardless, fails CI re-verification.
 - **Human-gated changes.** Both commands that relax enforcement require a human: `safeinstall trust approve` reads its confirmation from the controlling terminal (`/dev/tty`), never from stdin, and `trust unlock` likewise requires a controlling terminal — both refuse to run in CI or known agent-hook contexts, so an agent cannot silently re-baseline or remove the surface. `trust status` is read-only (safe in CI, never mutates the repo).
 - **Hash-chained ledger.** Baseline decisions are chained in `.safeinstall/ledger.jsonl`; the lock binds to a ledger entry (including its enforcement `mode`), so editing the committed lock to drop a file or downgrade strict→warn breaks the binding. A local head mirror under `~/.safeinstall/` catches naive/accidental history rewrites; a vanished mirror is self-healed from the verified head on the next clean run, so a fresh clone establishes it automatically without noise.
 
 ### Trust surface limitations — read honestly
 
-- **The durable guarantee is the committed lock verified by CI, not the local mirror.** Locally this is **tamper-evident against mistakes and non-targeted tampering, not tamper-proof.** A scheme-aware agent in your own user account can bypass interception (e.g. an install driven from `node -e`), rewrite the in-repo lock and ledger into a consistent state, and delete the local head mirror — user space cannot stop that, because the agent can read and delete anything you can. What it cannot do is subvert re-verification of the committed lock on a separate machine. **If you rely on this against a capable adversary, you must run the CI check.**
+- **The strongest layer is the committed lock reviewed on a PR, not the local mirror.** Locally this is **tamper-evident against mistakes and non-targeted tampering, not tamper-proof.** A scheme-aware agent in your own user account can bypass interception (e.g. an install driven from `node -e`), rewrite the in-repo lock and ledger into a consistent state, and delete the local head mirror — user space cannot stop that, because the agent can read and delete anything you can. CI re-verification runs on a separate machine, but it executes the workflow definition from the PR, so a consistent rewrite that also neutralizes the workflow passes the automated check. **The residual guarantee against a capable adversary is human review of the trust-surface diff (workflow, lock, and config) on every dependency PR — enforced by a ruleset that requires that review. Run the CI check *and* require that review; neither alone is sufficient.**
 - It watches shell commands and files, not intent: an install performed by a program the agent writes and runs is caught by reconciliation on the next SafeInstall/CI run, not prevented at the moment of the call.
 - A missing local head mirror is ambiguous (a fresh clone has none too), so on a clean verify it is self-healed from the committed ledger head rather than warned or blocked — the mirror is a best-effort local convenience, never the guarantee.
 
@@ -666,7 +666,7 @@ MIT — see [LICENSE](./LICENSE).
 
 SafeInstall is provided as-is under the MIT license. It is a policy tool that enforces configurable rules on package installs. It does not guarantee the safety of any package, does not detect all supply-chain attacks, and does not replace professional security review. Use at your own risk. The authors are not liable for any damages arising from the use of this software.
 
-Last verified: 2026-07-09
+Last verified: 2026-07-10
 
 ---
 

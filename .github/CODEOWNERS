@@ -1,7 +1,15 @@
-# The Agent Trust Surface only enforces if changes to it require human review.
-# The automatic CI check (safeinstall-trust.yml) catches inconsistent
-# tampering; a fully consistent rewrite of the whole baseline in one PR is only
-# caught by a human reviewing these diffs. SafeInstall dogfoods its own advice.
+# CODEOWNERS assigns reviewers to the trust-critical paths below. Assignment
+# alone does not block a merge: it becomes an enforced boundary only when the
+# branch ruleset requires code-owner review. As of this writing the ruleset
+# requires status checks but NOT code-owner review, so this file documents the
+# intended review ownership rather than a gate that is currently enforced.
+# Enforcing it is a maintainer decision (on a solo repo it forces self-approval
+# on every PR) — see RFC-001 §13.
+#
+# Why this matters: the automatic CI check (safeinstall-trust.yml) catches
+# inconsistent tampering, but a fully consistent rewrite of the whole baseline
+# in one PR is only caught by a human reviewing these diffs — which is exactly
+# the review this file is meant to gate once the ruleset enforces it.
 #
 # Order matters: the last matching pattern wins, so the default comes first
 # and the trust-critical paths below stay explicit even if the default ever
