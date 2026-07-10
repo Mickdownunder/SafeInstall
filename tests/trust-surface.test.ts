@@ -126,6 +126,9 @@ describe("snapshotTrustSurface + computeTrustSurfaceDrift", () => {
     const root = await createTempDir("safeinstall-trust-");
     await writeFile(path.join(root, "safeinstall.config.json"), "{}\n");
     await writeFile(path.join(root, "AGENTS.md"), "# rules\n");
+    await mkdir(path.join(root, ".codex"), { recursive: true });
+    await writeFile(path.join(root, ".codex", "hooks.json"), JSON.stringify({ hooks: {} }));
+    await writeFile(path.join(root, ".codex", "config.toml"), "[features]\nhooks = true\n");
     await mkdir(path.join(root, ".cursor", "rules"), { recursive: true });
     await writeFile(path.join(root, ".cursor", "rules", "main.md"), "be good\n");
     await writeFile(
@@ -141,6 +144,8 @@ describe("snapshotTrustSurface + computeTrustSurfaceDrift", () => {
     const paths = snapshot.files.map((file) => file.path).sort();
     expect(paths).toContain("safeinstall.config.json");
     expect(paths).toContain("AGENTS.md");
+    expect(paths).toContain(".codex/hooks.json");
+    expect(paths).toContain(".codex/config.toml");
     expect(paths).toContain(".cursor/rules/main.md");
     expect(snapshot.mcpServers.map((server) => server.name)).toContain("gh");
   });
@@ -205,6 +210,8 @@ describe("isTrustSurfacePath", () => {
     const root = "/project";
     expect(isTrustSurfacePath(root, "/project/safeinstall.config.json")).toBe(true);
     expect(isTrustSurfacePath(root, "/project/.cursor/hooks.json")).toBe(true);
+    expect(isTrustSurfacePath(root, "/project/.codex/hooks.json")).toBe(true);
+    expect(isTrustSurfacePath(root, "/project/.codex/config.toml")).toBe(true);
     expect(isTrustSurfacePath(root, "/project/.cursor/rules/x.md")).toBe(true);
     expect(isTrustSurfacePath(root, "/project/.github/workflows/safeinstall-trust.yml")).toBe(true);
     expect(isTrustSurfacePath(root, "/project/.safeinstall/trust-surface.lock")).toBe(true);

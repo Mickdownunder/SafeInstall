@@ -26,7 +26,7 @@
 SafeInstall runs your **policy before your package manager** — locally, blocking by default. One tool, three layers of defense:
 
 - 🧑‍💻 **For the humans who install** — prefix any command: `safeinstall pnpm add axios`. Policy runs, then pnpm. Release age, install scripts, untrusted sources, typo-squats, and cryptographic provenance are [checked before anything touches disk](#policy-defaults).
-- 🤖 **For the AI agents that install for you** — an [MCP tool](#mcp-server--ai-agents) agents can call, plus a [shell guard](#agent-guard--enforcement-not-advice) that intercepts install commands in Claude Code and Cursor *before they run*. Best-effort shell interception — one defense layer that fires even when the agent isn't cooperating, not a lossless guarantee.
+- 🤖 **For the AI agents that install for you** — an [MCP tool](#mcp-server--ai-agents) agents can call, plus a [shell guard](#agent-guard--enforcement-not-advice) that intercepts install commands in Claude Code, Codex, and Cursor *before they run*. Best-effort shell interception — one defense layer that fires even when the agent isn't cooperating, not a lossless guarantee.
 - 🔒 **For the files that program the agents** — the [Agent Trust Surface](#agent-trust-surface--self-defending-policy): a committed hash baseline of your config, hooks, rules, and MCP files, reconciled locally and re-verified in CI, so tampering with the rules surfaces as drift instead of silently owning every future session — with a fully consistent rewrite caught by human review of the diff, not the automated check alone.
 
 ---
@@ -216,7 +216,7 @@ safeinstall check --json              # machine-readable
 safeinstall init                      # create starter config
 safeinstall init --force              # overwrite existing config
 safeinstall mcp                       # MCP server for AI coding agents
-safeinstall guard install             # register agent shell hooks (Claude Code, Cursor)
+safeinstall guard install             # register agent shell hooks (Claude Code, Codex, Cursor)
 safeinstall trust lock                # baseline the Agent Trust Surface
 safeinstall trust lock --ci github    # ...and scaffold the CI re-verification workflow
 safeinstall trust status              # reconcile the trust surface (exit 2 on drift; read-only)
@@ -247,7 +247,7 @@ For `pnpm install` and `npm install` / `npm ci`, dependency versions come from t
 
 ## MCP server / AI agents
 
-The CLI reaches humans who type `safeinstall`. The **MCP server reaches every AI coding agent** — Claude Code, Cursor, Windsurf, Cline — so the policy engine is consulted *before* an agent suggests or runs an install, without anyone typing anything.
+The CLI reaches humans who type `safeinstall`. The **MCP server reaches AI coding agents** — Claude Code, Codex, Cursor, Windsurf, Cline — so the policy engine can be consulted *before* an agent suggests or runs an install, without anyone typing anything.
 
 `safeinstall mcp` starts a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio that exposes one tool, `check_package`, backed by the exact same engine as the CLI (release age, install scripts, untrusted sources, typo-squat, Sigstore provenance, and provenance continuity).
 
@@ -302,13 +302,14 @@ The MCP SDK ships as an **optional dependency**, lazily loaded only when `safein
 The MCP tool is advisory: an agent *can* consult it. The guard is a stronger layer: it hooks into the agent's shell layer and screens commands *before they run*, firing even when the agent doesn't know SafeInstall exists. This is best-effort shell interception — one layer of defense in depth, not a complete boundary; its command parsing is not exhaustive (see [Guard limitations](#guard-limitations)).
 
 ```bash
-safeinstall guard install          # registers hooks for Claude Code and Cursor
-safeinstall guard install --client cursor   # or just one client
+safeinstall guard install                  # Claude Code, Codex, and Cursor
+safeinstall guard install --client codex   # or just one client
 ```
 
 This writes project-level hook configuration (merged non-destructively, idempotent on re-runs):
 
 - **Claude Code** — a `PreToolUse` hook on the `Bash` tool in `.claude/settings.json`
+- **Codex** — a [`PreToolUse` hook](https://learn.chatgpt.com/docs/hooks#pretooluse) on `Bash` in `.codex/hooks.json`; raw installs are rewritten in-place through the SafeInstall CLI via Codex `updatedInput`. Open `/hooks` in Codex after installation and trust the new project hook before expecting it to run.
 - **Cursor** — a `beforeShellExecution` hook in `.cursor/hooks.json`, registered with `failClosed: true` so a crashed or timed-out guard blocks instead of silently allowing
 
 ### How the guard decides
@@ -318,29 +319,30 @@ The guard never evaluates policy itself — it detects package installs and rout
 | Agent runs | Guard response |
 |:---|:---|
 | `git status`, `npm test`, ... | Allowed — not an install |
-| `npm install axios` (also `npm i`, `pnpm add`, `bun a`, `npm ci`, `corepack pnpm add`, `pnpm --dir app add`, ...) | **Denied**, agent is told to run `safeinstall npm install axios` instead |
-| `cd app && npm i axios && npm test` | **Denied**, rewrite prefixes only the install segment |
+| `npm install axios` (also `npm i`, `pnpm add`, `bun a`, `npm ci`, `corepack pnpm add`, `pnpm --dir app add`, ...) | Claude/Cursor: **denied** with the SafeInstall replacement. Codex: **rewritten in-place** to `safeinstall npm install axios` before execution |
+| `cd app && npm i axios && npm test` | Rewrite prefixes only the install segment; Codex applies it directly, Claude/Cursor return it to the agent |
 | `safeinstall npm install axios` | Allowed — already routed through the policy engine |
 | `npm install $(cat list.txt)`, `bash -c "npm install ..."` | **Denied** — cannot be analyzed safely (fail-closed) |
 | `yarn add axios` | **Denied** — SafeInstall cannot policy-check yarn |
 | `npx tsc` with `typescript` installed locally | Allowed — npx resolves the local binary, nothing is downloaded |
-| `npx create-next-app`, `pnpm dlx ...`, `bunx ...`, `yarn dlx ...` | **Ask** — downloads and executes registry code, so the user must approve |
+| `npx create-next-app`, `pnpm dlx ...`, `bunx ...`, `yarn dlx ...` | Claude/Cursor: **ask**. Codex: **deny** because Codex `PreToolUse` does not currently support an `ask` decision |
 
 Routing through the CLI matters more than a simple allow/deny: a vetted-but-raw `npm install` would still execute lifecycle scripts. Through SafeInstall, the same install gets the full policy evaluation *and* runs with install scripts disabled.
 
-The deny message hands the agent the exact rewritten command, so a well-behaved agent self-corrects in one step — blocking becomes steering. The guard needs no network access and answers in milliseconds.
+Claude and Cursor receive the exact rewritten command so a well-behaved agent self-corrects in one step. Codex can apply that rewrite itself through `updatedInput`. The guard needs no network access and answers in milliseconds.
 
 ### Guard limitations
 
 - The `safeinstall` binary must be on the agent's `PATH` (`npm install -g safeinstall-cli`).
-- `npx` and friends are gated with **ask**, not policy-checked: SafeInstall's engine evaluates installs, not one-off executions. The local-binary fast path mirrors the runners' own resolution (nearest `node_modules/.bin`), so approved project tooling never prompts.
+- Codex requires users to review and trust new or changed project hooks with `/hooks`; until then Codex skips the hook. Codex currently intercepts only supported simple shell calls, not every `unified_exec` path, so the hook is still a defense-in-depth guardrail rather than a complete boundary.
+- `npx` and friends are not policy-checked: SafeInstall's engine evaluates installs, not one-off executions. Claude/Cursor request approval; Codex fails closed because its `PreToolUse` hook does not currently support `ask`. The local-binary fast path mirrors the runners' own resolution (nearest `node_modules/.bin`), so approved project tooling does not trigger the remote-runner gate.
 - A determined adversary can bypass shell-level analysis — installs can run out of band (a script file written first, `node -e`, and similar), and command-line parsing itself is not exhaustive. Do not rely on the shell layer alone: it raises the bar as one layer of defense in depth — combine it with the MCP tool and CI checks.
 
 ---
 
 ## Agent Trust Surface — self-defending policy
 
-The guard stops raw installs. But a prompt-injected agent does not have to fight the guard — it can just **rewrite the rules**: weaken `safeinstall.config.json`, delete the hook from `.cursor/hooks.json`, plant an invisible-Unicode instruction in `AGENTS.md`, or register a malicious MCP server. Those files program the *next* agent session; in the agent era they are the persistence mechanism, the new crontab.
+The guard stops raw installs. But a prompt-injected agent does not have to fight the guard — it can just **rewrite the rules**: weaken `safeinstall.config.json`, delete an agent hook, disable Codex hooks in `.codex/config.toml`, plant an invisible-Unicode instruction in `AGENTS.md`, or register a malicious MCP server. Those files program the *next* agent session; in the agent era they are the persistence mechanism, the new crontab.
 
 `safeinstall trust lock` records a hash baseline of that surface. SafeInstall then reconciles the real state against it before guard decisions and before every install/check, and can re-verify it in CI.
 
@@ -363,7 +365,7 @@ Two things you must do for the check to actually enforce, because a CLI cannot s
 
 | Zone | Files | On drift |
 |:---|:---|:---|
-| **Enforcement** | `safeinstall.config.json`, `.claude/settings.json`, `.cursor/hooks.json`, `.github/workflows/safeinstall-trust.yml`, `.safeinstall/` | Every agent command is denied until a human approves |
+| **Enforcement** | `safeinstall.config.json`, `.claude/settings.json`, `.codex/hooks.json`, `.codex/config.toml`, `.cursor/hooks.json`, `.github/workflows/safeinstall-trust.yml`, `.safeinstall/` | Every agent command is denied until a human approves |
 | **Instruction** | `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.cursor/rules/**`, `.github/copilot-instructions.md` | Hidden Unicode is always blocked; content drift warns (blocks in `--mode strict`) |
 | **Tool** | `.mcp.json`, `.cursor/mcp.json`, MCP blocks in `.claude/settings.json` | Installs and runners are denied until a human approves; unpinned MCP servers are flagged |
 
@@ -641,7 +643,7 @@ To enforce policy during the actual install step (not just a check):
 
 SafeInstall works with any tool that runs package manager commands — including AI coding assistants:
 
-**Cursor** · **GitHub Copilot** · **Cline** · **Claude Code** · **Windsurf** · **Aider** · **Devin** · **Continue**
+**Cursor** · **Codex** · **GitHub Copilot** · **Cline** · **Claude Code** · **Windsurf** · **Aider** · **Devin** · **Continue**
 
 Just prefix your install commands with `safeinstall`. Same workflow, one safety layer.
 

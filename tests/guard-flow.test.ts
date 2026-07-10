@@ -44,6 +44,20 @@ describe("parseGuardEvent", () => {
     expect(parseGuardEvent(event, "claude")).toMatchObject({ kind: "not-applicable" });
   });
 
+  it("extracts the command and cwd from a Codex PreToolUse Bash event", () => {
+    const event = {
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      cwd: "/tmp/project",
+      tool_input: { command: "pnpm add zod" }
+    };
+    expect(parseGuardEvent(event, "codex")).toEqual({
+      kind: "shell-command",
+      command: "pnpm add zod",
+      cwd: "/tmp/project"
+    });
+  });
+
   it("extracts the command and cwd from a Cursor beforeShellExecution event", () => {
     const event = {
       hook_event_name: "beforeShellExecution",
@@ -93,6 +107,7 @@ describe("decideGuard", () => {
   it("denies raw installs and hands the agent the rewritten command", async () => {
     const decision = await decideGuard("npm i axios && npm test");
     expect(decision.action).toBe("deny");
+    expect(decision.updatedCommand).toBe("safeinstall npm install axios && npm test");
     expect(decision.agentMessage).toContain("safeinstall npm install axios && npm test");
     expect(decision.agentMessage).toContain("lifecycle scripts stay disabled");
     expect(decision.userMessage).toBeTruthy();
@@ -163,6 +178,7 @@ describe("decideGuard", () => {
     const cwd = await createTempDir("safeinstall-guard-mixed-");
     const decision = await decideGuard("npm install axios && npx create-next-app", cwd);
     expect(decision.action).toBe("deny");
+    expect(decision.updatedCommand).toBeUndefined();
   });
 });
 
@@ -250,6 +266,57 @@ describe("renderGuardResponse", () => {
         permissionDecisionReason: "Run safeinstall instead."
       }
     });
+  });
+
+  it("renders a Codex allow as no output (no opinion)", () => {
+    const response = renderGuardResponse({ action: "allow" }, "codex");
+    expect(response.exitCode).toBe(0);
+    expect(response.stdout).toBeUndefined();
+  });
+
+  it("rewrites a raw install through SafeInstall using Codex updatedInput", () => {
+    const response = renderGuardResponse(
+      {
+        action: "deny",
+        updatedCommand: "safeinstall npm install axios",
+        agentMessage: "Use SafeInstall."
+      },
+      "codex"
+    );
+    expect(JSON.parse(response.stdout ?? "")).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+        updatedInput: { command: "safeinstall npm install axios" },
+        additionalContext: "SafeInstall routed this package-manager command through its policy-enforcing CLI."
+      }
+    });
+  });
+
+  it("renders a Codex policy block as deny", () => {
+    const response = renderGuardResponse(
+      { action: "deny", userMessage: "Blocked.", agentMessage: "Trust surface drifted." },
+      "codex"
+    );
+    expect(JSON.parse(response.stdout ?? "")).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "Trust surface drifted."
+      }
+    });
+  });
+
+  it("fails closed for Codex runner approval because PreToolUse ask is unsupported", () => {
+    const response = renderGuardResponse(
+      { action: "ask", userMessage: "npx fetches remote code.", agentMessage: "Ask the user." },
+      "codex"
+    );
+    const output = JSON.parse(response.stdout ?? "") as {
+      hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+    };
+    expect(output.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(output.hookSpecificOutput.permissionDecisionReason).toContain("cannot request approval yet");
   });
 
   it("renders a Cursor allow with an explicit permission", () => {

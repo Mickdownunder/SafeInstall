@@ -8,7 +8,8 @@ import type { CliReason, CliResult } from "./types";
 /**
  * `safeinstall guard install` — writes project-level hook configuration so
  * AI coding agents cannot run raw package installs. Supports Claude Code
- * (`.claude/settings.json`, PreToolUse/Bash) and Cursor
+ * (`.claude/settings.json`, PreToolUse/Bash), Codex
+ * (`.codex/hooks.json`, PreToolUse/Bash), and Cursor
  * (`.cursor/hooks.json`, beforeShellExecution).
  *
  * Merging is conservative: existing files are parsed, existing unrelated
@@ -17,7 +18,7 @@ import type { CliReason, CliResult } from "./types";
  * idempotent — an existing SafeInstall guard entry is detected and skipped.
  */
 
-export type GuardSetupClient = "claude" | "cursor";
+export type GuardSetupClient = "claude" | "codex" | "cursor";
 
 export const GUARD_HOOK_TIMEOUT_SECONDS = 60;
 
@@ -35,8 +36,11 @@ function guardCommand(client: GuardSetupClient): string {
   return `safeinstall guard ${client}`;
 }
 
-function isGuardCommand(value: unknown): boolean {
-  return typeof value === "string" && /(^|\/)safeinstall guard\b/.test(value);
+function isGuardCommand(value: unknown, client: GuardSetupClient): boolean {
+  return (
+    typeof value === "string" &&
+    new RegExp(`(^|[\\\\/])safeinstall(?:\\.cmd)?\\s+guard\\s+${client}(?:\\s|$)`).test(value)
+  );
 }
 
 /**
@@ -53,7 +57,7 @@ export function mergeClaudeSettings(existing: Record<string, unknown>): Record<s
       continue;
     }
     for (const hook of group.hooks) {
-      if (isRecord(hook) && isGuardCommand(hook.command)) {
+      if (isRecord(hook) && isGuardCommand(hook.command, "claude")) {
         return undefined;
       }
     }
@@ -76,6 +80,43 @@ export function mergeClaudeSettings(existing: Record<string, unknown>): Record<s
 }
 
 /**
+ * Merge the SafeInstall PreToolUse hook into a Codex hooks.json object.
+ * Returns undefined when the guard is already registered.
+ */
+export function mergeCodexHooks(existing: Record<string, unknown>): Record<string, unknown> | undefined {
+  const config = { ...existing };
+  const hooks = isRecord(config.hooks) ? { ...config.hooks } : {};
+  const preToolUse = Array.isArray(hooks.PreToolUse) ? [...hooks.PreToolUse] : [];
+
+  for (const group of preToolUse) {
+    if (!isRecord(group) || !Array.isArray(group.hooks)) {
+      continue;
+    }
+    for (const hook of group.hooks) {
+      if (isRecord(hook) && isGuardCommand(hook.command, "codex")) {
+        return undefined;
+      }
+    }
+  }
+
+  preToolUse.push({
+    matcher: "Bash",
+    hooks: [
+      {
+        type: "command",
+        command: guardCommand("codex"),
+        timeout: GUARD_HOOK_TIMEOUT_SECONDS,
+        statusMessage: "Checking package safety"
+      }
+    ]
+  });
+
+  hooks.PreToolUse = preToolUse;
+  config.hooks = hooks;
+  return config;
+}
+
+/**
  * Merge the SafeInstall beforeShellExecution hook into a Cursor hooks.json
  * object. Returns undefined when the guard is already registered.
  */
@@ -87,7 +128,7 @@ export function mergeCursorHooks(existing: Record<string, unknown>): Record<stri
     : [];
 
   for (const hook of beforeShellExecution) {
-    if (isRecord(hook) && isGuardCommand(hook.command)) {
+    if (isRecord(hook) && isGuardCommand(hook.command, "cursor")) {
       return undefined;
     }
   }
@@ -110,6 +151,7 @@ export function mergeCursorHooks(existing: Record<string, unknown>): Record<stri
 
 const CLIENT_FILES: Record<GuardSetupClient, { relativePath: string; label: string }> = {
   claude: { relativePath: path.join(".claude", "settings.json"), label: "Claude Code" },
+  codex: { relativePath: path.join(".codex", "hooks.json"), label: "Codex" },
   cursor: { relativePath: path.join(".cursor", "hooks.json"), label: "Cursor" }
 };
 
@@ -134,7 +176,12 @@ async function setupClient(cwd: string, client: GuardSetupClient): Promise<Guard
     existing = parsed;
   }
 
-  const merged = client === "claude" ? mergeClaudeSettings(existing) : mergeCursorHooks(existing);
+  const merged =
+    client === "claude"
+      ? mergeClaudeSettings(existing)
+      : client === "codex"
+        ? mergeCodexHooks(existing)
+        : mergeCursorHooks(existing);
   if (!merged) {
     return { client, configPath, status: "already-installed" };
   }
@@ -165,8 +212,8 @@ export function parseGuardSetupClients(argv: string[]): GuardSetupClient[] | Err
     }
 
     for (const entry of (value ?? "").split(",").map((part) => part.trim()).filter(Boolean)) {
-      if (entry !== "claude" && entry !== "cursor") {
-        return new Error(`Unsupported --client value "${entry}". Supported: claude, cursor.`);
+      if (entry !== "claude" && entry !== "codex" && entry !== "cursor") {
+        return new Error(`Unsupported --client value "${entry}". Supported: claude, codex, cursor.`);
       }
       if (!requested.includes(entry)) {
         requested.push(entry);
@@ -174,11 +221,11 @@ export function parseGuardSetupClients(argv: string[]): GuardSetupClient[] | Err
     }
 
     if (!value) {
-      return new Error("--client requires a value (claude, cursor, or a comma-separated list).");
+      return new Error("--client requires a value (claude, codex, cursor, or a comma-separated list).");
     }
   }
 
-  return requested.length > 0 ? requested : ["claude", "cursor"];
+  return requested.length > 0 ? requested : ["claude", "codex", "cursor"];
 }
 
 export async function runGuardSetupFlow(
@@ -240,7 +287,10 @@ export async function runGuardSetupFlow(
     reasons: [],
     summary: "Guard hooks registered. Agent shell commands that install packages will be routed through SafeInstall.",
     warnings: [
-      "The guard requires the safeinstall binary on the agent's PATH (npm install -g safeinstall-cli)."
+      "The guard requires the safeinstall binary on the agent's PATH (npm install -g safeinstall-cli).",
+      ...(options.clients.includes("codex")
+        ? ["Codex skips new or changed project hooks until the user reviews and trusts them with `/hooks`."]
+        : [])
     ],
     infos: [
       ...infos,

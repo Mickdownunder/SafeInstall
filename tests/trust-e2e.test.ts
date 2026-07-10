@@ -20,6 +20,9 @@ async function seedLockedProject(): Promise<{ cwd: string; stateDir: string }> {
   await writeFile(path.join(cwd, "safeinstall.config.json"), "{}\n");
   await mkdir(path.join(cwd, ".cursor"), { recursive: true });
   await writeFile(path.join(cwd, ".cursor", "hooks.json"), JSON.stringify({ version: 1 }));
+  await mkdir(path.join(cwd, ".codex"), { recursive: true });
+  await writeFile(path.join(cwd, ".codex", "hooks.json"), JSON.stringify({ hooks: {} }));
+  await writeFile(path.join(cwd, ".codex", "config.toml"), "[features]\nhooks = true\n");
   await writeFile(path.join(cwd, "package.json"), JSON.stringify({ name: "demo", version: "1.0.0" }));
 
   const lock = await runCli(["trust", "lock"], { cwd, env: { SAFEINSTALL_STATE_DIR: stateDir } });
@@ -93,6 +96,23 @@ describe("safeinstall trust (end to end)", () => {
     const result = await runGuardHook("cursor", event, { SAFEINSTALL_STATE_DIR: stateDir });
     const response = JSON.parse(result.stdout) as { permission: string };
     expect(response.permission).toBe("deny");
+  });
+
+  it("makes the Codex guard lock down after its hook config is tampered", async () => {
+    const { cwd, stateDir } = await seedLockedProject();
+    await writeFile(path.join(cwd, ".codex", "hooks.json"), JSON.stringify({ hooks: {}, evil: true }));
+
+    const event = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "git status" },
+      cwd
+    });
+    const result = await runGuardHook("codex", event, { SAFEINSTALL_STATE_DIR: stateDir });
+    const response = JSON.parse(result.stdout) as {
+      hookSpecificOutput: { permissionDecision: string };
+    };
+    expect(response.hookSpecificOutput.permissionDecision).toBe("deny");
   });
 
   it("refuses trust approve without an interactive terminal", async () => {
