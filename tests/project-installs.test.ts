@@ -10,6 +10,7 @@ import {
   loadNpmProjectInstallTargets,
   loadPnpmProjectInstallTargets
 } from "../src/project-installs";
+import { classifyResolvedSource } from "../src/project-installs/shared";
 
 const tempDirs: string[] = [];
 
@@ -29,6 +30,46 @@ async function createTempProject(files: Record<string, string>): Promise<string>
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((tempDir) => rm(tempDir, { recursive: true, force: true })));
+});
+
+describe("classifyResolvedSource", () => {
+  it("recognizes exact public registry hosts without trusting lookalike URLs", () => {
+    expect(
+      classifyResolvedSource(
+        "registry",
+        "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz"
+      )
+    ).toBe("registry");
+    expect(
+      classifyResolvedSource(
+        "registry",
+        "https://registry.yarnpkg.com/axios/-/axios-1.14.0.tgz"
+      )
+    ).toBe("registry");
+
+    expect(
+      classifyResolvedSource(
+        "registry",
+        "https://registry.npmjs.org.attacker.example/axios/-/axios-1.14.0.tgz"
+      )
+    ).toBe("tarball");
+    expect(
+      classifyResolvedSource(
+        "registry",
+        "https://attacker.example/registry.npmjs.org/axios-1.14.0.tgz"
+      )
+    ).toBe("tarball");
+  });
+
+  it("continues to recognize integrity-pinned custom registry tarballs", () => {
+    expect(
+      classifyResolvedSource(
+        "registry",
+        "https://packages.example.test/axios/-/axios-1.14.0.tgz",
+        true
+      )
+    ).toBe("registry");
+  });
 });
 
 describe("loadPnpmProjectInstallTargets", () => {

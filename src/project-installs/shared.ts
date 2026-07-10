@@ -8,6 +8,16 @@ export function isTarballLike(value: string): boolean {
   return value.endsWith(".tgz") || value.endsWith(".tar.gz");
 }
 
+const PUBLIC_REGISTRY_HOSTS = new Set(["registry.npmjs.org", "registry.yarnpkg.com"]);
+
+function isPublicRegistryUrl(value: string): boolean {
+  try {
+    return PUBLIC_REGISTRY_HOSTS.has(new URL(value).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 export function extractSemverPrefix(value: string): string | undefined {
   const match = value.match(/^(\d+\.\d+\.\d+(?:[-+][^()\s]+)?)/);
   return match?.[1];
@@ -69,7 +79,7 @@ export function classifyResolvedSource(
   if (isHttpUrl(resolvedReference)) {
     if (
       declaredSourceType === "registry" &&
-      (hasIntegrity || resolvedReference.includes("registry.npmjs.org") || resolvedReference.includes("registry.yarnpkg.com"))
+      (hasIntegrity || isPublicRegistryUrl(resolvedReference))
     ) {
       return "registry";
     }

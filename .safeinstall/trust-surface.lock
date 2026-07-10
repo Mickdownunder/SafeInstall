@@ -17,7 +17,7 @@
     {
       "path": ".github/workflows/safeinstall-trust.yml",
       "kind": "enforcement",
-      "sha256": "c35eb005870729a5f17b5dd09ff8d7be6847a0cfa324ae87791ebb4e37911b15",
+      "sha256": "2c097181920a91f53d637a0063bfce862f9c6d232a39e80752a8a197015780bb",
       "hiddenUnicode": []
     },
     {
@@ -28,6 +28,6 @@
     }
   ],
   "mcpServers": [],
-  "approvedAt": "2026-07-10T10:58:14.647Z",
-  "ledgerHead": "ba6fb16567192269b42889c922968bc81ee8160b69767b65f58b3e4569e0d926"
+  "approvedAt": "2026-07-10T11:28:06.478Z",
+  "ledgerHead": "441357fc37cef6633b0eb66ef73c7acc47ded3dab2a26d449f1753a8005d7791"
 }

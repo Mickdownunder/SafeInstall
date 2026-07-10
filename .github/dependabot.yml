@@ -8,11 +8,26 @@ updates:
     # Actions are SHA-pinned with a `# vX.Y.Z` comment; Dependabot updates
     # both the SHA and the comment together.
     open-pull-requests-limit: 5
+    groups:
+      routine-actions:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-    # Security-sensitive CLI: review every bump, no grouped majors.
+    # Security-sensitive CLI: keep majors and security updates isolated while
+    # grouping routine version updates into one reviewable PR.
     versioning-strategy: increase-if-necessary
+    groups:
+      routine-npm:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
