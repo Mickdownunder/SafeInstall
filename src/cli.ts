@@ -27,7 +27,7 @@ function printHelp(): void {
     [
       "Usage:",
       "  safeinstall <npm|pnpm|bun> <install-command> [...args]",
-      "  safeinstall check",
+      "  safeinstall check [--record]",
       "  safeinstall init [--force] [--client claude,codex,cursor] [--no-guard] [--no-lock] [--mode warn|strict]",
       "  safeinstall mcp",
       "  safeinstall guard install [--client claude,codex,cursor]",

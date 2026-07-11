@@ -66,6 +66,15 @@ function nonHumanMarker(): string | undefined {
   });
 }
 
+/**
+ * The active non-human context marker, if any — shared with decision-record
+ * emission so L0 `actor` provenance uses exactly the markers the human gate
+ * refuses (one list, one meaning).
+ */
+export function nonHumanContextMarker(): string | undefined {
+  return nonHumanMarker();
+}
+
 export function createTtyHumanGate(): HumanGate {
   return {
     async ensureInteractive(): Promise<void> {
