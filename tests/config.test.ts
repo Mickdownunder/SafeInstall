@@ -57,6 +57,46 @@ describe("config", () => {
     await expect(loadConfig(cwd)).rejects.toThrow("Config error: registryUrl must use http or https.");
   });
 
+  it("leaves minimumCliVersion unset in the default config", () => {
+    expect("minimumCliVersion" in createDefaultConfig()).toBe(false);
+  });
+
+  it("accepts a valid minimumCliVersion", async () => {
+    const cwd = await createTempDir("safeinstall-config-cliversion-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ minimumCliVersion: "0.12.0" }, null, 2)
+    );
+
+    const { config } = await loadConfig(cwd);
+
+    expect(config.minimumCliVersion).toBe("0.12.0");
+  });
+
+  it("rejects a minimumCliVersion that is not valid semver", async () => {
+    const cwd = await createTempDir("safeinstall-config-cliversion-invalid-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ minimumCliVersion: "latest" }, null, 2)
+    );
+
+    await expect(loadConfig(cwd)).rejects.toThrow(
+      "Config error: minimumCliVersion must be an exact semver version"
+    );
+  });
+
+  it("rejects a minimumCliVersion range: the field is a floor, not a constraint", async () => {
+    const cwd = await createTempDir("safeinstall-config-cliversion-range-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ minimumCliVersion: "^0.12.0" }, null, 2)
+    );
+
+    await expect(loadConfig(cwd)).rejects.toThrow(
+      "Config error: minimumCliVersion must be an exact semver version"
+    );
+  });
+
   it("defaults typoSquat mode to off when not configured", () => {
     const defaults = createDefaultConfig();
     expect(defaults.typoSquat.mode).toBe("off");

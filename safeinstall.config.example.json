@@ -1,4 +1,5 @@
 {
+  "minimumCliVersion": "0.12.0",
   "minimumReleaseAgeHours": 72,
   "registryUrl": "https://registry.npmjs.org",
   "allowedScripts": {
