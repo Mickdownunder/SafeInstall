@@ -334,14 +334,16 @@ async function scaffoldCi(root: string, provider: CiProvider): Promise<string[]>
     const result = await scaffoldCiWorkflow(root, provider);
     if (result.status === "created") {
       return [
-        `CI: wrote ${result.path} (pins safeinstall-cli@${result.pinnedVersion}). Commit it, and make it a required status check with review of .safeinstall/ — only then does the re-verification actually gate merges.`
+        `CI: wrote ${result.path} (pins safeinstall-cli@${result.pinnedVersion} by sha512 content hash). Commit it, and make it a required status check with review of .safeinstall/ — only then does the re-verification actually gate merges.`
       ];
     }
     return [
       `CI: ${result.path} already exists; left it untouched. Ensure it runs \`safeinstall trust status --require-lock\` on a version that has the trust command.`
     ];
   } catch (error) {
-    return [`CI: could not write the workflow (${error instanceof Error ? error.message : String(error)}).`];
+    return [
+      `CI: could not write the workflow (${error instanceof Error ? error.message : String(error)}). The lock itself succeeded, but the CI anchor is missing — re-run \`safeinstall trust lock --ci ${provider}\` once the registry is reachable.`
+    ];
   }
 }
 
