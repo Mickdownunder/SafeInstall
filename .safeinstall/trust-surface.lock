@@ -27,13 +27,27 @@
       "hiddenUnicode": []
     },
     {
+      "path": ".mcp.json",
+      "kind": "tool",
+      "sha256": "1b5703a2ca81d9c4d5b65ef50d0444fedfeefbe3d5f5de9270c3aeaa03b96af1",
+      "hiddenUnicode": []
+    },
+    {
       "path": "safeinstall.config.json",
       "kind": "enforcement",
       "sha256": "e70db1077cd78ee9a87938dcab10db98e76cc54147bb14ca101bef29696f3a98",
       "hiddenUnicode": []
     }
   ],
-  "mcpServers": [],
-  "approvedAt": "2026-07-10T19:59:11.082Z",
-  "ledgerHead": "0fa4001a0cf9f44cb2ca7a2366ddc81951d8b904bbd2eefa0089494400ca1b04"
+  "mcpServers": [
+    {
+      "name": "safeinstall",
+      "source": ".mcp.json",
+      "commandHash": "08e9a7d0009facac253354d7378c7dc4a7c44680843f51bc9ed0900a434c3c56",
+      "envKeys": [],
+      "unpinned": false
+    }
+  ],
+  "approvedAt": "2026-07-11T11:25:43.037Z",
+  "ledgerHead": "2d8d1e299968a6f07aa97d243fab443c316e3ef0a78e67a95d831a0c431a351b"
 }
