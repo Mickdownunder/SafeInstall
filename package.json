@@ -66,7 +66,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@types/node": "^25.9.1",
+    "@types/node": "^26.1.1",
     "@types/npm-package-arg": "^6.1.4",
     "@types/semver": "^7.7.1",
     "sigstore": "^4.1.1",
