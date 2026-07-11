@@ -60,6 +60,7 @@ function createInput(overrides: Partial<EvaluatePackageInput> = {}): EvaluatePac
       },
       resolvedVersion: "1.14.0",
       publishedAt: new Date("2026-03-31T10:00:00.000Z"),
+      publishTimeSource: "registry-time",
       lifecycleScripts: []
     },
     priorLifecycleScripts: [],

@@ -5,6 +5,7 @@ import { DiskCache } from "./disk-cache";
 import { getShutdownSignalError, throwIfAborted } from "./signals";
 import type {
   InstallLifecycleScriptName,
+  PublishTimeSource,
   RequestedPackage,
   ResolvedRegistryPackage
 } from "./types";
@@ -34,7 +35,10 @@ const ABBREVIATED_METADATA_HEADER = "application/vnd.npm.install-v1+json";
 const REGISTRY_FETCH_TIMEOUT_MS = 15_000;
 const REGISTRY_DISK_CACHE_TTL_MS = 60 * 60 * 1000;
 const VERSION_MANIFEST_CACHE_NAMESPACE = "registry-version-manifests-v1";
-const PUBLISH_TIME_CACHE_NAMESPACE = "registry-publish-times-v1";
+// v2: entries carry { publishedAt, source } and the priority flipped to the
+// registry time map (RFC-001 §14 D7) — v1 entries were header-derived dates
+// with no provenance, so they are deliberately not readable here.
+const PUBLISH_TIME_CACHE_NAMESPACE = "registry-publish-times-v2";
 
 function encodePackageName(name: string): string {
   // Preserve the leading "@" for scoped packages so the registry URL reads
@@ -70,13 +74,18 @@ function parsePublishedAt(packageName: string, version: string, rawValue: string
   return publishedAt;
 }
 
+interface PublishTimeRecord {
+  publishedAt: Date;
+  source: PublishTimeSource;
+}
+
 export class RegistryClient {
   private readonly registryUrl: string;
   private readonly diskCache: DiskCache;
   private readonly signal?: AbortSignal;
   private readonly packageCache = new Map<string, RegistryPackageDocument>();
   private readonly versionCache = new Map<string, RegistryVersionManifest>();
-  private readonly publishTimeCache = new Map<string, Date>();
+  private readonly publishTimeCache = new Map<string, PublishTimeRecord>();
   private readonly fullMetadataCache = new Map<string, RegistryPackageDocument>();
 
   constructor(options?: {
@@ -99,13 +108,14 @@ export class RegistryClient {
         ? requested.requested
         : this.resolveVersion(await this.fetchPackageDocument(requested.name), requested);
     const versionDoc = await this.fetchVersionManifest(requested.name, resolvedVersion);
-    const publishedAt = await this.fetchPublishedAt(requested.name, resolvedVersion, versionDoc);
+    const publishTime = await this.fetchPublishedAt(requested.name, resolvedVersion, versionDoc);
     const lifecycleScripts = this.collectLifecycleScripts(versionDoc.scripts);
 
     return {
       requested,
       resolvedVersion,
-      publishedAt,
+      publishedAt: publishTime.publishedAt,
+      publishTimeSource: publishTime.source,
       lifecycleScripts
     };
   }
@@ -181,7 +191,7 @@ export class RegistryClient {
     packageName: string,
     version: string,
     versionDoc: RegistryVersionManifest
-  ): Promise<Date> {
+  ): Promise<PublishTimeRecord> {
     throwIfAborted(this.signal);
 
     const versionKey = cacheKey(packageName, version);
@@ -191,28 +201,57 @@ export class RegistryClient {
     }
 
     const persistentKey = scopedCacheKey(this.registryUrl, packageName, version);
-    const cachedFromDisk = await this.diskCache.getJson<string>(PUBLISH_TIME_CACHE_NAMESPACE, persistentKey);
+    const cachedFromDisk = await this.diskCache.getJson<{ publishedAt: string; source: PublishTimeSource }>(
+      PUBLISH_TIME_CACHE_NAMESPACE,
+      persistentKey
+    );
     if (cachedFromDisk) {
-      const publishedAt = parsePublishedAt(packageName, version, cachedFromDisk);
-      this.publishTimeCache.set(versionKey, publishedAt);
-      return publishedAt;
+      const record: PublishTimeRecord = {
+        publishedAt: parsePublishedAt(packageName, version, cachedFromDisk.publishedAt),
+        source: cachedFromDisk.source
+      };
+      this.publishTimeCache.set(versionKey, record);
+      return record;
+    }
+
+    // The registry time map is the authoritative publish record (RFC-001 §14
+    // D7). The tarball last-modified header is a mutable CDN artifact; it
+    // stays available as a fallback, and which source answered is recorded so
+    // a release-age decision resting on the fallback can say so.
+    const fromTimeMap = await this.fetchPublishedAtFromTimeMap(packageName, version);
+    if (fromTimeMap) {
+      return this.rememberPublishedAt(versionKey, persistentKey, fromTimeMap, "registry-time");
     }
 
     const tarballUrl = versionDoc.dist?.tarball;
     if (tarballUrl) {
       const lastModified = await this.fetchTarballLastModified(packageName, version, tarballUrl);
       if (lastModified) {
-        const publishedAt = parsePublishedAt(packageName, version, lastModified);
-        this.publishTimeCache.set(versionKey, publishedAt);
-        await this.diskCache.setJson(PUBLISH_TIME_CACHE_NAMESPACE, persistentKey, publishedAt.toISOString());
-        return publishedAt;
+        return this.rememberPublishedAt(
+          versionKey,
+          persistentKey,
+          parsePublishedAt(packageName, version, lastModified),
+          "tarball-last-modified"
+        );
       }
     }
 
-    const publishedAt = await this.fetchPublishedAtFromFullMetadata(packageName, version);
-    this.publishTimeCache.set(versionKey, publishedAt);
-    await this.diskCache.setJson(PUBLISH_TIME_CACHE_NAMESPACE, persistentKey, publishedAt.toISOString());
-    return publishedAt;
+    throw new Error(`Registry error: missing publish time for ${packageName}@${version}.`);
+  }
+
+  private async rememberPublishedAt(
+    versionKey: string,
+    persistentKey: string,
+    publishedAt: Date,
+    source: PublishTimeSource
+  ): Promise<PublishTimeRecord> {
+    const record: PublishTimeRecord = { publishedAt, source };
+    this.publishTimeCache.set(versionKey, record);
+    await this.diskCache.setJson(PUBLISH_TIME_CACHE_NAMESPACE, persistentKey, {
+      publishedAt: publishedAt.toISOString(),
+      source
+    });
+    return record;
   }
 
   private async fetchTarballLastModified(
@@ -247,11 +286,31 @@ export class RegistryClient {
     }
   }
 
-  private async fetchPublishedAtFromFullMetadata(packageName: string, version: string): Promise<Date> {
-    const document = await this.fetchFullPackageDocument(packageName);
+  /**
+   * Publish time from the full packument's `time` map, or undefined so the
+   * caller can fall back to the tarball header. Timeouts and shutdowns stay
+   * fatal (they are environment failures, not evidence the map is absent);
+   * other fetch errors degrade to the fallback rather than failing a
+   * resolution the fallback could still serve.
+   */
+  private async fetchPublishedAtFromTimeMap(packageName: string, version: string): Promise<Date | undefined> {
+    let document: RegistryPackageDocument;
+    try {
+      document = await this.fetchFullPackageDocument(packageName);
+    } catch (error) {
+      const shutdownError = getShutdownSignalError(this.signal);
+      if (shutdownError) {
+        throw shutdownError;
+      }
+      if (error instanceof Error && error.message.includes("timed out")) {
+        throw error;
+      }
+      return undefined;
+    }
+
     const publishedAtRaw = document.time?.[version];
     if (!publishedAtRaw) {
-      throw new Error(`Registry error: missing publish time for ${packageName}@${version}.`);
+      return undefined;
     }
 
     return parsePublishedAt(packageName, version, publishedAtRaw);

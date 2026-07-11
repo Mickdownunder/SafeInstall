@@ -119,10 +119,19 @@ export interface ProjectDependencyState {
   installedVersion?: string;
 }
 
+/**
+ * Where a package's publish time was observed (RFC-001 §14 D7). The registry
+ * document's `time` map is the authoritative record; the tarball
+ * `last-modified` header is a mutable CDN artifact and only a fallback —
+ * release-age decisions resting on the fallback must be able to say so.
+ */
+export type PublishTimeSource = "registry-time" | "tarball-last-modified";
+
 export interface ResolvedRegistryPackage {
   requested: RequestedPackage;
   resolvedVersion: string;
   publishedAt: Date;
+  publishTimeSource: PublishTimeSource;
   lifecycleScripts: InstallLifecycleScriptName[];
 }
 
