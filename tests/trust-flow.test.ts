@@ -11,7 +11,12 @@ import {
   runTrustUnlockFlow
 } from "../src/trust-flow";
 import type { HumanGate } from "../src/trust-flow";
-import { readLedgerHeadMirror, removeLedgerHeadMirror } from "../src/trust-ledger";
+import {
+  appendLedgerEntry,
+  readLedgerHeadMirror,
+  removeLedgerHeadMirror,
+  writeLedgerHeadMirror
+} from "../src/trust-ledger";
 import { cleanupTempDirs, createTempDir } from "./cli-e2e-helpers";
 
 afterAll(async () => {
@@ -541,5 +546,71 @@ describe("createTtyHumanGate agent-context refusal", () => {
     } catch (error) {
       expect((error as Error).message).not.toContain("CODEX_SHELL is set");
     }
+  });
+});
+
+describe("issue #33: mirror chain containment instead of head equality", () => {
+  it("fast-forwards a stale mirror when the ledger is a forward extension of it", async () => {
+    // The everyday multi-worktree case: a pull/rebase brings reviewed ledger
+    // entries, but this path's mirror still records the older head. That is
+    // legitimate advancement, not a rewrite — no alarm, mirror fast-forwards.
+    const root = await seedProject();
+    await runTrustLockFlow(root, ["trust", "lock"]);
+    const oldHead = await readLedgerHeadMirror(root);
+    // Advance the baseline the real way (drift + approve), so ledger AND lock
+    // move together — exactly what a pull/rebase of reviewed history delivers.
+    await writeFile(path.join(root, "safeinstall.config.json"), '{"minimumReleaseAgeHours":48}\n');
+    const approve = await runTrustApproveFlow(root, ["trust", "approve"], { humanGate: approvingGate() });
+    expect(approve.decision).toBe("allow");
+    const newHead = await readLedgerHeadMirror(root);
+    await writeLedgerHeadMirror(root, oldHead as string); // simulate the stale per-path mirror
+
+    const status = await runTrustStatusFlow(root, ["trust", "status", "--require-lock"]);
+
+    expect(status.decision).toBe("allow");
+    expect(status.reasons.some((reason) => reason.message.includes("recorded head"))).toBe(false);
+    await expect(readLedgerHeadMirror(root)).resolves.toBe(newHead);
+  });
+
+  it("still blocks a rollback: the newer mirrored head is missing from a truncated chain", async () => {
+    const root = await seedProject();
+    await runTrustLockFlow(root, ["trust", "lock"]);
+    await appendLedgerEntry(root, "approved", "test: entry to roll back");
+    // Attacker truncates the ledger to its (valid) first entry. The mirror
+    // still records the newer head, which the truncated chain cannot contain.
+    const ledgerFile = path.join(root, ".safeinstall", "ledger.jsonl");
+    const firstLine = (await readFile(ledgerFile, "utf8")).split("\n")[0];
+    await writeFile(ledgerFile, `${firstLine}\n`, "utf8");
+
+    const status = await runTrustStatusFlow(root, ["trust", "status", "--require-lock"]);
+
+    expect(status.decision).toBe("block");
+    expect(
+      status.reasons.some((reason) => reason.message.includes("does not match the recorded head"))
+    ).toBe(true);
+  });
+
+  it("still blocks a rewritten chain: a foreign valid chain does not contain the mirrored head", async () => {
+    const rootA = await seedProject();
+    const rootB = await seedProject();
+    await runTrustLockFlow(rootA, ["trust", "lock"]);
+    await runTrustLockFlow(rootB, ["trust", "lock"]);
+    // Attacker replaces A's ledger with B's internally-valid chain (and B's
+    // lock, so lock-vs-ledger binding is consistent). A's mirror head is not
+    // in that chain — the mirror is what still catches the swap.
+    for (const name of ["ledger.jsonl", "trust-surface.lock"]) {
+      await writeFile(
+        path.join(rootA, ".safeinstall", name),
+        await readFile(path.join(rootB, ".safeinstall", name), "utf8"),
+        "utf8"
+      );
+    }
+
+    const status = await runTrustStatusFlow(rootA, ["trust", "status", "--require-lock"]);
+
+    expect(status.decision).toBe("block");
+    expect(
+      status.reasons.some((reason) => reason.message.includes("does not match the recorded head"))
+    ).toBe(true);
   });
 });
