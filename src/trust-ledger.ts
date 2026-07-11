@@ -1,7 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
+import { withFileLock } from "./file-lock";
 
 /**
  * Hash-chained trust ledger. Every baseline decision (created, approved) is
@@ -51,113 +53,15 @@ function ledgerPath(root: string): string {
 }
 
 /**
- * A lock older than this is presumed abandoned by a crashed process. Ledger
- * operations touch only tiny files and finish in milliseconds, so a lock that
- * has survived this long is not a live holder.
- */
-const LEDGER_LOCK_STALE_MS = 10_000;
-/** Overall backstop so a wedged lock errors instead of spinning forever. */
-const LEDGER_LOCK_WAIT_MS = 15_000;
-
-/**
- * Serialize ledger writes with an exclusive, OWNED lock file. Node has no
- * portable flock, but `open(..., "wx")` (O_CREAT|O_EXCL) is an atomic
- * create-or-fail on every platform. Two concurrent runs (parallel agent
- * commands, a CI matrix) would otherwise read the same head and append entries
- * that do not chain, corrupting the ledger and causing a false lockdown.
- *
- * Two properties make this race-safe where a naive lock is not:
- * - The lock file carries a per-acquisition token, and release removes the lock
- *   ONLY if it still holds our token — so a holder never deletes a lock that a
- *   different holder has since acquired (an unconditional rm-by-path is exactly
- *   what let two writers interleave before).
- * - A stale lock is stolen ATOMICALLY via rename(): of two racing stealers only
- *   one moves the observed file; the other gets ENOENT and retries a normal
- *   create. rm-then-open is never used, so the exclusive create is never raced.
+ * Serialize ledger writes with the shared exclusive-owned-lock primitive
+ * (src/file-lock.ts — extracted verbatim from here so the decision-record
+ * store reuses the reviewed concurrency behavior instead of reimplementing
+ * it). Two concurrent runs (parallel agent commands, a CI matrix) would
+ * otherwise read the same head and append entries that do not chain,
+ * corrupting the ledger and causing a false lockdown.
  */
 async function withLedgerLock<T>(root: string, action: () => Promise<T>): Promise<T> {
-  const lockFile = `${ledgerPath(root)}.lock`;
-  await mkdir(path.dirname(lockFile), { recursive: true });
-  const token = `${process.pid}-${randomUUID()}`;
-
-  await acquireLedgerLock(lockFile, token);
-  try {
-    return await action();
-  } finally {
-    try {
-      if ((await readFile(lockFile, "utf8")) === token) {
-        await rm(lockFile, { force: true });
-      }
-    } catch {
-      // Already gone, or now owned by someone else — never steal it back.
-    }
-  }
-}
-
-/**
- * True when an exclusive create/rename lost the race for the lock file. POSIX
- * reports this as EEXIST (create) or ENOENT (the observed file already moved).
- * Windows surfaces the same contention — and a file caught mid-deletion by
- * another holder's rm — as EPERM/EBUSY, so those are retryable there too, not
- * hard errors. On POSIX EPERM is a genuine permission fault and still throws.
- */
-function isLockContentionError(error: unknown, ...posixCodes: string[]): boolean {
-  const code = (error as NodeJS.ErrnoException).code;
-  if (code && posixCodes.includes(code)) {
-    return true;
-  }
-  return process.platform === "win32" && (code === "EPERM" || code === "EBUSY");
-}
-
-async function acquireLedgerLock(lockFile: string, token: string): Promise<void> {
-  const waitUntil = Date.now() + LEDGER_LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      const handle = await open(lockFile, "wx");
-      try {
-        await handle.writeFile(token, "utf8");
-      } finally {
-        await handle.close();
-      }
-      return;
-    } catch (error) {
-      if (!isLockContentionError(error, "EEXIST")) {
-        throw error;
-      }
-    }
-
-    let ageMs: number;
-    try {
-      ageMs = Date.now() - (await stat(lockFile)).mtimeMs;
-    } catch {
-      continue; // The lock vanished under us — retry the exclusive create.
-    }
-
-    if (ageMs > LEDGER_LOCK_STALE_MS) {
-      // Steal a presumed-crashed lock atomically: rename moves the exact file
-      // we observed; a second stealer racing us gets ENOENT and simply retries.
-      try {
-        const stolen = `${lockFile}.stale-${token}`;
-        await rename(lockFile, stolen);
-        await rm(stolen, { force: true });
-      } catch (error) {
-        // A second stealer already moved the file (ENOENT), or on Windows holds
-        // it mid-operation (EPERM/EBUSY) — either way, just retry the create.
-        if (!isLockContentionError(error, "ENOENT")) {
-          throw error;
-        }
-      }
-      continue;
-    }
-
-    if (Date.now() > waitUntil) {
-      throw new Error(
-        `Timed out waiting for the trust ledger lock at ${lockFile}. ` +
-          "If no other safeinstall process is running, delete that file and retry."
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, 15 + Math.floor(Math.random() * 20)));
-  }
+  return withFileLock(`${ledgerPath(root)}.lock`, { label: "trust ledger" }, action);
 }
 
 /** State dir for ledger-head mirrors — outside any workspace. */
