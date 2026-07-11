@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -115,7 +115,17 @@ export async function resolveGitRepo(cwd: string): Promise<GitRepoContext | unde
     // Older git without --show-object-format only supports sha1.
   }
 
-  return { root: path.resolve(root), objectFormat };
+  // Canonicalize so path comparisons against caller-supplied paths agree:
+  // Windows 8.3 short names (RUNNER~1) and macOS /var -> /private/var
+  // symlinks otherwise make the same directory look like two.
+  let canonicalRoot = path.resolve(root);
+  try {
+    canonicalRoot = await realpath(canonicalRoot);
+  } catch {
+    // Root reported by git but not resolvable — keep the resolved form.
+  }
+
+  return { root: canonicalRoot, objectFormat };
 }
 
 /**

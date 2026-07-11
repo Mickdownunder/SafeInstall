@@ -1,5 +1,6 @@
 import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
+import { captureDecisionState, emitDecisionRecord } from "./decision-emit";
 import { evaluateRequestedPackages } from "./evaluations";
 import { formatCommand, printConfigInfo, printWarnings } from "./output";
 import { runPackageManager } from "./package-managers";
@@ -300,7 +301,37 @@ export async function runInstallFlow(
   const directBlockReasons = blocked.flatMap((evaluation) => evaluation.blockedReasons);
   const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons];
 
+  // Bind the repository state BEFORE the package manager can change it: the
+  // decision record's before/after lockfile bindings are what CI later
+  // verifies (RFC-001 §5.2, §7). Emission is audit evidence, never a gate —
+  // when it cannot happen (no git repo), the result says so instead of
+  // staying silent.
+  const decisionState = await captureDecisionState({
+    packageDir: invocation.packageDir ?? invocation.effectiveCwd,
+    manager: plan.manager,
+    lockfilePath,
+    configPath: path
+  });
+  if (!decisionState.captured) {
+    infos.push(`Decision record not written: ${decisionState.skippedReason}.`);
+  }
+
   if (allBlockReasons.length > 0) {
+    if (decisionState.captured) {
+      const emitted = await emitDecisionRecord({
+        capture: decisionState.captured,
+        recordType: "install",
+        argv,
+        packageManager: plan.manager,
+        config,
+        evaluations,
+        decision: "block",
+        reasons: allBlockReasons,
+        installed: null
+      });
+      if (emitted.info) infos.push(emitted.info);
+      if (emitted.warning) warnings.push(emitted.warning);
+    }
     return {
       mode: "install",
       decision: "block",
@@ -328,6 +359,9 @@ export async function runInstallFlow(
       console.error(`Warning: ${warning}`);
     }
     printWarnings(evaluations);
+    if (!decisionState.captured) {
+      console.error(`Info: Decision record not written: ${decisionState.skippedReason}.`);
+    }
     console.error("Allowed: policy checks passed.");
   }
 
@@ -343,6 +377,32 @@ export async function runInstallFlow(
     signal: options.signal,
     stdio: options.jsonMode ? "pipe" : "inherit"
   });
+
+  if (decisionState.captured) {
+    const emitted = await emitDecisionRecord({
+      capture: decisionState.captured,
+      recordType: "install",
+      argv,
+      packageManager: plan.manager,
+      config,
+      evaluations,
+      decision: "allow",
+      reasons: [],
+      installed: execution.code === 0
+    });
+    if (emitted.info) {
+      infos.push(emitted.info);
+      if (!options.jsonMode) {
+        console.error(`Info: ${emitted.info}`);
+      }
+    }
+    if (emitted.warning) {
+      warnings.push(emitted.warning);
+      if (!options.jsonMode) {
+        console.error(`Warning: ${emitted.warning}`);
+      }
+    }
+  }
 
   return {
     mode: "install",

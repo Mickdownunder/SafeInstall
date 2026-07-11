@@ -1,5 +1,6 @@
 import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
+import { captureDecisionState, emitDecisionRecord } from "./decision-emit";
 import { evaluateRequestedPackages } from "./evaluations";
 import { formatCommand } from "./output";
 import { loadManifestDependencies } from "./project-state";
@@ -190,6 +191,36 @@ export async function runCheckFlow(
   const infos = evaluations.flatMap((evaluation) => evaluation.infos);
   const directBlockReasons = blocked.flatMap((evaluation) => evaluation.blockedReasons);
   const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons];
+
+  // Opt-in audit trail for checks (`safeinstall check --record`): a check
+  // changes no lockfile, so its record binds before == after. Not the
+  // default — checks run constantly on agent hotpaths, and unconditional
+  // records would dirty every worktree and train users to gitignore the
+  // decisions directory, defeating the same-commit rule for installs.
+  if (argv.includes("--record")) {
+    const decisionState = await captureDecisionState({
+      packageDir: invocation.packageDir ?? invocation.effectiveCwd,
+      lockfilePath: projectTargets?.lockfilePath,
+      configPath: path
+    });
+    if (decisionState.captured) {
+      const emitted = await emitDecisionRecord({
+        capture: decisionState.captured,
+        recordType: "check",
+        argv,
+        packageManager: null,
+        config,
+        evaluations,
+        decision: allBlockReasons.length > 0 ? "block" : "allow",
+        reasons: allBlockReasons,
+        installed: null
+      });
+      if (emitted.info) infos.push(emitted.info);
+      if (emitted.warning) warnings.push(emitted.warning);
+    } else {
+      infos.push(`Decision record not written: ${decisionState.skippedReason}.`);
+    }
+  }
 
   if (allBlockReasons.length > 0) {
     return {
