@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createTtyHumanGate,
@@ -24,6 +24,37 @@ beforeEach(async () => {
   stateDir = await createTempDir("safeinstall-state-");
   process.env.SAFEINSTALL_STATE_DIR = stateDir;
 });
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+/**
+ * The CI scaffold records the verifier tarball's sha512 from the registry at
+ * scaffold time (TOFU). Stub that single fetch so the lock flow stays
+ * hermetic; any other network access is a test bug and rejects loudly.
+ */
+function stubVerifierRegistry(): void {
+  const digest = Buffer.alloc(64, 1);
+  vi.stubGlobal("fetch", (input: unknown) => {
+    const url = String(input);
+    const match = url.match(/\/safeinstall-cli\/([^/]+)$/);
+    if (match) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            dist: {
+              tarball: `https://registry.npmjs.org/safeinstall-cli/-/safeinstall-cli-${match[1]}.tgz`,
+              integrity: `sha512-${digest.toString("base64")}`
+            }
+          }),
+          { status: 200 }
+        )
+      );
+    }
+    return Promise.reject(new Error(`unexpected fetch in test: ${url}`));
+  });
+}
 
 async function seedProject(): Promise<string> {
   const root = await createTempDir("safeinstall-trustflow-");
@@ -88,6 +119,7 @@ describe("runTrustLockFlow", () => {
   });
 
   it("scaffolds the CI workflow with --ci github, captures it in the baseline, and stays clean", async () => {
+    stubVerifierRegistry();
     const root = await seedProject();
     const first = await runTrustLockFlow(root, ["trust", "lock", "--ci", "github"]);
     expect(first.decision).toBe("allow");
@@ -95,6 +127,7 @@ describe("runTrustLockFlow", () => {
 
     const workflow = await readFile(path.join(root, ".github", "workflows", "safeinstall-trust.yml"), "utf8");
     expect(workflow).toContain("safeinstall trust status --require-lock");
+    expect(workflow).toContain("sha512sum -c -");
 
     // The workflow the lock just wrote must be part of the baseline, not
     // reported as "added" enforcement drift on the next status.
@@ -103,6 +136,7 @@ describe("runTrustLockFlow", () => {
   });
 
   it("protects the CI workflow itself: flipping it off is enforcement drift", async () => {
+    stubVerifierRegistry();
     const root = await seedProject();
     await runTrustLockFlow(root, ["trust", "lock", "--ci", "github"]);
 
@@ -115,6 +149,7 @@ describe("runTrustLockFlow", () => {
   });
 
   it("adds CI to an already-locked clean surface without leaving drift", async () => {
+    stubVerifierRegistry();
     const root = await seedProject();
     await runTrustLockFlow(root, ["trust", "lock"]);
 
@@ -131,6 +166,26 @@ describe("runTrustLockFlow", () => {
     const result = await runTrustLockFlow(root, ["trust", "lock", "--ci", "jenkins"]);
     expect(result.decision).toBe("error");
     expect(result.reasons[0].code).toBe("trust-invalid-arguments");
+  });
+
+  it("locks without a CI anchor when the registry is down, and says so loudly", async () => {
+    // The scaffold's TOFU fetch fails closed: no workflow with a weaker,
+    // version-only pin is ever written. The lock itself still succeeds
+    // (documented design: a scaffolding hiccup must not fail the lock), and
+    // the user is told how to add the missing anchor.
+    vi.stubGlobal("fetch", () => Promise.reject(new Error("getaddrinfo ENOTFOUND registry.npmjs.org")));
+    const root = await seedProject();
+
+    const result = await runTrustLockFlow(root, ["trust", "lock", "--ci", "github"]);
+    expect(result.decision).toBe("allow");
+    expect(
+      result.infos.some(
+        (info) => info.includes("could not write the workflow") && info.includes("trust lock --ci github")
+      )
+    ).toBe(true);
+    await expect(
+      readFile(path.join(root, ".github", "workflows", "safeinstall-trust.yml"), "utf8")
+    ).rejects.toThrow();
   });
 });
 
