@@ -14,6 +14,10 @@
 
 - **The external verification anchor exists: [safeinstall-verifier](https://github.com/Mickdownunder/safeinstall-verifier).** Trust verification logic now lives in a separate, code-owner-locked public repository (RFC-001 §13 K1, stage 2 of #41): a composite action that installs safeinstall-cli pinned by exact version and sha512 content hash and verifies a candidate checkout strictly as data, guarded by a CI-required adversarial suite (tampered workflow, weakened policy, redirected registryUrl, forged lock, identically-named-but-neutered check, removed baseline, naive consistent rewrite via mirror containment, corrupt verifier tarball — every case must fail, and the clean fixture must pass, so a vacuous verifier can never go green). SECURITY.md now states the shipped/pending split and the solo-maintainer review model (owner decision, #41) precisely. Switching this repository's trust workflow to invoke the verifier by full commit SHA is a separate, owner-gated change (enforcement zone).
 
+### Fixed
+
+- **Release-age now trusts the registry `time` map first, not a CDN header (RFC-001 §13 M1 / §14 D7).** Publish times were taken from the tarball's `last-modified` HTTP header — a mutable CDN/cache artifact — with the registry's authoritative `time` map only as fallback. The priority is flipped: the `time` map is primary, the header is fallback only, and every resolution records which source answered (`publishTimeSource: "registry-time" | "tarball-last-modified"`) so a release-age decision resting on the weaker source can say so instead of silently downgrading. The publish-time disk cache moved to a new namespace (`registry-publish-times-v2`) carrying the source alongside the date; old header-derived entries without provenance are deliberately not read.
+
 ## 0.12.0 - 2026-07-11
 
 ### Added

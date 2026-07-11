@@ -44,6 +44,7 @@ function resolvedPackage(overrides: Partial<ResolvedRegistryPackage> = {}): Reso
     resolvedVersion: "1.7.9",
     // 120 hours before NOW
     publishedAt: new Date("2026-06-18T12:00:00.000Z"),
+    publishTimeSource: "registry-time",
     lifecycleScripts: [],
     ...overrides
   };
