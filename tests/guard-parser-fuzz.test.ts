@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -56,7 +56,9 @@ describe("guard parser fuzz campaign", () => {
     // rather than vacuously true.
     expect(totalReferenceUnsafe).toBeGreaterThan(1000);
     if (violations.length > 0) {
-      const dump = path.join(os.tmpdir(), `safeinstall-fuzz-new-violations-${Date.now()}.json`);
+      // mkdtemp, not a predictable /tmp filename: a guessable path in the
+      // shared temp dir is symlink-attackable (CodeQL js/insecure-temporary-file).
+      const dump = path.join(mkdtempSync(path.join(os.tmpdir(), "safeinstall-fuzz-")), "new-violations.json");
       writeFileSync(dump, JSON.stringify(violations, null, 2));
       const preview = violations
         .slice(0, 10)
