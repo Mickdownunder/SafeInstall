@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Projects can pin the CLI version their protections assume.** A new optional config field `minimumCliVersion` (exact semver, e.g. `"0.12.0"`) declares the lowest safeinstall-cli version whose guard behavior the project relies on. When an older CLI runs, it warns loudly — naming the running version, the required version, and the update command — in the guard hook (agent and user messages plus stderr), in `install`/`check` results, and as an info line in `trust status`. The comparison is fully offline (no network in the guard hotpath) and deliberately a warning, never a hard failure: a hard failure would break every agent session after each release until the global CLI is updated, recreating the block-fatigue #33 removed. An invalid value (non-semver, or a range) fails config parsing closed like every other config error. Note the bootstrap edge: CLIs that predate this field reject unknown config keys, so setting it makes them refuse the whole config (fail-closed) instead of warning.
+
 ## 0.12.0 - 2026-07-11
 
 ### Added
