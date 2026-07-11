@@ -1,13 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 - 2026-07-11
 
 ### Added
 
+- **The repo dogfoods its own MCP server.** A root `.mcp.json` (exact-version pinned, as the trust surface demands of everyone) gives agent sessions in this repository `check_package` automatically, and satisfies Open-Plugins auto-detection.
+
 - **`trust lock --ci github` now scaffolds a content-hash-pinned verifier.** The generated workflow installs the CLI from a tarball whose sha512 is verified against the digest recorded from the registry at scaffold time (trust on first use), so a registry later serving different bytes for the same version fails the check instead of silently swapping the verifier. Everything embedded in the workflow is allowlist-validated first; any registry error fails the scaffold closed — a weaker, version-only workflow is never written.
+
+### Fixed
+
+- **Legitimate trust-history advancement no longer demands approval.** The out-of-workspace ledger mirror now reconciles by hash-chain containment instead of head equality: a pull/rebase that brings reviewed, CI-verified trust entries fast-forwards the mirror silently, while rewrites and rollbacks still hard-block (#33).
 
 ### Changed
 
+- Declared the MCP registry name in its canonical namespace case (`io.github.Mickdownunder/safeinstall`) and shipped `server.json`, enabling publication to the official MCP registry.
 - **The Claude Code guard now rewrites raw installs in place, matching the Codex client.** A raw package-manager install (`npm install axios`, plus the previously bypassable case-insensitive, fd-redirection, and wrapper forms) is no longer denied with an instruction to re-run through the CLI; `safeinstall guard claude` now returns `hookSpecificOutput.updatedInput` to replace it with the SafeInstall-routed command. The hook emits **no `permissionDecision`**, so Claude Code's normal permission prompt stays active and displays the *rewritten* command — the user reviews and approves `safeinstall npm install axios`, never the raw install. Verified end-to-end against Claude Code v2.1.206: with `permission_mode: default` and a hook returning only `updatedInput`, the permission dialog showed the routed command and only the routed command executed on approval, so the in-place rewrite is a UX win, not a permission-prompt bypass. The `ask` path (registry runners) is unchanged — Claude's approval prompt is already stronger than Codex's forced deny — and mixed install-plus-runner commands still hard-deny, because `decideGuard` leaves the rewrite unset so a registry runner can never ride along inside `updatedInput`.
 
 ## 0.11.1 - 2026-07-10
