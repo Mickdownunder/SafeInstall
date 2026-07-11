@@ -70,4 +70,4 @@ changes, not tamper-proofing against a fully consistent rewrite.
 
 SafeInstall is published to npm with [Sigstore provenance attestations](https://docs.npmjs.com/generating-provenance-statements) via GitHub Actions trusted publishing. Every release is cryptographically traceable to a specific commit and workflow run.
 
-Last verified: 2026-07-10
+Last verified: 2026-07-11
