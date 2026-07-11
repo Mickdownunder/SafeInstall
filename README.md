@@ -311,7 +311,7 @@ safeinstall guard install --client codex   # or just one client
 
 This writes project-level hook configuration (merged non-destructively, idempotent on re-runs):
 
-- **Claude Code** — a `PreToolUse` hook on the `Bash` tool in `.claude/settings.json`
+- **Claude Code** — a `PreToolUse` hook on the `Bash` tool in `.claude/settings.json`; raw installs are rewritten in-place through the SafeInstall CLI via `updatedInput` with no `permissionDecision`, so Claude's normal permission prompt still fires and shows the user the rewritten command to approve
 - **Codex** — a [`PreToolUse` hook](https://learn.chatgpt.com/docs/hooks#pretooluse) on `Bash` in `.codex/hooks.json`; raw installs are rewritten in-place through the SafeInstall CLI via Codex `updatedInput`. Open `/hooks` in Codex after installation and trust the new project hook before expecting it to run.
 - **Cursor** — a `beforeShellExecution` hook in `.cursor/hooks.json`, registered with `failClosed: true` so a crashed or timed-out guard blocks instead of silently allowing
 
@@ -324,8 +324,8 @@ The guard never evaluates policy itself — it detects package installs and rout
 | Agent runs | Guard response |
 |:---|:---|
 | `git status`, `npm test`, ... | Allowed — not an install |
-| `npm install axios` (also `npm i`, `pnpm add`, `bun a`, `npm ci`, `corepack pnpm add`, `pnpm --dir app add`, ...) | Claude/Cursor: **denied** with the SafeInstall replacement. Codex: **rewritten in-place** to `safeinstall npm install axios` before execution |
-| `cd app && npm i axios && npm test` | Rewrite prefixes only the install segment; Codex applies it directly, Claude/Cursor return it to the agent |
+| `npm install axios` (also `npm i`, `pnpm add`, `bun a`, `npm ci`, `corepack pnpm add`, `pnpm --dir app add`, ...) | Claude/Codex: **rewritten in-place** to `safeinstall npm install axios` before execution (the permission prompt shows the routed command). Cursor: **denied** with the SafeInstall replacement |
+| `cd app && npm i axios && npm test` | Rewrite prefixes only the install segment; Claude/Codex apply it directly, Cursor returns it to the agent |
 | `safeinstall npm install axios` | Allowed — already routed through the policy engine |
 | `npm install $(cat list.txt)`, `bash -c "npm install ..."` | **Denied** — cannot be analyzed safely (fail-closed) |
 | `yarn add axios` | **Denied** — SafeInstall cannot policy-check yarn |
@@ -334,7 +334,7 @@ The guard never evaluates policy itself — it detects package installs and rout
 
 Routing through the CLI matters more than a simple allow/deny: a vetted-but-raw `npm install` would still execute lifecycle scripts. Through SafeInstall, the same install gets the full policy evaluation *and* runs with install scripts disabled.
 
-Claude and Cursor receive the exact rewritten command so a well-behaved agent self-corrects in one step. Codex can apply that rewrite itself through `updatedInput`. The guard needs no network access and answers in milliseconds.
+Claude and Codex apply the rewrite in-place through `updatedInput`, so the user's normal permission prompt shows the SafeInstall-routed command to approve rather than the raw install. Cursor receives the exact rewritten command in the block message so a well-behaved agent self-corrects in one step. The guard needs no network access and answers in milliseconds.
 
 ### Guard limitations
 

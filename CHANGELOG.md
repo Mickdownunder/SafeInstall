@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **The Claude Code guard now rewrites raw installs in place, matching the Codex client.** A raw package-manager install (`npm install axios`, plus the previously bypassable case-insensitive, fd-redirection, and wrapper forms) is no longer denied with an instruction to re-run through the CLI; `safeinstall guard claude` now returns `hookSpecificOutput.updatedInput` to replace it with the SafeInstall-routed command. The hook emits **no `permissionDecision`**, so Claude Code's normal permission prompt stays active and displays the *rewritten* command — the user reviews and approves `safeinstall npm install axios`, never the raw install. Verified end-to-end against Claude Code v2.1.206: with `permission_mode: default` and a hook returning only `updatedInput`, the permission dialog showed the routed command and only the routed command executed on approval, so the in-place rewrite is a UX win, not a permission-prompt bypass. The `ask` path (registry runners) is unchanged — Claude's approval prompt is already stronger than Codex's forced deny — and mixed install-plus-runner commands still hard-deny, because `decideGuard` leaves the rewrite unset so a registry runner can never ride along inside `updatedInput`.
+
 ## 0.11.1 - 2026-07-10
 
 ### Security

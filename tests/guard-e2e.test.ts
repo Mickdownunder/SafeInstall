@@ -48,7 +48,7 @@ async function runGuardHook(
 }
 
 describe("safeinstall guard (hook mode)", () => {
-  it("denies a raw npm install from a Claude Code event", async () => {
+  it("rewrites a raw npm install through SafeInstall from a Claude Code event", async () => {
     const event = JSON.stringify({
       hook_event_name: "PreToolUse",
       tool_name: "Bash",
@@ -59,17 +59,27 @@ describe("safeinstall guard (hook mode)", () => {
     expect(result.code).toBe(0);
 
     const response = JSON.parse(result.stdout) as {
-      hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+      hookSpecificOutput: {
+        permissionDecision?: string;
+        updatedInput?: { command: string };
+        additionalContext?: string;
+      };
     };
-    expect(response.hookSpecificOutput.permissionDecision).toBe("deny");
-    expect(response.hookSpecificOutput.permissionDecisionReason).toContain("safeinstall npm install axios");
+    // updatedInput WITHOUT permissionDecision: the command is replaced in place,
+    // yet Claude Code still shows the user its normal permission prompt — for
+    // the rewritten, policy-enforcing command (verified end-to-end against
+    // Claude Code v2.1.206, where the prompt displayed the safeinstall-routed
+    // command, not the original raw install).
+    expect(response.hookSpecificOutput.permissionDecision).toBeUndefined();
+    expect(response.hookSpecificOutput.updatedInput?.command).toBe("safeinstall npm install axios");
+    expect(response.hookSpecificOutput.additionalContext).toContain("SafeInstall routed");
   });
 
   it.each([
     ["case-insensitive manager", "NPM install evil-pkg"],
     ["leading fd redirection", "2>err npm install evil-pkg"],
     ["wrapper value option", "sudo -u root npm install evil-pkg"]
-  ])("denies the previously bypassable %s form", async (_label, command) => {
+  ])("rewrites the previously bypassable %s form for Claude", async (_label, command) => {
     const event = JSON.stringify({
       hook_event_name: "PreToolUse",
       tool_name: "Bash",
@@ -79,10 +89,29 @@ describe("safeinstall guard (hook mode)", () => {
     const result = await runGuardHook("claude", event);
     expect(result.code).toBe(0);
     const response = JSON.parse(result.stdout) as {
-      hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+      hookSpecificOutput: { permissionDecision?: string; updatedInput?: { command: string } };
     };
+    expect(response.hookSpecificOutput.permissionDecision).toBeUndefined();
+    expect(response.hookSpecificOutput.updatedInput?.command).toContain("safeinstall");
+  });
+
+  it("denies a mixed install and registry-runner command for Claude instead of rewriting", async () => {
+    const event = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "npm install axios && npx create-next-app" }
+    });
+
+    const result = await runGuardHook("claude", event);
+    expect(result.code).toBe(0);
+    const response = JSON.parse(result.stdout) as {
+      hookSpecificOutput: { permissionDecision?: string; updatedInput?: { command: string } };
+    };
+    // A package runner is mixed in, so decideGuard leaves updatedCommand unset
+    // and the guard must fall back to a hard deny — the registry runner must
+    // never survive inside updatedInput.
     expect(response.hookSpecificOutput.permissionDecision).toBe("deny");
-    expect(response.hookSpecificOutput.permissionDecisionReason).toContain("safeinstall");
+    expect(response.hookSpecificOutput.updatedInput).toBeUndefined();
   });
 
   it("asks before npm create downloads and executes a template", async () => {
