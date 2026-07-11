@@ -1,0 +1,26 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Mickdownunder/safeinstall",
+  "description": "Local-first supply-chain security gate for npm/pnpm/bun: typosquat, release age, provenance checks",
+  "repository": {
+    "url": "https://github.com/Mickdownunder/SafeInstall",
+    "source": "github"
+  },
+  "version": "0.12.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "safeinstall-cli",
+      "version": "0.12.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}
