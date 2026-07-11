@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "safeinstall": {
+      "command": "npx",
+      "args": ["safeinstall-cli@0.11.1", "mcp"]
+    }
+  }
+}
