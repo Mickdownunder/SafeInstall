@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { PACKAGE_VERSION } from "./cli-version";
@@ -90,24 +91,34 @@ export async function captureDecisionState(options: {
   configPath?: string;
 }): Promise<DecisionCaptureResult> {
   try {
-    const repo = await resolveGitRepo(options.packageDir);
+    // Canonicalize before comparing against the repo root: Windows 8.3
+    // short paths and macOS /var symlinks otherwise make in-repo files look
+    // like they escape it (observed as skipped records on the Windows CI leg).
+    const packageDir = await realpath(options.packageDir);
+    const repo = await resolveGitRepo(packageDir);
     if (!repo) {
       return { skippedReason: "not a git repository (records bind git blob identities, RFC-001 D2)" };
     }
 
-    const lockfileAbsolute =
+    const canonicalizeExpected = async (filePath: string): Promise<string> =>
+      path.join(await realpath(path.dirname(filePath)), path.basename(filePath));
+
+    const rawLockfilePath =
       options.lockfilePath ??
-      (options.manager ? await conventionalLockfilePath(options.packageDir, options.manager) : undefined);
-    if (!lockfileAbsolute) {
+      (options.manager ? await conventionalLockfilePath(packageDir, options.manager) : undefined);
+    if (!rawLockfilePath) {
       return { skippedReason: "no lockfile path could be established for this command" };
     }
+    const lockfileAbsolute = await canonicalizeExpected(rawLockfilePath);
     const lockfileRepoPath = insideRepo(repo, lockfileAbsolute);
     if (!lockfileRepoPath) {
       return { skippedReason: `lockfile ${lockfileAbsolute} lies outside the repository` };
     }
 
-    const manifestRepoPath = insideRepo(repo, path.join(options.packageDir, "package.json"));
-    const policyRepoPath = options.configPath ? insideRepo(repo, options.configPath) : null;
+    const manifestRepoPath = insideRepo(repo, path.join(packageDir, "package.json"));
+    const policyRepoPath = options.configPath
+      ? insideRepo(repo, await canonicalizeExpected(options.configPath))
+      : null;
 
     return {
       captured: {
