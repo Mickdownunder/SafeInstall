@@ -39,6 +39,7 @@
     "dev": "pnpm build && node dist/cli.js",
     "prepack": "pnpm build",
     "pack:smoke": "node scripts/pack-smoke.mjs",
+    "attack-lab": "pnpm build && node attack-lab/run.mjs",
     "release:check": "pnpm typecheck && pnpm build && pnpm test && pnpm pack:smoke",
     "replay": "pnpm build && node demo/replay/run.cjs",
     "test": "vitest run",

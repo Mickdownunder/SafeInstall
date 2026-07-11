@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "workflow-neutered-same-name-check",
+  "title": "Replace the trust workflow with an identically-named no-op that reports success",
+  "layer": "workflow-anchor",
+  "attacker": {
+    "prerequisites": [
+      "A malicious PR author who edits .github/workflows/safeinstall-trust.yml in the PR"
+    ],
+    "goal": "Satisfy the required status check by name while the workflow does nothing, so a required-check-by-name ruleset passes a tampered PR."
+  },
+  "startingState": "The PR rewrites the trust workflow to a no-op that keeps the workflow and job names, aiming to pass the required 'trust-base' check without verifying anything.",
+  "vulnerableVersion": "n/a — defended on two axes: pull_request_target loads the workflow definition from the protected base branch (a PR cannot change what runs for its own check), and editing the workflow file is enforcement-zone drift the trust check flags",
+  "defense": "defended",
+  "expectedVerdict": "fail: the neutered workflow fails verification on content (the base-loaded definition runs, not the PR's), and the edit is trust-surface drift",
+  "regressionTest": "safeinstall-verifier: test/run-adversarial.sh case neutered-same-name; local: tests/workflow-security.test.ts",
+  "disclosure": "public",
+  "provenance": "RFC-001 §13 K1; closed by the external verifier repo + base-loaded workflow"
+}

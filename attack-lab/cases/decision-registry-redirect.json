@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "decision-registry-redirect",
+  "title": "Point registryUrl at an attacker mirror to poison the CI re-evaluation",
+  "layer": "decision-record",
+  "attacker": {
+    "prerequisites": [
+      "A malicious pull request author",
+      "Control of a registry mirror serving forged publish times and provenance"
+    ],
+    "goal": "Make the independent CI re-evaluation read from the attacker's registry so a poisoned package clears release-age and provenance checks."
+  },
+  "startingState": "A PR edits safeinstall.config.json's registryUrl to https://registry.attacker.example and installs from it. The decision-record verifier re-checks the committed head.",
+  "vulnerableVersion": "n/a — defended by the D3 verifier-side registry trust root",
+  "defense": "defended",
+  "expectedVerdict": "finding: registry-not-default (decisions verify/authorize fails unless the URL is allowlisted verifier-side)",
+  "regressionTest": "tests/decision-verify.test.ts > treats a non-default registryUrl as a hard finding unless allowlisted (D3)",
+  "disclosure": "public",
+  "decisionRecord": "registry-not-default",
+  "provenance": "RFC-001 §13 K3; closed this cycle by decision D3"
+}
