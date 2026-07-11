@@ -3,6 +3,7 @@
 import { parseCliOptions } from "./cli-options";
 import { PACKAGE_VERSION } from "./cli-version";
 import { runCheckFlow } from "./check-flow";
+import { runDecisionsFlow } from "./decision-flow";
 import { isGuardClient, runGuardHook } from "./guard-flow";
 import { parseGuardSetupClients, runGuardSetupFlow } from "./guard-setup";
 import { parseInitOptions, runInitFlow } from "./init-flow";
@@ -35,6 +36,7 @@ function printHelp(): void {
       "  safeinstall trust status [--require-lock]",
       "  safeinstall trust approve",
       "  safeinstall trust unlock",
+      "  safeinstall decisions verify --base <ref> [--head <ref>] [--allow-registry <url>]",
       "",
       "Commands:",
       "  init         One-command onboarding: write the starter policy config,",
@@ -61,6 +63,11 @@ function printHelp(): void {
       "  trust approve  Review drift and approve a new baseline. Interactive",
       "               only: refuses to run from CI or agent hooks.",
       "  trust unlock  Remove the trust baseline (lock, ledger, head mirror).",
+      "  decisions verify  Verify the committed decision-record chains against",
+      "               a base..head delta: every changed lockfile needs a chain",
+      "               anchored at both ends. Exit 2 on any failure — use it in",
+      "               CI. Records are audit evidence; verdicts are re-derived,",
+      "               never trusted.",
       "",
       "Global options:",
       "  --json       Emit machine-readable JSON output.",
@@ -142,6 +149,13 @@ async function main(): Promise<void> {
       return;
     }
 
+    if (argv[0] === "decisions") {
+      const result = await runDecisionsFlow(process.cwd(), argv);
+      writeCliResult(result, json);
+      process.exitCode = result.exitCode;
+      return;
+    }
+
     if (argv[0] === "mcp") {
       // The MCP server owns stdio for the JSON-RPC protocol and runs until the
       // client closes the transport. It reports its own failures to stderr, so
@@ -186,7 +200,15 @@ async function main(): Promise<void> {
     const interrupted = error instanceof ShutdownSignalError;
     const result: CliResult = {
       mode:
-        argv[0] === "check" ? "check" : argv[0] === "init" ? "init" : argv[0] === "trust" ? "trust" : "install",
+        argv[0] === "check"
+          ? "check"
+          : argv[0] === "init"
+            ? "init"
+            : argv[0] === "trust"
+              ? "trust"
+              : argv[0] === "decisions"
+                ? "decisions"
+                : "install",
       decision: "error",
       exitCode: interrupted ? signalExitCode(error.signalName) : 1,
       exitCodeMeaning: interrupted
