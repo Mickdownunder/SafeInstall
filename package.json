@@ -70,7 +70,7 @@
     "@types/npm-package-arg": "^6.1.4",
     "@types/semver": "^7.7.1",
     "sigstore": "^4.1.1",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vite": "8.1.0",
     "vitest": "^4.1.7"
   },
