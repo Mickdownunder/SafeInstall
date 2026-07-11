@@ -262,20 +262,43 @@ export async function readLedgerHeadMirror(root: string): Promise<string | undef
 }
 
 /**
- * Compare the in-repo chain head against the out-of-workspace mirror.
- * - "ok": mirror matches.
- * - "mismatch": mirror disagrees — the in-repo ledger was rewritten locally.
+ * Reconcile the in-repo chain head against the out-of-workspace mirror.
+ * - "ok": mirror matches the head.
+ * - "advanced": the verified chain CONTAINS the mirrored head as an ancestor —
+ *   the ledger moved forward legitimately (a pull/rebase bringing reviewed,
+ *   CI-verified history is the everyday case), so the mirror is fast-forwarded
+ *   to the new head instead of raising a false alarm. The hash chain makes
+ *   this safe: an old entry's hash only stays valid if the entire prefix is
+ *   byte-identical, so a rewrite cannot contain the mirrored head, and a
+ *   rollback (truncated chain) no longer contains the newer mirrored head —
+ *   both still land in "mismatch".
+ * - "mismatch": the mirrored head is NOT in the chain — rewrite or rollback.
  * - "missing": no local mirror. Ambiguous by nature (a fresh clone of a
  *   committed lock legitimately has none, but so does a deleted mirror), so
  *   the caller surfaces it as a WARNING, not a hard block. It is never proof
  *   of tampering on its own — the committed lock + CI re-verify is the anchor.
  */
-export async function checkLedgerMirror(root: string, head: string): Promise<"ok" | "mismatch" | "missing"> {
+export async function checkLedgerMirror(
+  root: string,
+  head: string,
+  entries?: TrustLedgerEntry[]
+): Promise<"ok" | "advanced" | "mismatch" | "missing"> {
   const mirrored = await readLedgerHeadMirror(root);
   if (mirrored === undefined) {
     return "missing";
   }
-  return mirrored === head ? "ok" : "mismatch";
+  if (mirrored === head) {
+    return "ok";
+  }
+  if (entries?.some((entry) => entry.hash === mirrored)) {
+    // Best-effort fast-forward, same posture as the missing-mirror self-heal:
+    // a read-only state dir just leaves it stale for a later run.
+    await writeLedgerHeadMirror(root, head).catch(() => {
+      /* retry on a later run */
+    });
+    return "advanced";
+  }
+  return "mismatch";
 }
 
 /** Remove the mirror record (used when a project intentionally unlocks). */

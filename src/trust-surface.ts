@@ -768,7 +768,7 @@ export async function checkTrustSurface(startDir: string): Promise<TrustSurfaceS
         });
       }
 
-      const mirror = await checkLedgerMirror(context.root, chain.head as string);
+      const mirror = await checkLedgerMirror(context.root, chain.head as string, entries);
       if (mirror === "mismatch") {
         findings.push({
           kind: "mirror-mismatch",
