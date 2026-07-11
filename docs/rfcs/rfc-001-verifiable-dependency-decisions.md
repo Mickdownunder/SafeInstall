@@ -418,9 +418,19 @@ section now so records remain comparable.
 3. `safeinstall decisions authorize` — fresh S2 evaluation of every
    changed lockfile's delta against merge-base, registry metadata fetched
    by CI from the pinned root.
-4. Verdict `allow` → check passes and (L2, when enabled) a signed
-   attestation is uploaded as a workflow artifact bound to the lockfile
-   blob OID.
+4. Verdict `allow` → check passes. `decisions authorize --output` writes the
+   authorization artifact (canonical JCS bytes: base/head commits, verified
+   lockfile blob OIDs, the policy blob, verdict + reasons). `decisions attest`
+   builds the in-toto v1 Statement over that artifact (subject = artifact
+   sha256, predicate = the authorization) — the signable DSSE payload. **L2,
+   when enabled:** that statement is signed with Sigstore keyless (OIDC
+   identity from the workflow) and the bundle uploaded as a workflow artifact;
+   `decisions verify-attestation` checks statement↔artifact binding
+   non-cryptographically, while the signature is verified against the workflow
+   identity via `sigstore.verify`. The statement layer and its binding check
+   ship now; the keyless signing + identity verification are gated on the CLI
+   release that carries `decisions` and on the OIDC context (no signature is
+   claimed until it exists — the "records, not proofs" discipline of §1).
 5. Any other verdict → check fails with the policy reasons as the check
    summary.
 
