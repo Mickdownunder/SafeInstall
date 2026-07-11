@@ -3,6 +3,8 @@ import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 
+import { cliVersionWarning } from "./cli-version";
+import { loadConfig } from "./config";
 import { formatCommand } from "./output";
 import { parseCiProvider, scaffoldCiWorkflow } from "./trust-ci";
 import type { CiProvider } from "./trust-ci";
@@ -352,6 +354,28 @@ export interface TrustStatusOptions {
   requireLock?: boolean;
 }
 
+/**
+ * The `minimumCliVersion` claim, rendered for `trust status`. Status is a
+ * read-only diagnostic that never loaded the config before this feature, so a
+ * config parse failure surfaces as a warning line here instead of failing the
+ * reconciliation — the policy-evaluating flows (install/check) are where
+ * config errors fail closed.
+ */
+async function cliVersionStatusLines(cwd: string): Promise<{ infos: string[]; warnings: string[] }> {
+  try {
+    const { config } = await loadConfig(cwd);
+    const warning = cliVersionWarning(config.minimumCliVersion);
+    return { infos: warning ? [warning] : [], warnings: [] };
+  } catch (error) {
+    return {
+      infos: [],
+      warnings: [
+        `Could not evaluate minimumCliVersion: ${error instanceof Error ? error.message : String(error)}`
+      ]
+    };
+  }
+}
+
 export async function runTrustStatusFlow(
   cwd: string,
   argv: string[],
@@ -359,6 +383,7 @@ export async function runTrustStatusFlow(
 ): Promise<CliResult> {
   const requireLock = options.requireLock || argv.includes("--require-lock");
   const status = await checkTrustSurface(cwd);
+  const cliVersion = await cliVersionStatusLines(cwd);
 
   if (!status.active) {
     if (requireLock) {
@@ -373,12 +398,16 @@ export async function runTrustStatusFlow(
             suggestion: "Run `safeinstall trust lock` and commit .safeinstall/ to the repository."
           }
         ],
-        summary: "Trust status failed: no lock."
+        summary: "Trust status failed: no lock.",
+        warnings: cliVersion.warnings,
+        infos: cliVersion.infos
       });
     }
     return baseResult(argv, {
       exitCodeMeaning: "No trust lock governs this directory.",
-      summary: "Trust surface not locked. Run `safeinstall trust lock` to create a baseline."
+      summary: "Trust surface not locked. Run `safeinstall trust lock` to create a baseline.",
+      warnings: cliVersion.warnings,
+      infos: cliVersion.infos
     });
   }
 
@@ -392,7 +421,8 @@ export async function runTrustStatusFlow(
       exitCodeMeaning: "The trust surface has drifted from the approved baseline.",
       reasons: status.findings.map((finding) => ({ code: `trust-${finding.kind}`, message: finding.message })),
       summary: "Trust surface drift detected.",
-      warnings: status.instructionWarnings,
+      warnings: [...cliVersion.warnings, ...status.instructionWarnings],
+      infos: cliVersion.infos,
       details: { root: status.root, drift: status.drift }
     });
   }
@@ -400,7 +430,8 @@ export async function runTrustStatusFlow(
   return baseResult(argv, {
     exitCodeMeaning: "The trust surface matches the approved baseline.",
     summary: `Trust surface verified: ${status.lock?.files.length ?? 0} file(s), ${status.lock?.mcpServers.length ?? 0} MCP server(s) match the baseline (mode: ${status.mode}).`,
-    warnings: status.instructionWarnings,
+    warnings: [...cliVersion.warnings, ...status.instructionWarnings],
+    infos: cliVersion.infos,
     details: { root: status.root }
   });
 }
