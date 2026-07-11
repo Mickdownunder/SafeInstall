@@ -55,7 +55,7 @@ async function createClient(
 }
 
 describe("RegistryClient", () => {
-  it("uses abbreviated metadata, version manifests, and tarball headers for resolution", async () => {
+  it("takes the publish time from the registry time map as the primary source", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -82,10 +82,9 @@ describe("RegistryClient", () => {
         })
       )
       .mockResolvedValueOnce(
-        new Response(null, {
-          status: 200,
-          headers: {
-            "last-modified": "Fri, 27 Mar 2026 19:01:42 GMT"
+        jsonResponse({
+          time: {
+            "1.14.0": "2026-03-27T19:01:42.000Z"
           }
         })
       );
@@ -97,6 +96,7 @@ describe("RegistryClient", () => {
     expect(result.resolvedVersion).toBe("1.14.0");
     expect(result.lifecycleScripts).toEqual(["postinstall"]);
     expect(result.publishedAt.toISOString()).toBe("2026-03-27T19:01:42.000Z");
+    expect(result.publishTimeSource).toBe("registry-time");
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[0][0]).toBe("https://registry.npmjs.org/axios");
@@ -106,9 +106,9 @@ describe("RegistryClient", () => {
       }
     });
     expect(fetchMock.mock.calls[0][1]?.signal).toBeDefined();
-    expect(fetchMock.mock.calls[2][1]).toMatchObject({
-      method: "HEAD"
-    });
+    // The publish-time lookup is the full packument, not a tarball HEAD probe.
+    expect(fetchMock.mock.calls[2][0]).toBe("https://registry.npmjs.org/axios");
+    expect(fetchMock.mock.calls[2][1]?.method).toBeUndefined();
   });
 
   it("builds registry metadata requests against a configured mirror URL", async () => {
@@ -135,10 +135,9 @@ describe("RegistryClient", () => {
         })
       )
       .mockResolvedValueOnce(
-        new Response(null, {
-          status: 200,
-          headers: {
-            "last-modified": "Fri, 27 Mar 2026 19:01:42 GMT"
+        jsonResponse({
+          time: {
+            "1.14.0": "2026-03-27T19:01:42.000Z"
           }
         })
       );
@@ -151,6 +150,7 @@ describe("RegistryClient", () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe("https://mirror.example.internal/npm/axios");
     expect(fetchMock.mock.calls[1][0]).toBe("https://mirror.example.internal/npm/axios/1.14.0");
+    expect(fetchMock.mock.calls[2][0]).toBe("https://mirror.example.internal/npm/axios");
   });
 
   it("reuses exact-version metadata from the disk cache across client instances", async () => {
@@ -174,10 +174,9 @@ describe("RegistryClient", () => {
         })
       )
       .mockResolvedValueOnce(
-        new Response(null, {
-          status: 200,
-          headers: {
-            "last-modified": "Fri, 27 Mar 2026 19:01:42 GMT"
+        jsonResponse({
+          time: {
+            "1.14.0": "2026-03-27T19:01:42.000Z"
           }
         })
       );
@@ -203,10 +202,12 @@ describe("RegistryClient", () => {
     expect(secondResult.resolvedVersion).toBe("1.14.0");
     expect(secondResult.lifecycleScripts).toEqual(["postinstall"]);
     expect(secondResult.publishedAt.toISOString()).toBe("2026-03-27T19:01:42.000Z");
+    // The cache preserves the publish-time provenance, not just the date.
+    expect(secondResult.publishTimeSource).toBe("registry-time");
     expect(secondFetchMock).not.toHaveBeenCalled();
   });
 
-  it("falls back to the full packument time map when tarball headers are missing", async () => {
+  it("falls back to the tarball last-modified header when the time map lacks the version", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -229,11 +230,18 @@ describe("RegistryClient", () => {
           }
         })
       )
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
       .mockResolvedValueOnce(
         jsonResponse({
           time: {
-            "1.14.0": "Fri, 27 Mar 2026 19:01:42 GMT"
+            created: "2020-01-01T00:00:00.000Z"
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 200,
+          headers: {
+            "last-modified": "Fri, 27 Mar 2026 19:01:42 GMT"
           }
         })
       );
@@ -243,7 +251,44 @@ describe("RegistryClient", () => {
     const result = await (await createClient()).resolvePackage(createRequestedPackage());
 
     expect(result.publishedAt.toISOString()).toBe("2026-03-27T19:01:42.000Z");
+    expect(result.publishTimeSource).toBe("tarball-last-modified");
     expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[3][1]).toMatchObject({
+      method: "HEAD"
+    });
+  });
+
+  it("errors when neither the time map nor the tarball header provide a publish time", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          "dist-tags": {
+            latest: "1.14.0"
+          },
+          versions: {
+            "1.14.0": {
+              version: "1.14.0"
+            }
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          version: "1.14.0",
+          dist: {
+            tarball: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz"
+          }
+        })
+      )
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect((await createClient()).resolvePackage(createRequestedPackage())).rejects.toThrow(
+      "Registry error: missing publish time for axios@1.14.0."
+    );
   });
 
   it("turns timed out registry requests into a stable runtime error", async () => {

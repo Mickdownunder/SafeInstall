@@ -58,6 +58,7 @@ describe("attack replay: mastra (2026-06-17)", () => {
         requested,
         resolvedVersion: fixture.directInstall.version,
         publishedAt: new Date(fixture.directInstall.publishedAt),
+        publishTimeSource: "registry-time",
         lifecycleScripts: fixture.directInstall.lifecycleScripts
       }
     });
