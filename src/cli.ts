@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { parseCliOptions } from "./cli-options";
+import { PACKAGE_VERSION } from "./cli-version";
 import { runCheckFlow } from "./check-flow";
 import { isGuardClient, runGuardHook } from "./guard-flow";
 import { parseGuardSetupClients, runGuardSetupFlow } from "./guard-setup";
@@ -11,8 +12,6 @@ import { formatCommand, writeCliResult } from "./output";
 import { isTrustSubcommand, runTrustFlow } from "./trust-flow";
 import { createShutdownController, ShutdownSignalError, signalExitCode } from "./signals";
 import type { CliResult } from "./types";
-
-const PACKAGE_VERSION = String((require("../package.json") as { version?: string }).version ?? "0.0.0");
 
 function isHelpRequest(argv: string[]): boolean {
   return argv[0] === "--help" || argv[0] === "-h";

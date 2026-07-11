@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { cliVersionWarning } from "./cli-version";
+import { loadConfig } from "./config";
 import { analyzeShellCommand } from "./guard-commands";
 import type { GuardRunnerMatch } from "./guard-commands";
 import { findNearestUpward } from "./project-discovery";
@@ -193,7 +195,48 @@ async function decideTrustSurface(
   return undefined;
 }
 
+/**
+ * Offline lookup of the project's `minimumCliVersion` claim. A broken config
+ * must not change guard verdicts: the guard denies raw installs regardless,
+ * and the routed CLI fails closed on the same config — so load failures only
+ * produce a stderr diagnostic and never a warning or a different decision.
+ */
+async function versionMismatchWarning(cwd: string): Promise<string | undefined> {
+  try {
+    const { config } = await loadConfig(cwd);
+    return cliVersionWarning(config.minimumCliVersion);
+  } catch (error) {
+    process.stderr.write(
+      `safeinstall guard: could not evaluate minimumCliVersion (${error instanceof Error ? error.message : String(error)}).\n`
+    );
+    return undefined;
+  }
+}
+
 export async function decideGuard(command: string, cwd: string = process.cwd()): Promise<GuardDecision> {
+  const decision = await decideGuardCommand(command, cwd);
+  if (decision.action === "allow") {
+    // Ordinary commands stay on the zero-extra-I/O hotpath: the version check
+    // reads the config file, so it runs only once the guard has an opinion.
+    return decision;
+  }
+
+  const warning = await versionMismatchWarning(cwd);
+  if (!warning) {
+    return decision;
+  }
+
+  // The claude/codex rewrite path renders neither message, so the warning also
+  // goes to stderr (the guard's diagnostic channel; stdout stays the protocol).
+  process.stderr.write(`safeinstall guard: ${warning}\n`);
+  return {
+    ...decision,
+    userMessage: decision.userMessage ? `${decision.userMessage} ${warning}` : warning,
+    agentMessage: decision.agentMessage ? `${decision.agentMessage}\n\n${warning}` : warning
+  };
+}
+
+async function decideGuardCommand(command: string, cwd: string): Promise<GuardDecision> {
   const analysis = analyzeShellCommand(command);
 
   const trustDecision = await decideTrustSurface(command, cwd, analysis);

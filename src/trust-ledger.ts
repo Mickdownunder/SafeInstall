@@ -94,6 +94,21 @@ async function withLedgerLock<T>(root: string, action: () => Promise<T>): Promis
   }
 }
 
+/**
+ * True when an exclusive create/rename lost the race for the lock file. POSIX
+ * reports this as EEXIST (create) or ENOENT (the observed file already moved).
+ * Windows surfaces the same contention — and a file caught mid-deletion by
+ * another holder's rm — as EPERM/EBUSY, so those are retryable there too, not
+ * hard errors. On POSIX EPERM is a genuine permission fault and still throws.
+ */
+function isLockContentionError(error: unknown, ...posixCodes: string[]): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code && posixCodes.includes(code)) {
+    return true;
+  }
+  return process.platform === "win32" && (code === "EPERM" || code === "EBUSY");
+}
+
 async function acquireLedgerLock(lockFile: string, token: string): Promise<void> {
   const waitUntil = Date.now() + LEDGER_LOCK_WAIT_MS;
   for (;;) {
@@ -106,7 +121,7 @@ async function acquireLedgerLock(lockFile: string, token: string): Promise<void>
       }
       return;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      if (!isLockContentionError(error, "EEXIST")) {
         throw error;
       }
     }
@@ -126,7 +141,9 @@ async function acquireLedgerLock(lockFile: string, token: string): Promise<void>
         await rename(lockFile, stolen);
         await rm(stolen, { force: true });
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        // A second stealer already moved the file (ENOENT), or on Windows holds
+        // it mid-operation (EPERM/EBUSY) — either way, just retry the create.
+        if (!isLockContentionError(error, "ENOENT")) {
           throw error;
         }
       }

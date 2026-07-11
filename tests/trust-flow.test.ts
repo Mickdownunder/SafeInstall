@@ -255,6 +255,49 @@ describe("P1b regression: hidden Unicode is never approved", () => {
   });
 });
 
+describe("trust status minimumCliVersion", () => {
+  it("reports an info line on a clean surface when the running CLI is too old", async () => {
+    const root = await seedProject();
+    await writeFile(path.join(root, "safeinstall.config.json"), '{"minimumCliVersion":"999.0.0"}\n');
+    await runTrustLockFlow(root, ["trust", "lock"]);
+
+    const status = await runTrustStatusFlow(root, ["trust", "status"]);
+    expect(status.decision).toBe("allow");
+    expect(status.infos.some((info) => info.includes("safeinstall-cli >= 999.0.0"))).toBe(true);
+    expect(status.infos.some((info) => info.includes("npm install -g safeinstall-cli@latest"))).toBe(true);
+  });
+
+  it("stays silent when the running CLI satisfies the minimum", async () => {
+    const root = await seedProject();
+    await writeFile(path.join(root, "safeinstall.config.json"), '{"minimumCliVersion":"0.0.1"}\n');
+    await runTrustLockFlow(root, ["trust", "lock"]);
+
+    const status = await runTrustStatusFlow(root, ["trust", "status"]);
+    expect(status.decision).toBe("allow");
+    expect(status.infos).toEqual([]);
+  });
+
+  it("reports the info line even for an unlocked project", async () => {
+    const root = await createTempDir("safeinstall-status-cliversion-");
+    await writeFile(path.join(root, "safeinstall.config.json"), '{"minimumCliVersion":"999.0.0"}\n');
+
+    const status = await runTrustStatusFlow(root, ["trust", "status"]);
+    expect(status.decision).toBe("allow");
+    expect(status.infos.some((info) => info.includes("safeinstall-cli >= 999.0.0"))).toBe(true);
+  });
+
+  it("degrades to a warning line when the config cannot be parsed, without failing status", async () => {
+    const root = await createTempDir("safeinstall-status-cliversion-broken-");
+    await writeFile(path.join(root, "safeinstall.config.json"), '{"minimumCliVersion":"soon"}\n');
+
+    const status = await runTrustStatusFlow(root, ["trust", "status"]);
+    expect(status.decision).toBe("allow");
+    expect(status.warnings.some((warning) => warning.includes("Could not evaluate minimumCliVersion"))).toBe(
+      true
+    );
+  });
+});
+
 describe("P2b: unpinned MCP stays visible", () => {
   async function seedUnpinnedMcp(): Promise<string> {
     const root = await createTempDir("safeinstall-unpinned-");

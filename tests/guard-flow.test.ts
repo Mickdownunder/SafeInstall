@@ -182,6 +182,70 @@ describe("decideGuard", () => {
   });
 });
 
+describe("decideGuard minimumCliVersion", () => {
+  it("enriches deny messages when the running CLI is older than the project minimum", async () => {
+    const cwd = await createTempDir("safeinstall-guard-cliversion-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ minimumCliVersion: "999.0.0" })
+    );
+
+    const decision = await decideGuard("npm install axios", cwd);
+    expect(decision.action).toBe("deny");
+    expect(decision.updatedCommand).toBe("safeinstall npm install axios");
+    expect(decision.agentMessage).toContain("safeinstall-cli >= 999.0.0");
+    expect(decision.userMessage).toContain("safeinstall-cli >= 999.0.0");
+    expect(decision.agentMessage).toContain("npm install -g safeinstall-cli@latest");
+  });
+
+  it("enriches ask messages when the running CLI is older than the project minimum", async () => {
+    const cwd = await createTempDir("safeinstall-guard-cliversion-ask-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ minimumCliVersion: "999.0.0" })
+    );
+
+    const decision = await decideGuard("npx create-next-app", cwd);
+    expect(decision.action).toBe("ask");
+    expect(decision.userMessage).toContain("safeinstall-cli >= 999.0.0");
+  });
+
+  it("leaves messages untouched when the running CLI satisfies the minimum", async () => {
+    const cwd = await createTempDir("safeinstall-guard-cliversion-ok-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ minimumCliVersion: "0.0.1" })
+    );
+
+    const decision = await decideGuard("npm install axios", cwd);
+    expect(decision.action).toBe("deny");
+    expect(decision.agentMessage).not.toContain("safeinstall-cli >=");
+  });
+
+  it("keeps the verdict and skips the warning when the config cannot be parsed", async () => {
+    const cwd = await createTempDir("safeinstall-guard-cliversion-broken-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ minimumCliVersion: "not-a-version" })
+    );
+
+    const decision = await decideGuard("npm install axios", cwd);
+    expect(decision.action).toBe("deny");
+    expect(decision.updatedCommand).toBe("safeinstall npm install axios");
+    expect(decision.agentMessage).not.toContain("safeinstall-cli >=");
+  });
+
+  it("does not read the config for allowed commands", async () => {
+    const cwd = await createTempDir("safeinstall-guard-cliversion-allow-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ minimumCliVersion: "999.0.0" })
+    );
+
+    expect(await decideGuard("git status", cwd)).toEqual({ action: "allow" });
+  });
+});
+
 describe("decideGuard trust surface", () => {
   async function lockedProject(): Promise<string> {
     const root = await createTempDir("safeinstall-guard-trust-");

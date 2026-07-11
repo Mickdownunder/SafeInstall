@@ -1,3 +1,4 @@
+import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
 import { evaluateRequestedPackages } from "./evaluations";
 import { formatCommand } from "./output";
@@ -73,6 +74,8 @@ export async function runCheckFlow(
     invocation.packageDir
   );
   const commandString = formatCommand("safeinstall", argv);
+  const versionWarning = cliVersionWarning(config.minimumCliVersion);
+  const cliVersionWarnings = versionWarning ? [versionWarning] : [];
 
   const trust = await trustSurfacePrecheck(invocation.effectiveCwd);
   if (trust.reasons.length > 0) {
@@ -87,7 +90,7 @@ export async function runCheckFlow(
       configLabel: configLabel(path),
       reasons: trust.reasons,
       summary: "Check blocked.",
-      warnings: trust.warnings,
+      warnings: [...cliVersionWarnings, ...trust.warnings],
       infos: [],
       affectedPackages: []
     };
@@ -112,7 +115,7 @@ export async function runCheckFlow(
         }
       ],
       summary: "Check blocked.",
-      warnings: trustWarnings,
+      warnings: [...cliVersionWarnings, ...trustWarnings],
       infos: [],
       affectedPackages: []
     };
@@ -130,7 +133,7 @@ export async function runCheckFlow(
       configLabel: configLabel(path),
       reasons: projectTargets.issues.map(createProjectIssueReason),
       summary: "Check blocked.",
-      warnings: trustWarnings,
+      warnings: [...cliVersionWarnings, ...trustWarnings],
       infos: [],
       affectedPackages: []
     };
@@ -154,7 +157,7 @@ export async function runCheckFlow(
       configLabel: configLabel(path),
       reasons: [],
       summary: "Check skipped: package.json has no direct dependencies.",
-      warnings: trustWarnings,
+      warnings: [...cliVersionWarnings, ...trustWarnings],
       infos: [],
       affectedPackages: []
     };
@@ -179,6 +182,7 @@ export async function runCheckFlow(
 
   const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
   const warnings = [
+    ...cliVersionWarnings,
     ...trustWarnings,
     ...evaluations.flatMap((evaluation) => evaluation.warnings),
     ...transitive.warnings

@@ -397,6 +397,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 
 ```json
 {
+  "minimumCliVersion": "0.12.0",
   "minimumReleaseAgeHours": 72,
   "registryUrl": "https://registry.npmjs.org",
   "allowedScripts": {
@@ -435,6 +436,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 
 | Field | Purpose |
 |:---|:---|
+| `minimumCliVersion` | Optional. Lowest safeinstall-cli version whose behavior this project's protections assume (exact semver). An older running CLI **warns** — in the guard, `install`/`check`, and `trust status` — but never hard-fails |
 | `minimumReleaseAgeHours` | Minimum age in hours for registry versions |
 | `registryUrl` | npm-compatible registry URL for metadata (mirrors, Artifactory, Verdaccio) |
 | `allowedScripts` | Per-package lifecycle script exceptions |
@@ -452,6 +454,19 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `transitive.checks` | Which checks run transitively: `"install-script"` and/or `"untrusted-source"` |
 | `continuity.mode` | `"off"` / `"warn"` / `"block"` — detect provenance downgrades and source-repo changes against a learned per-package baseline |
 | `continuity.baselineSize` | How many recent versions to sample when learning the baseline (default 5) |
+
+### Pinning a minimum CLI version
+
+Guard verdicts change across releases (fixed false positives, new checks), but the CLI is typically installed globally — so a project can assume `0.12.0` behavior while an agent's machine still runs `0.11.0`. Set `minimumCliVersion` to the lowest version whose behavior your policy assumes, and every older CLI announces the mismatch loudly:
+
+```text
+Warning: This project's safeinstall.config.json expects safeinstall-cli >= 0.12.0, but version 0.11.0 is running — protections this project relies on may be missing or behave differently. Update with `npm install -g safeinstall-cli@latest`.
+```
+
+The check is fully offline (a semver comparison against the running version) and deliberately a warning, never a hard failure: a hard failure would break every agent session after each release until the global CLI is updated. Two sharp edges to know:
+
+- The field must be an **exact version** (`"0.12.0"`), not a range — it is a floor, not a constraint. Anything else fails config parsing closed.
+- CLIs released **before this field existed** reject unknown config keys, so they refuse the whole config (fail-closed) instead of warning. Setting the field effectively requires collaborators to run a CLI that knows it.
 
 Run `safeinstall init` to generate a starter config.
 
