@@ -220,9 +220,10 @@ export async function decideGuard(command: string, cwd: string = process.cwd()):
     const mixedWithRunner = analysis.runners.length > 0;
     return {
       action: "deny",
-      // Codex can apply a rewrite directly. Keep that optimization limited to
-      // pure install commands: a mixed `npm install && npx ...` tool call must
-      // be denied so the registry runner cannot survive inside updatedInput.
+      // Both the Codex and Claude clients can apply this rewrite in place.
+      // Keep it limited to pure install commands: a mixed `npm install && npx
+      // ...` tool call must be denied so the registry runner cannot survive
+      // inside updatedInput.
       updatedCommand: analysis.runners.length === 0 ? rewritten : undefined,
       userMessage: mixedWithRunner
         ? "SafeInstall blocked a command that mixes a package install with registry execution."
@@ -316,6 +317,33 @@ export function renderGuardResponse(decision: GuardDecision, client: GuardClient
       // prompt entirely, which is a weaker posture than doing nothing.
       return { exitCode: 0 };
     }
+
+    if (decision.action === "deny" && decision.updatedCommand) {
+      // Rewrite the raw install in place through the SafeInstall CLI, the same
+      // UX as the Codex client. Emitting `updatedInput` WITHOUT a
+      // permissionDecision replaces the command but keeps the normal permission
+      // flow active — and Claude Code shows the user the REWRITTEN command in
+      // that prompt (verified end-to-end against Claude Code v2.1.206: the hook
+      // returned only updatedInput, permission_mode stayed "default", and the
+      // permission dialog displayed the safeinstall-routed command). So the
+      // user approves the policy-enforcing command, never a raw install, and
+      // the guard never silently bypasses the prompt.
+      //
+      // Only pure installs reach here: decideGuard leaves updatedCommand
+      // undefined when a package runner is mixed in, so those still deny.
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            updatedInput: { command: decision.updatedCommand },
+            additionalContext:
+              "SafeInstall routed this package-manager command through its policy-enforcing CLI."
+          }
+        })
+      };
+    }
+
     return {
       exitCode: 0,
       stdout: JSON.stringify({

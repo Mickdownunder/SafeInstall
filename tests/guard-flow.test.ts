@@ -268,6 +268,40 @@ describe("renderGuardResponse", () => {
     });
   });
 
+  it("rewrites a raw install through SafeInstall using Claude updatedInput without a permissionDecision", () => {
+    const response = renderGuardResponse(
+      {
+        action: "deny",
+        updatedCommand: "safeinstall npm install axios",
+        agentMessage: "Use SafeInstall."
+      },
+      "claude"
+    );
+    // No permissionDecision key: the command is replaced in place while the
+    // normal Claude permission prompt stays active and shows the rewrite.
+    expect(JSON.parse(response.stdout ?? "")).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        updatedInput: { command: "safeinstall npm install axios" },
+        additionalContext: "SafeInstall routed this package-manager command through its policy-enforcing CLI."
+      }
+    });
+  });
+
+  it("keeps a hard deny for Claude when there is no rewrite (mixed runner)", () => {
+    const response = renderGuardResponse(
+      { action: "deny", userMessage: "Blocked.", agentMessage: "Mixed with a runner." },
+      "claude"
+    );
+    expect(JSON.parse(response.stdout ?? "")).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "Mixed with a runner."
+      }
+    });
+  });
+
   it("renders a Codex allow as no output (no opinion)", () => {
     const response = renderGuardResponse({ action: "allow" }, "codex");
     expect(response.exitCode).toBe(0);
