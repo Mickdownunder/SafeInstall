@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -16,13 +16,14 @@ afterAll(async () => {
 
 async function runGuardHook(
   client: string,
-  stdinPayload: string
+  stdinPayload: string,
+  hookCwd?: string
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   // The guard resolves its policy and trust context from cwd. Spawn every
   // hook in a fresh temp dir so these tests never read the host repo's
   // config or trust-surface state (a drifted dev checkout must not change
-  // test outcomes).
-  const cwd = await createTempDir("safeinstall-guard-e2e-");
+  // test outcomes). Tests that need a prepared config pass their own cwd.
+  const cwd = hookCwd ?? (await createTempDir("safeinstall-guard-e2e-"));
   const child = spawn(process.execPath, [cliPath, "guard", client], {
     cwd,
     stdio: ["pipe", "pipe", "pipe"]
@@ -127,6 +128,33 @@ describe("safeinstall guard (hook mode)", () => {
     };
     expect(response.hookSpecificOutput.permissionDecision).toBe("ask");
     expect(response.hookSpecificOutput.permissionDecisionReason).toContain("fetch and execute");
+  });
+
+  it("carries the minimumCliVersion warning into the hook response when the CLI is too old", async () => {
+    const cwd = await createTempDir("safeinstall-guard-e2e-cliversion-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ minimumCliVersion: "999.0.0" })
+    );
+    const event = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "npm install axios && npx create-next-app" }
+    });
+
+    const result = await runGuardHook("claude", event, cwd);
+    expect(result.code).toBe(0);
+    const response = JSON.parse(result.stdout) as {
+      hookSpecificOutput: { permissionDecision?: string; permissionDecisionReason?: string };
+    };
+    expect(response.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(response.hookSpecificOutput.permissionDecisionReason).toContain("safeinstall-cli >= 999.0.0");
+    expect(response.hookSpecificOutput.permissionDecisionReason).toContain(
+      "npm install -g safeinstall-cli@latest"
+    );
+    // The claude/codex rewrite path renders neither message, so the guard also
+    // emits the warning on stderr; assert that diagnostic channel here too.
+    expect(result.stderr).toContain("safeinstall-cli >= 999.0.0");
   });
 
   it("stays silent for a harmless Claude Code command", async () => {

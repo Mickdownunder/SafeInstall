@@ -80,6 +80,13 @@ export interface ContinuityResult {
 }
 
 export interface SafeInstallConfig {
+  /**
+   * Lowest safeinstall-cli version whose behavior this project's protections
+   * assume (exact semver, e.g. "0.12.0"). An older running CLI warns — never
+   * hard-fails — in the guard, install/check, and trust-status flows. Absent
+   * from the default config: it only makes sense as an explicit project claim.
+   */
+  minimumCliVersion?: string;
   minimumReleaseAgeHours: number;
   registryUrl: string;
   allowedScripts: Record<string, InstallLifecycleScriptName[]>;

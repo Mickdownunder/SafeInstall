@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import semver from "semver";
+
 import { findNearestUpward } from "./project-discovery";
 import type { PackageManagerName, SafeInstallConfig } from "./types";
 
@@ -8,6 +10,7 @@ export const CONFIG_FILE_NAME = "safeinstall.config.json";
 export const DEFAULT_REGISTRY_URL = "https://registry.npmjs.org";
 
 const KNOWN_CONFIG_KEYS = new Set<keyof SafeInstallConfig>([
+  "minimumCliVersion",
   "minimumReleaseAgeHours",
   "registryUrl",
   "allowedScripts",
@@ -325,6 +328,14 @@ function mergeConfig(input: Partial<SafeInstallConfig>): SafeInstallConfig {
 
   if (!Number.isFinite(merged.minimumReleaseAgeHours) || merged.minimumReleaseAgeHours < 0) {
     throw new Error("Config error: minimumReleaseAgeHours must be a non-negative number.");
+  }
+
+  if (merged.minimumCliVersion !== undefined) {
+    if (typeof merged.minimumCliVersion !== "string" || semver.valid(merged.minimumCliVersion) === null) {
+      throw new Error(
+        'Config error: minimumCliVersion must be an exact semver version (e.g. "0.12.0").'
+      );
+    }
   }
 
   merged.registryUrl = normalizeRegistryUrl(merged.registryUrl);

@@ -1,3 +1,4 @@
+import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
 import { evaluateRequestedPackages } from "./evaluations";
 import { formatCommand, printConfigInfo, printWarnings } from "./output";
@@ -133,6 +134,8 @@ export async function runInstallFlow(
   const invocation = await resolveInvocationContext(cwd, [...rawPlan.managerArgs, ...rawPlan.forwardedArgs]);
   const { config, path } = await loadConfig(invocation.effectiveCwd, options.configPath);
   const commandString = formatCommand("safeinstall", argv);
+  const versionWarning = cliVersionWarning(config.minimumCliVersion);
+  const cliVersionWarnings = versionWarning ? [versionWarning] : [];
 
   const trust = await trustSurfacePrecheck(invocation.effectiveCwd);
   if (trust.reasons.length > 0) {
@@ -148,7 +151,7 @@ export async function runInstallFlow(
       packageManager: rawPlan.manager,
       reasons: trust.reasons,
       summary: "Install blocked.",
-      warnings: trust.warnings,
+      warnings: [...cliVersionWarnings, ...trust.warnings],
       infos: [],
       affectedPackages: [],
       execution: {
@@ -177,7 +180,7 @@ export async function runInstallFlow(
         }
       ],
       summary: "Install blocked.",
-      warnings: trustWarnings,
+      warnings: [...cliVersionWarnings, ...trustWarnings],
       infos: [],
       affectedPackages: [],
       execution: {
@@ -205,7 +208,7 @@ export async function runInstallFlow(
         }
       ],
       summary: "Install blocked.",
-      warnings: trustWarnings,
+      warnings: [...cliVersionWarnings, ...trustWarnings],
       infos: [],
       affectedPackages: [],
       execution: {
@@ -233,7 +236,7 @@ export async function runInstallFlow(
       packageManager: plan.manager,
       reasons: issues,
       summary: "Install blocked.",
-      warnings: trustWarnings,
+      warnings: [...cliVersionWarnings, ...trustWarnings],
       infos: [],
       affectedPackages: [],
       execution: {
@@ -260,7 +263,7 @@ export async function runInstallFlow(
         }
       ],
       summary: "Install failed: no packages found.",
-      warnings: trustWarnings,
+      warnings: [...cliVersionWarnings, ...trustWarnings],
       infos: [],
       affectedPackages: [],
       execution: {
@@ -288,6 +291,7 @@ export async function runInstallFlow(
 
   const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
   const warnings = [
+    ...cliVersionWarnings,
     ...trustWarnings,
     ...evaluations.flatMap((evaluation) => evaluation.warnings),
     ...transitive.warnings
@@ -320,6 +324,9 @@ export async function runInstallFlow(
 
   if (!options.jsonMode) {
     printConfigInfo(path);
+    for (const warning of cliVersionWarnings) {
+      console.error(`Warning: ${warning}`);
+    }
     printWarnings(evaluations);
     console.error("Allowed: policy checks passed.");
   }
