@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "workflow-consistent-rewrite-no-mirror",
+  "title": "Fully consistent rewrite of policy + lock + ledger on a machine with no prior mirror",
+  "layer": "workflow-anchor",
+  "attacker": {
+    "prerequisites": [
+      "A PR author who can rewrite safeinstall.config.json, the trust lock, and the ledger together into an internally consistent state",
+      "A merge onto a fresh clone (any CI runner) that has no out-of-workspace ledger mirror of the honest chain"
+    ],
+    "goal": "Weaken the policy and re-baseline the trust surface consistently, so every automated in-repo check agrees with itself and passes."
+  },
+  "startingState": "The PR sets minimumReleaseAgeHours to 0 and provenance.mode to off, then regenerates the lock and ledger to match. On a fresh CI clone there is no mirror that remembers the prior baseline.",
+  "vulnerableVersion": "all versions — this is the K2 residual; automated trust verification cannot distinguish a consistent rewrite from a legitimate re-baseline without an off-machine anchor",
+  "defense": "documented-limit",
+  "expectedVerdict": "known-limit: automatic verification passes; the security boundary is human review of the trust-surface diff (SECURITY.md), and on a solo project that review is the merging owner",
+  "regressionTest": "tests/attack-lab.test.ts > documents the K2 consistent-rewrite limit without claiming a fix",
+  "disclosure": "public",
+  "provenance": "RFC-001 §13 K2; the deliberately-unclosed residual, documented in SECURITY.md and bounded by the solo-maintainer decision (#41)"
+}

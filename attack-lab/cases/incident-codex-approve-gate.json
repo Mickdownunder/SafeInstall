@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "incident-codex-approve-gate",
+  "title": "A Codex session approves its own trust-surface change (CODEX_SHELL gap)",
+  "layer": "human-gate",
+  "attacker": {
+    "prerequisites": [
+      "A prompt-injected or malicious agent running inside a Codex shell session on the user's machine",
+      "The agent can run safeinstall trust approve"
+    ],
+    "goal": "Re-baseline a tampered Agent Trust Surface (weakened policy, deleted guard hook) without a human, so future sessions inherit the tampered state as 'approved'."
+  },
+  "startingState": "A locked project (.safeinstall/ committed). The agent has edited an enforcement-zone file and wants trust approve to bless it. The controlling shell exports CODEX_SHELL (set by Codex in every shell it spawns).",
+  "vulnerableVersion": "<= 0.11.0 (CODEX_SHELL absent from the human-gate refusal list; CI, CLAUDECODE, CURSOR_AGENT were covered but Codex was not)",
+  "defense": "defended",
+  "expectedVerdict": "refuse: trust approve exits non-zero with 'CODEX_SHELL is set'",
+  "regressionTest": "tests/trust-flow.test.ts > refuses approval in known non-human contexts (CODEX_SHELL)",
+  "disclosure": "public",
+  "provenance": "incident-2026-07-11; fixed in 0.11.1 (real incident feeding RFC-001 Appendix A)"
+}

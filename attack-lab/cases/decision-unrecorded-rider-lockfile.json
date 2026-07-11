@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "decision-unrecorded-rider-lockfile",
+  "title": "A second workspace lockfile changes without its own decision record (monorepo rider)",
+  "layer": "decision-record",
+  "attacker": {
+    "prerequisites": [
+      "A malicious PR author in a monorepo with more than one lockfile"
+    ],
+    "goal": "Slip a dependency change into a second workspace lockfile that no decision record covers, riding along with a legitimately-recorded change to the first."
+  },
+  "startingState": "A repo with two lockfiles. The PR records a change to lockfile A honestly, and silently changes lockfile B in apps/web with no record for B.",
+  "vulnerableVersion": "n/a — defended by the D5 PR-level completeness rule (changed-lockfile set must equal chained-path set)",
+  "defense": "defended",
+  "expectedVerdict": "finding: decisions-missing for the unrecorded lockfile path (verification fails)",
+  "regressionTest": "tests/decision-verify.test.ts > fails when a second workspace lockfile changes without its own chain (M4)",
+  "disclosure": "public",
+  "decisionRecord": "decisions-missing",
+  "provenance": "RFC-001 §13 M4; closed this cycle by decision D5"
+}

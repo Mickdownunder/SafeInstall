@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "decision-post-record-tamper",
+  "title": "Edit the lockfile after the decision record was written (post-record tamper)",
+  "layer": "decision-record",
+  "attacker": {
+    "prerequisites": [
+      "A malicious PR author who can run SafeInstall to produce a clean record, then edit the lockfile"
+    ],
+    "goal": "Get a clean-looking decision record committed while the actually-merged lockfile contains something the record never evaluated."
+  },
+  "startingState": "The PR records an honest install, then silently appends an extra dependency to the lockfile before committing, so the record's 'after' binding no longer matches head.",
+  "vulnerableVersion": "n/a — defended: the verifier recomputes the head lockfile blob OID and sha256 and requires an exact match with the record",
+  "defense": "defended",
+  "expectedVerdict": "finding: decisions-binding-mismatch (head binding != committed lockfile)",
+  "regressionTest": "tests/decision-verify.test.ts > fails when the final recorded state does not match the committed head",
+  "disclosure": "public",
+  "decisionRecord": "decisions-binding-mismatch",
+  "provenance": "RFC-001 §7 A4 defense; adversarial verify suite"
+}
