@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Provenance no longer deadlocks the install that brings its own verifier (issue #56).** Verification collapsed two different failures into one fail-closed `invalid` verdict: a bundle that loads and fails to verify (a package-specific attack signal) and the `sigstore` tool being absent entirely (an environment state — provenance can be evaluated for no package). The second blocked the bootstrap install that installs `sigstore` itself, so a fresh checkout with provenance active could not install its own dependencies (found live during the 0.13.0 release). A distinct `tooling-unavailable` status now degrades the tool-absent case to a loud per-package warning (`provenance NOT verified — sigstore not installed`) while a genuinely invalid bundle still blocks fail-closed, unchanged. The residual — an attacker deleting `sigstore` to downgrade enforcement — is recorded as a first-class Attack Lab `known-gap` (`provenance-tooling-removed`), not silently swallowed.
+
 ## 0.13.0 - 2026-07-12
 
 ### Added

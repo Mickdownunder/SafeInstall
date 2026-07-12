@@ -12,6 +12,7 @@ import {
   lookupGlobPattern,
   matchesGlob,
   repositoryMatchesPublisher,
+  SigstoreToolingUnavailableError,
   verifyProvenance
 } from "../src/provenance";
 import type { Bundle, ProvenanceDependencies } from "../src/provenance";
@@ -294,6 +295,37 @@ describe("verifyProvenance", () => {
 
     expect(result.status).toBe("invalid");
     expect(result.error).toContain("signature mismatch");
+  });
+
+  it("returns tooling-unavailable (not invalid) when the sigstore tool is absent", async () => {
+    // A missing verification tool is an environment state, not a verdict on
+    // the package — it must be distinguishable from a bundle that fails to
+    // verify, so the policy layer can degrade it instead of blocking.
+    const cacheDir = await createTempDir("safeinstall-provenance-");
+    const result = await verifyProvenance({
+      packageName: "axios",
+      version: "1.14.0",
+      registryUrl: "https://registry.npmjs.org",
+      diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
+      config: createConfig(),
+      deps: createDeps({
+        fetchAttestations: async () => ({
+          attestations: [
+            {
+              predicateType: "https://slsa.dev/provenance/v1",
+              bundle: makeBundleWithStatement(exampleStatement)
+            }
+          ]
+        }),
+        verifyBundle: async () => {
+          throw new SigstoreToolingUnavailableError();
+        }
+      })
+    });
+
+    expect(result.status).toBe("tooling-unavailable");
+    expect(result.status).not.toBe("invalid");
+    expect(result.error).toContain("sigstore");
   });
 
   it("returns invalid when the SLSA statement has no repository URL", async () => {

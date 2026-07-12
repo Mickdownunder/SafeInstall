@@ -206,16 +206,34 @@ async function defaultFetchAttestations(
   return (await response.json()) as NpmAttestationResponse;
 }
 
+/**
+ * Thrown when the `sigstore` verification tooling itself is absent — as
+ * opposed to a bundle that loads but fails to verify. The distinction is a
+ * security boundary: a missing tool means provenance cannot be evaluated for
+ * ANY package (an environment/config state, e.g. a fresh checkout whose
+ * `sigstore` peer dep is still being installed), whereas a failed verification
+ * is a package-specific signal. Callers must degrade the former to a warning
+ * and keep failing the latter closed — collapsing them makes SafeInstall
+ * unbootstrappable (it cannot install the very `sigstore` it demands).
+ */
+export class SigstoreToolingUnavailableError extends Error {
+  constructor() {
+    super(
+      "Sigstore provenance verification requires the optional 'sigstore' package. " +
+        "Install it with: npm install sigstore"
+    );
+    this.name = "SigstoreToolingUnavailableError";
+  }
+}
+
 async function defaultVerifyBundle(bundle: Bundle): Promise<void> {
   let verify: (b: unknown) => Promise<unknown>;
   try {
     const sigstore = await import("sigstore");
     verify = sigstore.verify as (b: unknown) => Promise<unknown>;
   } catch {
-    throw new Error(
-      "Sigstore provenance verification requires the optional 'sigstore' package. " +
-        "Install it with: npm install sigstore"
-    );
+    // The tool is not installed — distinct from a bundle that fails to verify.
+    throw new SigstoreToolingUnavailableError();
   }
   await verify(bundle);
 }
@@ -397,6 +415,15 @@ export async function verifyProvenance(
   try {
     await deps.verifyBundle(slsa.bundle);
   } catch (error) {
+    // Missing verification tooling is an environment state, not a verdict on
+    // this package: report it distinctly so the policy layer degrades it to a
+    // warning instead of blocking every package (the bootstrap deadlock).
+    if (error instanceof SigstoreToolingUnavailableError) {
+      return {
+        status: "tooling-unavailable",
+        error: error.message
+      };
+    }
     return {
       status: "invalid",
       error: error instanceof Error ? error.message : String(error)

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "provenance-tooling-bootstrap",
+  "title": "Provenance enforcement deadlocks the install that brings its own verifier (sigstore bootstrap)",
+  "layer": "provenance",
+  "attacker": {
+    "prerequisites": [
+      "No attacker — this is a self-inflicted availability failure found while dogfooding the 0.13.0 release"
+    ],
+    "goal": "n/a — the failure mode is that a fresh checkout with provenance enabled cannot install its own dependencies (including the sigstore package provenance verification requires), so SafeInstall cannot be bootstrapped."
+  },
+  "startingState": "A fresh checkout runs `pnpm install` routed through the guard with provenance active and no node_modules yet. Provenance verification tries to load the sigstore package, which is itself part of the install set and not present yet, so every package is blocked with 'requires the optional sigstore package'.",
+  "vulnerableVersion": "<= 0.13.0 — provenance collapsed 'verification tool absent' into the same 'invalid' verdict as 'bundle failed to verify', blocking fail-closed",
+  "defense": "defended",
+  "expectedVerdict": "warning: provenance NOT verified (sigstore not installed) — the install proceeds; the tool-absent state is reported as status 'tooling-unavailable', never 'invalid'",
+  "regressionTest": "tests/policy.test.ts > warns but does NOT block when the sigstore tool is unavailable (bootstrap deadlock fix)",
+  "disclosure": "public",
+  "provenance": "Found live during the 0.13.0 release verification (issue #56, finding 2). Fix: a distinct SigstoreToolingUnavailableError → status 'tooling-unavailable' → loud warning, not a block."
+}

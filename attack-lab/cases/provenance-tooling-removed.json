@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "provenance-tooling-removed",
+  "title": "Remove the sigstore package to downgrade provenance enforcement to a warning",
+  "layer": "provenance",
+  "attacker": {
+    "prerequisites": [
+      "An attacker who already has write access to node_modules (can delete the installed sigstore package) and wants to install a package whose provenance would fail to verify"
+    ],
+    "goal": "Slip a package past provenance enforcement by making the verification tool absent, so the check degrades to a warning instead of blocking."
+  },
+  "startingState": "sigstore was installed; the attacker deletes it, then installs a package with a bad/absent provenance bundle. Because the tool is now missing, provenance cannot be evaluated and the bootstrap-deadlock fix degrades it to a warning.",
+  "vulnerableVersion": "n/a — documented limit: the tool-absent degradation is a deliberate availability tradeoff (SafeInstall must be bootstrappable), accepted in exchange for a residual attacker path here",
+  "defense": "documented-limit",
+  "expectedVerdict": "known-gap: provenance is NOT enforced while sigstore is absent; the install emits a loud per-package 'provenance NOT verified — sigstore not installed' warning, and the independent layers (release age, typo-squat, untrusted source, install scripts) still apply",
+  "regressionTest": "tests/policy.test.ts > still blocks a genuinely invalid attestation even in the same strict config (attacker case)",
+  "disclosure": "public",
+  "provenance": "The residual introduced by the provenance-tooling-bootstrap fix (issue #56). Kept as a first-class known-gap so it cannot be silently relabelled 'defended': closing it needs tool-presence enforcement (e.g. an opt-in provenance.requireTooling that pre-installs sigstore out of band) without re-breaking bootstrap. An attacker who can delete node_modules already has broad local write access — a different, larger threat model."
+}

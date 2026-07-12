@@ -35,7 +35,12 @@ export interface ProvenanceConfig {
   offlineBehavior: "fail-closed" | "allow-cached";
 }
 
-export type ProvenanceVerificationStatus = "verified" | "missing" | "invalid" | "unreachable";
+export type ProvenanceVerificationStatus =
+  | "verified"
+  | "missing"
+  | "invalid"
+  | "unreachable"
+  | "tooling-unavailable";
 
 export interface ProvenanceVerificationResult {
   status: ProvenanceVerificationStatus;
