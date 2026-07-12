@@ -21,7 +21,11 @@ describe("GitHub workflow security boundaries", () => {
     expect(content).toContain("pull_request_target:");
     expect(content).not.toMatch(/^  pull_request:\s*$/m);
     expect(content).toContain("persist-credentials: false");
-    expect(content).toContain("working-directory: candidate");
+    // Verification runs from the external, code-owner-locked verifier action,
+    // pinned by full commit SHA (never a tag or branch, so a PR cannot alter
+    // what judges it — RFC-001 §13 K1), with the candidate passed as data.
+    expect(content).toMatch(/uses:\s*Mickdownunder\/safeinstall-verifier@[0-9a-f]{40}\b/);
+    expect(content).toContain("candidate-path: candidate");
   });
 
   it("keeps untrusted build code outside the OIDC-enabled publish job", async () => {
