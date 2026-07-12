@@ -69,4 +69,41 @@ describe("release metadata", () => {
       access: "public"
     });
   });
+
+  // Release-PR checklist enforcement: the SECURITY.md supported-versions table
+  // is the one release item that slipped in v0.12.0 (PR #40, fixed in PR #43)
+  // because nothing asserted it. This test fails the moment package.json is
+  // bumped without updating the table to match.
+  it("keeps the SECURITY.md supported-versions table in sync with package.json", async () => {
+    const { version } = JSON.parse(
+      await readFile(path.join(projectRoot, "package.json"), "utf8")
+    ) as { version: string };
+    const versionMatch = /^(\d+)\.(\d+)\.\d+/.exec(version);
+    expect(versionMatch).not.toBeNull();
+    const majorMinor = `${versionMatch![1]}.${versionMatch![2]}`;
+
+    const securityMd = await readFile(path.join(projectRoot, "SECURITY.md"), "utf8");
+    const sectionMatch = /^## Supported versions\n([\s\S]*?)(?=^## )/m.exec(securityMd);
+    expect(sectionMatch, "SECURITY.md must have a '## Supported versions' section").not.toBeNull();
+
+    const rows = sectionMatch![1]
+      .split("\n")
+      .filter((line) => line.trim().startsWith("|"))
+      .map((line) =>
+        line
+          .split("|")
+          .slice(1, -1)
+          .map((cell) => cell.trim())
+      );
+    // Header, separator, and exactly one supported + one unsupported row.
+    expect(rows[0]).toEqual(["Version", "Supported"]);
+    const dataRows = rows.slice(2);
+    expect(dataRows).toHaveLength(2);
+
+    const [supportedRow, unsupportedRow] = dataRows;
+    expect(supportedRow[0]).toBe(`${majorMinor}.x`);
+    expect(supportedRow[1]).toBe("Yes");
+    expect(unsupportedRow[0]).toBe(`< ${majorMinor}`);
+    expect(unsupportedRow[1]).toBe(`No (upgrade to the latest ${majorMinor}.x release)`);
+  });
 });
