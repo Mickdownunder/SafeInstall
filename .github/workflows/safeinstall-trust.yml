@@ -1,8 +1,12 @@
 name: SafeInstall Trusted Base Verification
 
-# This workflow is loaded from the PR's protected base branch, not from the
-# proposed PR revision. It checks out the candidate only as inert data and runs
-# an exact, immutable SafeInstall CLI version against it. No PR code executes.
+# The verification logic is invoked from the external, code-owner-locked
+# verifier repository BY FULL COMMIT SHA (RFC-001 §13 K1). This workflow file
+# is loaded from the protected base branch (pull_request_target); the PR
+# candidate is checked out only as inert data and never executed. A pull
+# request against THIS repo cannot alter what runs — bumping the pinned SHA is
+# an enforcement-zone change requiring review, and the verifier repo pins the
+# CLI version + sha512 outside this repo entirely.
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
@@ -32,20 +36,12 @@ jobs:
           path: candidate
           persist-credentials: false
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      # Verification runs from the external verifier repo, pinned by full commit
+      # SHA — never a branch or tag. The verifier installs an integrity-pinned
+      # safeinstall-cli (version + sha512 recorded in that repo's pin.json) and
+      # runs trust status against the candidate, which it treats strictly as
+      # data. Bumping this SHA is an enforcement-zone change requiring review.
+      - name: SafeInstall trusted verification
+        uses: Mickdownunder/safeinstall-verifier@ff2165456b3cfc0245d0f85be6da5645bd58bee9 # v0.1.1 (safeinstall-cli 0.13.0)
         with:
-          node-version: 22
-
-      # The verifier is pinned by content hash, not just version (RFC-001 §13
-      # decision, K1(b)): a registry that serves different bytes for the same
-      # version cannot swap the verification logic. The digest is the sha512 of
-      # the v0.11.0 tarball, cross-checked against a local byte-identical
-      # rebuild from the v0.11.0 tag before it was recorded here.
-      - name: Install integrity-pinned verifier
-        run: |
-          curl -fsSL "https://registry.npmjs.org/safeinstall-cli/-/safeinstall-cli-0.11.0.tgz" -o /tmp/safeinstall-cli-0.11.0.tgz
-          echo "f7d978aa2462b6b5c4f3d40a0fb00ca62c76837d5b25ca861ddd86af2b90f17bfc06efc21f4805f15e7c164a0ee3538cddee72664986406d23a60137498e291f  /tmp/safeinstall-cli-0.11.0.tgz" | sha512sum -c -
-          npm install -g /tmp/safeinstall-cli-0.11.0.tgz
-
-      - run: safeinstall trust status --require-lock
-        working-directory: candidate
+          candidate-path: candidate
