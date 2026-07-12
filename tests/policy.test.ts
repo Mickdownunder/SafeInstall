@@ -562,6 +562,52 @@ describe("evaluatePackage", () => {
       expect(result.blockedReasons.map((reason) => reason.code)).toContain("attestation-invalid");
     });
 
+    it("warns but does NOT block when the sigstore tool is unavailable (bootstrap deadlock fix)", () => {
+      // The tool being absent means provenance cannot be evaluated for any
+      // package — blocking would deadlock the very install that brings
+      // sigstore. Even under the strictest config (require + fail-closed) it
+      // degrades to a loud warning, not a block.
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "require",
+              requireFor: ["axios"],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: { status: "tooling-unavailable", error: "sigstore not installed" }
+        })
+      );
+
+      expect(result.blockedReasons).toHaveLength(0);
+      expect(result.warnings.some((warning) => warning.includes("NOT verified"))).toBe(true);
+      expect(result.warnings.some((warning) => warning.includes("sigstore"))).toBe(true);
+    });
+
+    it("still blocks a genuinely invalid attestation even in the same strict config (attacker case)", () => {
+      // Guard against the fix widening into a bypass: a bundle that loads and
+      // fails to verify is a package-specific verdict and must still block.
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "require",
+              requireFor: ["axios"],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed"
+            }
+          }),
+          provenanceResult: { status: "invalid", error: "signature mismatch" }
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toContain("attestation-invalid");
+    });
+
     it("blocks on unreachable when offlineBehavior is fail-closed", () => {
       const result = evaluatePackage(
         createInput({

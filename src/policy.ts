@@ -333,6 +333,22 @@ function applyProvenanceDecision(
     return;
   }
 
+  if (result.status === "tooling-unavailable") {
+    // The sigstore tool is absent, so provenance cannot be evaluated for ANY
+    // package — an environment state, not a verdict on this one. Blocking here
+    // would deadlock the bootstrap install that brings sigstore itself. Warn
+    // loudly instead: the policy is NOT being enforced, and the fix is named.
+    // This does not weaken the other layers (release age, typo-squat, sources),
+    // and the residual — an attacker removing sigstore to slip provenance — is
+    // a documented known-gap in the Attack Lab, not silently swallowed here.
+    evaluation.warnings.push(
+      `Provenance NOT verified for ${requested}: the 'sigstore' package is not installed, ` +
+        `so provenance enforcement is inactive for every package. Install it (npm install sigstore) ` +
+        `to enable verification.`
+    );
+    return;
+  }
+
   if (result.status === "unreachable") {
     if (config.offlineBehavior === "fail-closed") {
       evaluation.blockedReasons.push({
