@@ -250,11 +250,11 @@ async function decideGuardCommand(command: string, cwd: string): Promise<GuardDe
       .join("\n");
     return {
       action: "deny",
-      userMessage: "SafeInstall blocked a package install it could not safely analyze.",
+      userMessage: "SafeInstall blocked a command it could not safely analyze for package installs.",
       agentMessage:
-        "SafeInstall guard blocked this command because it could not verify what would be installed:\n" +
+        "SafeInstall guard blocked this command because it could not verify whether it installs anything:\n" +
         `${reasons}\n` +
-        "Rewrite the install as a plain, literal package-manager command (npm, pnpm, or bun) and it will be checked and routed automatically."
+        "If it installs packages, rewrite it as a plain, literal package-manager command (npm, pnpm, or bun) and it will be checked and routed. If a package-manager word appears only as an argument (a workflow name, a read-only query), run that part as a separate command without shell substitution so the guard can see it is not an install."
     };
   }
 

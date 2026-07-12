@@ -245,7 +245,7 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
       return {
         unanalyzable: {
           segmentText,
-          reason: "The segment uses shell substitution and mentions a package manager, so SafeInstall cannot verify what would be installed."
+          reason: "The segment mixes shell substitution with a package-manager word, so SafeInstall cannot see whether an install is hidden inside the substitution and fails closed. If this is NOT an install (the word is an argument such as a workflow name, or a read-only query like `npm view`), run that part as a separate command without `$(...)` so the guard can tell it apart; if it IS an install, spell out the packages literally."
         }
       };
     }
@@ -306,7 +306,7 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
       return {
         unanalyzable: {
           segmentText,
-          reason: "The segment uses shell substitution and mentions a package manager, so SafeInstall cannot verify what would be installed."
+          reason: "The segment mixes shell substitution with a package-manager word, so SafeInstall cannot see whether an install is hidden inside the substitution and fails closed. If this is NOT an install (the word is an argument such as a workflow name, or a read-only query like `npm view`), run that part as a separate command without `$(...)` so the guard can tell it apart; if it IS an install, spell out the packages literally."
         }
       };
     }
