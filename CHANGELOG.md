@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.13.1 - 2026-07-12
 
 ### Fixed
+
+- **Clearer guard message for a package-manager word inside shell substitution.** The block now explains the non-install case — a package-manager word used only as an argument (a workflow name, a read-only query) — and points to splitting that part into a separate command, instead of the misleading "rewrite the install" text. The parser is unchanged and still fail-closed; only the guidance improves (issue #56, finding 1).
 
 - **Provenance no longer deadlocks the install that brings its own verifier (issue #56).** Verification collapsed two different failures into one fail-closed `invalid` verdict: a bundle that loads and fails to verify (a package-specific attack signal) and the `sigstore` tool being absent entirely (an environment state — provenance can be evaluated for no package). The second blocked the bootstrap install that installs `sigstore` itself, so a fresh checkout with provenance active could not install its own dependencies (found live during the 0.13.0 release). A distinct `tooling-unavailable` status now degrades the tool-absent case to a loud per-package warning (`provenance NOT verified — sigstore not installed`) while a genuinely invalid bundle still blocks fail-closed, unchanged. The residual — an attacker deleting `sigstore` to downgrade enforcement — is recorded as a first-class Attack Lab `known-gap` (`provenance-tooling-removed`), not silently swallowed.
 
