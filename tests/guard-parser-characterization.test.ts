@@ -115,7 +115,7 @@ const CASES: Case[] = [
     { input: "npm i a && npm i b", decision: "deny", installs: ["npm install", "npm install"], rewrite: "safeinstall npm install a && safeinstall npm install b" },
     // ---- subst ----
     { input: "npm install $(cat packages.txt)", decision: "deny", reasonIncludes: "The install command uses she" },
-    { input: "`echo npm` install evil-pkg", decision: "deny", reasonIncludes: "The segment uses shell subst" },
+    { input: "`echo npm` install evil-pkg", decision: "deny", reasonIncludes: "shell substitution" },
     { input: "npm install `whoami`", decision: "deny", reasonIncludes: "The install command uses she" },
     { input: "( npm install evil-pkg )", decision: "deny", reasonIncludes: "The install command uses she" },
     { input: "echo $(date)", decision: "allow" },
@@ -343,7 +343,7 @@ describe("guard decision + message layer (decideGuard, no trust lock)", () => {
     const decision = await decideGuard("npm install $(cat packages.txt)", cwd);
     expect(decision.action).toBe("deny");
     expect(decision.userMessage).toContain("could not safely analyze");
-    expect(decision.agentMessage).toContain("could not verify what would be installed");
+    expect(decision.agentMessage).toContain("could not verify whether it installs anything");
   });
 
   it("denies a nested-shell install fail-closed", async () => {
