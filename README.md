@@ -103,7 +103,7 @@ safeinstall check                     # audit direct deps against policy
 ┌─────────────────────┐     ┌──────────────┐     ┌─────────────────┐
 │  safeinstall pnpm   │ ──▶ │  Resolve &   │ ──▶ │  Policy check   │
 │  add axios          │     │  fetch meta  │     │  (age, scripts, │
-└─────────────────────┘     └──────────────┘     │   sources, ...)  │
+└─────────────────────┘     └──────────────┘     │  sources, ...)  │
                                                   └────────┬────────┘
                                                            │
                                                  ┌─────────▼─────────┐
