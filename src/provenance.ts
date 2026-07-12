@@ -360,7 +360,6 @@ export async function verifyProvenance(
   const cacheKey = `${input.registryUrl}|${input.packageName}@${input.version}`;
 
   let rawResponse: NpmAttestationResponse | null = null;
-  let reachedRegistry = true;
   try {
     rawResponse = await deps.fetchAttestations(url, input.signal);
     if (rawResponse) {
@@ -371,7 +370,6 @@ export async function verifyProvenance(
     if (shutdownError) {
       throw shutdownError;
     }
-    reachedRegistry = false;
     if (input.config.offlineBehavior === "allow-cached") {
       const cached = await input.diskCache.getJson<NpmAttestationResponse>(
         ATTESTATION_CACHE_NAMESPACE,
@@ -392,14 +390,10 @@ export async function verifyProvenance(
     }
   }
 
-  // Skip-ahead on TTL: even in fail-closed mode we still honor the disk
-  // cache for packages already fetched this hour, so repeated installs of
-  // the same version don't refetch. This is separate from allow-cached
-  // offline behavior above, which reaches for cache only after a failure.
-  if (rawResponse === null && reachedRegistry) {
-    return { status: "missing" };
-  }
-
+  // No attestation for this version: a registry 404 resolves to null, and the
+  // allow-cached fallback above already returned "unreachable" when nothing was
+  // cached — so reaching here with no response means missing provenance. The
+  // policy layer decides whether that blocks.
   if (!rawResponse) {
     return { status: "missing" };
   }
