@@ -11,7 +11,7 @@ import { RegistryClient } from "./registry";
 import { throwIfAborted } from "./signals";
 import { buildInstallPlan, parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
-import { trustSurfacePrecheck } from "./trust-surface";
+import { trustSurfacePrecheck } from "./trust-surface-check";
 import type { CliReason, CliResult, PackageEvaluation } from "./types";
 
 export interface InstallFlowOptions {

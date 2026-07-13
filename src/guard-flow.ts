@@ -5,8 +5,9 @@ import { loadConfig } from "./config";
 import { analyzeShellCommand } from "./guard-commands";
 import type { GuardRunnerMatch } from "./guard-commands";
 import { findNearestUpward } from "./project-discovery";
-import { checkTrustSurface, isTrustSurfacePath, partitionTrustFindings } from "./trust-surface";
+import { isTrustSurfacePath } from "./trust-surface";
 import type { TrustSurfaceStatus } from "./trust-surface";
+import { checkTrustSurface, partitionTrustFindings } from "./trust-surface-check";
 
 /**
  * `safeinstall guard <claude|codex|cursor>` — a pre-shell-execution hook for AI

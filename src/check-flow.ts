@@ -10,7 +10,7 @@ import { RegistryClient } from "./registry";
 import { throwIfAborted } from "./signals";
 import { parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
-import { trustSurfacePrecheck } from "./trust-surface";
+import { trustSurfacePrecheck } from "./trust-surface-check";
 import type { CliReason, CliResult, PackageEvaluation } from "./types";
 
 function configLabel(configPath?: string): string {
