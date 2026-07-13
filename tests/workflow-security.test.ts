@@ -19,7 +19,7 @@ describe("GitHub workflow security boundaries", () => {
   it("loads the durable trust verifier from the protected base branch", async () => {
     const content = await readFile(path.join(workflows, "safeinstall-trust.yml"), "utf8");
     expect(content).toContain("pull_request_target:");
-    expect(content).not.toMatch(/^  pull_request:\s*$/m);
+    expect(content).not.toMatch(/^ {2}pull_request:\s*$/m);
     expect(content).toContain("persist-credentials: false");
     // Verification runs from the external, code-owner-locked verifier action,
     // pinned by full commit SHA (never a tag or branch, so a PR cannot alter

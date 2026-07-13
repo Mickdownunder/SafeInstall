@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 
 import { analyzeShellCommand } from "../src/guard-commands";
 import {
-  checkInvariants,
   classifyDecision,
   generateCommand,
   makeRng,

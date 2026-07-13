@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -7,7 +8,7 @@ import { parseCiProvider, scaffoldCiWorkflow } from "../src/trust-ci";
 import { cleanupTempDirs, createTempDir, mkdirp, projectRoot } from "./cli-e2e-helpers";
 
 const packageVersion = (
-  JSON.parse(require("node:fs").readFileSync(path.join(projectRoot, "package.json"), "utf8")) as {
+  JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf8")) as {
     version: string;
   }
 ).version;
@@ -102,7 +103,7 @@ describe("scaffoldCiWorkflow", () => {
     expect(content).toContain("trust-base:");
     expect(content).toContain("persist-credentials: false");
     expect(content).toContain("working-directory: candidate");
-    expect(content).not.toMatch(/^  pull_request:\s*$/m);
+    expect(content).not.toMatch(/^ {2}pull_request:\s*$/m);
     // Every third-party action is immutable, not a moving major tag.
     expect(content).not.toContain("actions/checkout@v4");
     expect(content).not.toContain("actions/setup-node@v4");
