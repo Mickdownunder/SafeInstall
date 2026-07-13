@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.14.0 - 2026-07-13
+
+### Added
+
+- **Opt-in `provenance.toolingUnavailable: "fail-closed"` closes the tool-removal known-gap.** When the `sigstore` verifier is absent, provenance can be evaluated for no package; the default (`"warn"`) degrades to a loud per-package warning so a fresh environment stays bootstrappable. The new per-project knob lets a project that has already installed `sigstore` treat a *missing* verifier as suspicious and **block** every install until it is reinstalled — closing the residual where an attacker with `node_modules` write access could delete `sigstore` to slip provenance past the check. The `sigstore` bootstrap install itself (`requested.name === "sigstore"`) stays exempt, so `fail-closed` can never deadlock. New block code `attestation-tooling-unavailable`; the Attack Lab records the opt-in defence (`provenance-tooling-fail-closed`) alongside the still-honest default-mode limit (`provenance-tooling-removed`).
+
+### Changed
+
+- **Internal hardening — no runtime behaviour change.** `trust-surface.ts` (870 LoC) was split into four focused modules (hidden-Unicode detection, MCP-server parsing, trust-surface reconciliation, and the data model), each under the 500-LoC line. ESLint + typescript-eslint were added with type-aware rules (`no-explicit-any`, `no-floating-promises`, `switch-exhaustiveness-check`), wired into `pnpm lint`, the `release:check` gate, and a dedicated CI job; the linter found and fixed 14 real issues, including two non-exhaustive switches. TypeScript was hardened with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`: every optional field and every array/record index access is now honest, fixed with real guards, `for...of`, and documented invariants — never a `!` assertion.
+
 ## 0.13.1 - 2026-07-12
 
 ### Fixed

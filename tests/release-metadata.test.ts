@@ -28,7 +28,7 @@ describe("release metadata", () => {
 
     expect(packageJson.private).not.toBe(true);
     expect(packageJson.name).toBe("safeinstall-cli");
-    expect(packageJson.version).toBe("0.13.1");
+    expect(packageJson.version).toBe("0.14.0");
     expect(packageJson.license).toBe("MIT");
 
     // The heavy, capability-rich deps (sigstore, MCP SDK) must NOT be installed
