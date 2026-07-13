@@ -51,11 +51,11 @@ export interface EvaluatePackageInput {
   config: SafeInstallConfig;
   requested: RequestedPackage;
   now: Date;
-  priorState?: ProjectDependencyState;
-  resolvedRegistryPackage?: ResolvedRegistryPackage;
+  priorState?: ProjectDependencyState | undefined;
+  resolvedRegistryPackage?: ResolvedRegistryPackage | undefined;
   priorLifecycleScripts?: InstallLifecycleScriptName[];
-  provenanceResult?: ProvenanceVerificationResult;
-  continuityResult?: ContinuityResult;
+  provenanceResult?: ProvenanceVerificationResult | undefined;
+  continuityResult?: ContinuityResult | undefined;
   /**
    * Error captured when registry metadata resolution failed (package does
    * not exist, network error, 5xx, etc.). If a typo-squat check fires on
@@ -64,7 +64,7 @@ export interface EvaluatePackageInput {
    * block is added so the user sees a real error message rather than a
    * silent, empty allow.
    */
-  resolutionError?: Error;
+  resolutionError?: Error | undefined;
 }
 
 export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation {

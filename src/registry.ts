@@ -82,7 +82,7 @@ interface PublishTimeRecord {
 export class RegistryClient {
   private readonly registryUrl: string;
   private readonly diskCache: DiskCache;
-  private readonly signal?: AbortSignal;
+  private readonly signal?: AbortSignal | undefined;
   private readonly packageCache = new Map<string, RegistryPackageDocument>();
   private readonly versionCache = new Map<string, RegistryVersionManifest>();
   private readonly publishTimeCache = new Map<string, PublishTimeRecord>();
@@ -92,7 +92,7 @@ export class RegistryClient {
     registryUrl?: string;
     cacheDir?: string;
     cacheTtlMs?: number;
-    signal?: AbortSignal;
+    signal?: AbortSignal | undefined;
   }) {
     this.registryUrl = (options?.registryUrl ?? DEFAULT_REGISTRY_URL).replace(/\/+$/, "");
     this.diskCache = new DiskCache({

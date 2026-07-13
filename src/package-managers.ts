@@ -18,14 +18,14 @@ export interface RunPackageManagerOptions {
   config: SafeInstallConfig;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
   stdio?: "inherit" | "pipe";
 }
 
 export interface PackageManagerExecutionResult {
   code: number;
-  stdout?: string;
-  stderr?: string;
+  stdout?: string | undefined;
+  stderr?: string | undefined;
 }
 
 export function buildPackageManagerCommand(

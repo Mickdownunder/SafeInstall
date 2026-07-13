@@ -61,7 +61,7 @@ export interface AttackCase {
   regressionTest: string;
   disclosure: DisclosureStatus;
   /** Decision-record finding code this maps to, when applicable. */
-  decisionRecord?: string;
+  decisionRecord?: string | undefined;
   provenance: string;
 }
 

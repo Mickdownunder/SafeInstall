@@ -1,7 +1,7 @@
 export interface ParsedCliOptions {
   args: string[];
   json: boolean;
-  configPath?: string;
+  configPath?: string | undefined;
 }
 
 export function parseCliOptions(argv: string[]): ParsedCliOptions {

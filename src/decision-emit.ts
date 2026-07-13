@@ -86,9 +86,9 @@ export async function captureDecisionState(options: {
   packageDir: string;
   manager?: PackageManagerName;
   /** Absolute lockfile path when the flow already resolved one. */
-  lockfilePath?: string;
+  lockfilePath?: string | undefined;
   /** Absolute path of the loaded config file, when one exists. */
-  configPath?: string;
+  configPath?: string | undefined;
 }): Promise<DecisionCaptureResult> {
   try {
     // Canonicalize before comparing against the repo root: Windows 8.3

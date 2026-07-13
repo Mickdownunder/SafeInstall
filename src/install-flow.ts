@@ -17,7 +17,7 @@ import type { CliReason, CliResult, PackageEvaluation } from "./types";
 export interface InstallFlowOptions {
   jsonMode: boolean;
   signal?: AbortSignal;
-  configPath?: string;
+  configPath?: string | undefined;
 }
 
 function configLabel(configPath?: string): string {
@@ -71,7 +71,7 @@ async function collectTargetPackages(
 ): Promise<{
   issues: CliReason[];
   plan: ReturnType<typeof buildInstallPlan>;
-  lockfilePath?: string;
+  lockfilePath?: string | undefined;
 }> {
   const plan = buildInstallPlan(argv);
   if (!plan.projectInstall) {

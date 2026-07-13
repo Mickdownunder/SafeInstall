@@ -159,7 +159,7 @@ export interface EvaluateContinuityInput {
   config: ContinuityConfig;
   diskCache: DiskCache;
   deps?: ContinuityDependencies;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**

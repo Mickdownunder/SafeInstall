@@ -112,8 +112,8 @@ export interface StatementVerification {
   ok: boolean;
   reasons: string[];
   /** The verdict the statement carries, when the statement parsed. */
-  verdict?: "allow" | "block";
-  headCommit?: string;
+  verdict?: "allow" | "block" | undefined;
+  headCommit?: string | undefined;
 }
 
 /**

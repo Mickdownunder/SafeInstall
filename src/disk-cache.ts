@@ -29,7 +29,7 @@ function hashKey(key: string): string {
 }
 
 export interface DiskCacheOptions {
-  cacheDir?: string;
+  cacheDir?: string | undefined;
   ttlMs: number;
 }
 

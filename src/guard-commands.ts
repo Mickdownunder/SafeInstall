@@ -161,7 +161,7 @@ interface SegmentFinding {
     managerToken: ShellToken;
     subcommandToken: ShellToken;
     /** Present when the manager was invoked through corepack; the rewrite drops it. */
-    corepackToken?: ShellToken;
+    corepackToken?: ShellToken | undefined;
   };
   runner?: GuardRunnerMatch;
   unanalyzable?: GuardUnanalyzableSegment;
