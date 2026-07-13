@@ -12,18 +12,21 @@ export async function mapConcurrent<TInput, TOutput>(
   }
 
   const results = new Array<TOutput>(values.length);
-  let nextIndex = 0;
+
+  // Shared iterator hands out [index, value] pairs in order. entries() yields
+  // [number, TInput] (never undefined), and next() is synchronous, so it is safe
+  // to pull from concurrently: no two workers can interleave inside a single next().
+  const pending = values.entries();
 
   async function runWorker(): Promise<void> {
     while (true) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-
-      if (currentIndex >= values.length) {
+      const next = pending.next();
+      if (next.done) {
         return;
       }
 
-      results[currentIndex] = await mapper(values[currentIndex], currentIndex);
+      const [currentIndex, value] = next.value;
+      results[currentIndex] = await mapper(value, currentIndex);
     }
   }
 

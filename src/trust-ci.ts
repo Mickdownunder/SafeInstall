@@ -66,6 +66,9 @@ function cliPackage(): { name: string; version: string } {
 export function parseCiProvider(argv: string[]): CiProvider | undefined | Error {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === undefined) {
+      continue;
+    }
     let value: string | undefined;
     if (token === "--ci") {
       value = argv[index + 1];

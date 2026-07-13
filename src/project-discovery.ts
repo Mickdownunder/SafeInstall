@@ -50,6 +50,9 @@ export async function findNearestPackageDir(startDir: string): Promise<string | 
 
 function extractFlagValue(args: string[], index: number): string | undefined {
   const token = args[index];
+  if (token === undefined) {
+    return undefined;
+  }
   if (token.includes("=")) {
     return token.slice(token.indexOf("=") + 1);
   }
@@ -62,6 +65,9 @@ export function resolveEffectiveCwd(invokedCwd: string, args: string[]): string 
 
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
+    if (token === undefined) {
+      continue;
+    }
     const flagName = token.includes("=") ? token.slice(0, token.indexOf("=")) : token;
 
     if (!CWD_FLAGS.has(flagName)) {

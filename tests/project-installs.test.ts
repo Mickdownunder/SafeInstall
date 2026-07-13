@@ -11,6 +11,7 @@ import {
   loadPnpmProjectInstallTargets
 } from "../src/project-installs";
 import { classifyResolvedSource } from "../src/project-installs/shared";
+import { present } from "./helpers/present";
 
 const tempDirs: string[] = [];
 
@@ -107,7 +108,7 @@ packages:
 
     expect(result.issues).toEqual([]);
     expect(result.targets).toHaveLength(1);
-    expect(result.targets[0].requested).toMatchObject({
+    expect(present(result.targets[0]).requested).toMatchObject({
       name: "axios",
       sourceType: "registry",
       requested: "1.14.0",
@@ -183,7 +184,7 @@ packages:
     const result = await loadPnpmProjectInstallTargets(cwd, cwd);
 
     expect(result.issues).toEqual([]);
-    expect(result.targets[0].requested).toMatchObject({
+    expect(present(result.targets[0]).requested).toMatchObject({
       name: "lodash",
       sourceType: "git"
     });
@@ -217,7 +218,7 @@ packages:
     const result = await loadPnpmProjectInstallTargets(cwd, cwd);
 
     expect(result.issues).toEqual([]);
-    expect(result.targets[0].requested).toMatchObject({
+    expect(present(result.targets[0]).requested).toMatchObject({
       name: "axios",
       sourceType: "registry",
       requested: "1.14.0"
@@ -267,7 +268,7 @@ describe("loadNpmProjectInstallTargets", () => {
     const result = await loadNpmProjectInstallTargets(cwd, cwd);
 
     expect(result.issues).toEqual([]);
-    expect(result.targets[0].requested).toMatchObject({
+    expect(present(result.targets[0]).requested).toMatchObject({
       name: "axios",
       sourceType: "registry",
       requested: "1.14.0",
@@ -350,7 +351,7 @@ describe("loadNpmProjectInstallTargets", () => {
     const result = await loadNpmProjectInstallTargets(cwd, cwd);
 
     expect(result.issues).toEqual([]);
-    expect(result.targets[0].requested).toMatchObject({
+    expect(present(result.targets[0]).requested).toMatchObject({
       name: "lodash",
       sourceType: "git"
     });
@@ -396,7 +397,7 @@ describe("loadNpmProjectInstallTargets", () => {
     const result = await loadNpmProjectInstallTargets(cwd, cwd);
 
     expect(result.issues).toEqual([]);
-    expect(result.targets[0].requested).toMatchObject({
+    expect(present(result.targets[0]).requested).toMatchObject({
       sourceType: "registry",
       requested: "1.14.0"
     });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { analyzeShellCommand } from "../src/guard-commands";
+import { present } from "./helpers/present";
 
 describe("analyzeShellCommand", () => {
   describe("commands without installs", () => {
@@ -161,7 +162,7 @@ describe("analyzeShellCommand", () => {
         const analysis = analyzeShellCommand(command);
         expect(analysis.installs, command).toEqual([]);
         expect(analysis.unanalyzable, command).toHaveLength(1);
-        expect(analysis.unanalyzable[0].reason, command).toContain("split-string");
+        expect(present(analysis.unanalyzable[0]).reason, command).toContain("split-string");
       }
     });
 
@@ -169,7 +170,7 @@ describe("analyzeShellCommand", () => {
       const analysis = analyzeShellCommand("sudo --future-option value npm install evil-pkg");
       expect(analysis.installs).toEqual([]);
       expect(analysis.unanalyzable).toHaveLength(1);
-      expect(analysis.unanalyzable[0].reason).toContain("wrapper option");
+      expect(present(analysis.unanalyzable[0]).reason).toContain("wrapper option");
     });
 
     it("does not mistake command lookup mode for command execution", () => {
@@ -274,7 +275,7 @@ describe("analyzeShellCommand", () => {
       const analysis = analyzeShellCommand("npm install $PKG");
       expect(analysis.installs).toEqual([]);
       expect(analysis.unanalyzable).toHaveLength(1);
-      expect(analysis.unanalyzable[0].reason).toContain("variable expansion");
+      expect(present(analysis.unanalyzable[0]).reason).toContain("variable expansion");
     });
 
     it("allows env-assignment prefixes containing expansions", () => {
@@ -286,7 +287,7 @@ describe("analyzeShellCommand", () => {
     it("flags installs hidden in nested shells", () => {
       const analysis = analyzeShellCommand('bash -c "npm install evil-pkg"');
       expect(analysis.unanalyzable).toHaveLength(1);
-      expect(analysis.unanalyzable[0].reason).toContain("nested shell");
+      expect(present(analysis.unanalyzable[0]).reason).toContain("nested shell");
     });
 
     it("ignores nested shells without install hints", () => {
@@ -299,7 +300,7 @@ describe("analyzeShellCommand", () => {
       for (const command of ["yarn", "yarn install", "yarn add axios", "yarn global add pkg"]) {
         const analysis = analyzeShellCommand(command);
         expect(analysis.unanalyzable, command).toHaveLength(1);
-        expect(analysis.unanalyzable[0].reason, command).toContain("yarn");
+        expect(present(analysis.unanalyzable[0]).reason, command).toContain("yarn");
       }
     });
 
@@ -318,7 +319,7 @@ describe("analyzeShellCommand", () => {
       ]) {
         const analysis = analyzeShellCommand(command);
         expect(analysis.runners, command).toHaveLength(1);
-        expect(analysis.runners[0].fetchesRemote, command).toBe(true);
+        expect(present(analysis.runners[0]).fetchesRemote, command).toBe(true);
       }
 
       expect(analyzeShellCommand("npm init").runners).toEqual([]);
@@ -328,7 +329,7 @@ describe("analyzeShellCommand", () => {
       const analysis = analyzeShellCommand("pnpm --some-future-flag value add evil-pkg");
       expect(analysis.installs).toEqual([]);
       expect(analysis.unanalyzable).toHaveLength(1);
-      expect(analysis.unanalyzable[0].reason).toContain('"add"');
+      expect(present(analysis.unanalyzable[0]).reason).toContain('"add"');
     });
 
     it("does not flag install aliases owned by non-install subcommands", () => {

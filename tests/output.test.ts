@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { writeCliResult } from "../src/output";
 import type { CliResult } from "../src/types";
+import { present } from "./helpers/present";
 
 function createResult(overrides: Partial<CliResult> = {}): CliResult {
   return {
@@ -40,7 +41,7 @@ describe("writeCliResult", () => {
     );
 
     expect(writeSpy).toHaveBeenCalledTimes(1);
-    const payload = JSON.parse(String(writeSpy.mock.calls[0][0]));
+    const payload = JSON.parse(String(present(writeSpy.mock.calls[0])[0]));
     expect(payload).toMatchObject({
       mode: "check",
       decision: "block",

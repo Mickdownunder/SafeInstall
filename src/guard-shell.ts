@@ -236,11 +236,15 @@ function skipRedirection(tokens: ShellToken[], index: number): number | undefine
 export function stripRedirections(tokens: ShellToken[]): ShellToken[] {
   const result: ShellToken[] = [];
   for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === undefined) {
+      continue;
+    }
     const end = skipRedirection(tokens, index);
     if (end !== undefined) {
       index = end - 1;
     } else {
-      result.push(tokens[index]);
+      result.push(token);
     }
   }
   return result;
@@ -260,6 +264,12 @@ function scanWrapper(tokens: ShellToken[], wrapperIndex: number, wrapper: string
   terminal?: boolean;
 } {
   const spec = WRAPPER_OPTIONS[wrapper];
+  if (spec === undefined) {
+    // Invariant: scanWrapper is only reached after WRAPPER_COMMANDS.has(wrapper)
+    // succeeds, and every WRAPPER_COMMANDS entry has a WRAPPER_OPTIONS spec. A
+    // miss means the two tables drifted out of sync — a programming error.
+    throw new Error(`No wrapper-option spec registered for wrapper "${wrapper}".`);
+  }
   let index = wrapperIndex + 1;
   while (index < tokens.length) {
     const redirectionEnd = skipRedirection(tokens, index);
@@ -267,7 +277,11 @@ function scanWrapper(tokens: ShellToken[], wrapperIndex: number, wrapper: string
       index = redirectionEnd;
       continue;
     }
-    const value = tokens[index].value;
+    const token = tokens[index];
+    if (token === undefined) {
+      break;
+    }
+    const value = token.value;
     if (value === "--") return { nextIndex: index + 1 };
     if (!value.startsWith("-") || value === "-") return { nextIndex: index };
     if (spec.terminalFlags?.has(value)) return { nextIndex: -1, terminal: true };
@@ -300,7 +314,11 @@ export function findCommandTokenIndex(tokens: ShellToken[]): CommandTokenResolut
   let index = 0;
   let corepackToken: ShellToken | undefined;
   while (index < tokens.length) {
-    const value = tokens[index].value;
+    const token = tokens[index];
+    if (token === undefined) {
+      break;
+    }
+    const value = token.value;
     const redirectionEnd = skipRedirection(tokens, index);
     if (redirectionEnd !== undefined) {
       index = redirectionEnd;
@@ -312,7 +330,7 @@ export function findCommandTokenIndex(tokens: ShellToken[]): CommandTokenResolut
     }
     const wrapper = shellBasename(value);
     if (!WRAPPER_COMMANDS.has(wrapper)) return { index, corepackToken };
-    if (wrapper === "corepack") corepackToken = tokens[index];
+    if (wrapper === "corepack") corepackToken = token;
     const scan = scanWrapper(tokens, index, wrapper);
     if (scan.error) return { index: -1, corepackToken, wrapperError: scan.error };
     if (scan.terminal || scan.nextIndex < 0) return { index: -1, corepackToken };
@@ -324,7 +342,11 @@ export function findCommandTokenIndex(tokens: ShellToken[]): CommandTokenResolut
 export function collectWriteTargets(tokens: ShellToken[], commandIndex: number): string[] {
   const targets: string[] = [];
   for (let index = 0; index < tokens.length; index += 1) {
-    const operator = redirectionBase(tokens[index].value);
+    const token = tokens[index];
+    if (token === undefined) {
+      continue;
+    }
+    const operator = redirectionBase(token.value);
     if (operator && WRITE_REDIRECTIONS.has(operator)) {
       const target = tokens[index + 1]?.value;
       const duplicatesFd = (operator === ">&" || operator === "<&") && /^-?\d+$/.test(target ?? "");
@@ -333,7 +355,9 @@ export function collectWriteTargets(tokens: ShellToken[], commandIndex: number):
     }
   }
   if (commandIndex < 0 || commandIndex >= tokens.length) return targets;
-  const executable = shellBasename(tokens[commandIndex].value);
+  const commandToken = tokens[commandIndex];
+  if (commandToken === undefined) return targets;
+  const executable = shellBasename(commandToken.value);
   const args = stripRedirections(tokens.slice(commandIndex + 1));
   const isInPlaceSed = executable === "sed" && args.some((token) => token.value === "-i" || token.value.startsWith("-i"));
   if (FILE_WRITER_EXECUTABLES.has(executable) || isInPlaceSed) {

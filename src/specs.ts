@@ -66,6 +66,9 @@ export function extractRequestedSpecs(args: string[]): string[] {
 
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
+    if (token === undefined) {
+      continue;
+    }
 
     if (token === "--" && !positionalOnly) {
       // Everything after `--` is positional. For install commands the
@@ -206,6 +209,9 @@ function splitManagerArgsAndCommand(argv: string[]): {
 
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
+    if (token === undefined) {
+      continue;
+    }
 
     if (!isFlag(token)) {
       return {
@@ -218,8 +224,9 @@ function splitManagerArgsAndCommand(argv: string[]): {
 
     preCommandArgs.push(token);
 
-    if (!token.includes("=") && FLAGS_WITH_VALUES.has(token) && rest[index + 1]) {
-      preCommandArgs.push(rest[index + 1]);
+    const next = rest[index + 1];
+    if (!token.includes("=") && FLAGS_WITH_VALUES.has(token) && next) {
+      preCommandArgs.push(next);
       index += 1;
     }
   }

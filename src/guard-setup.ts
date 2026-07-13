@@ -214,6 +214,9 @@ export function parseGuardSetupClients(argv: string[]): GuardSetupClient[] | Err
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === undefined) {
+      continue;
+    }
     let value: string | undefined;
 
     if (token === "--client") {

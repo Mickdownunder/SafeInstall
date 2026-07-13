@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { analyzeShellCommand } from "../src/guard-commands";
 import { decideGuard } from "../src/guard-flow";
+import { present } from "./helpers/present";
 
 /**
  * Characterization tests for the shell-command guard parser.
@@ -287,7 +288,7 @@ describe("guard parser characterization", () => {
       }
       if (testCase.reasonIncludes !== undefined) {
         expect(analysis.unanalyzable.length).toBeGreaterThan(0);
-        expect(analysis.unanalyzable[0].reason).toContain(testCase.reasonIncludes);
+        expect(present(analysis.unanalyzable[0]).reason).toContain(testCase.reasonIncludes);
       }
       if (testCase.writeTargets !== undefined) {
         expect(analysis.writeTargets).toEqual(testCase.writeTargets);

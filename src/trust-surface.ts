@@ -284,6 +284,9 @@ const RUNNER_VALUE_FLAGS = new Set(["-c", "--call", "--shell", "--cwd"]);
 function runnerSpec(args: string[]): string | undefined {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === undefined) {
+      continue;
+    }
     if (arg === "-p" || arg === "--package") {
       return args[index + 1];
     }
@@ -758,6 +761,11 @@ export async function checkTrustSurface(startDir: string): Promise<TrustSurfaceS
       // seen as drift) changes this hash but cannot change the hash-chained
       // ledger entry without breaking the chain.
       const baselineEntry = entries[lockIndex];
+      if (baselineEntry === undefined) {
+        // Invariant: this branch runs only when staleBaseline is false, which
+        // requires lockIndex !== -1 (a valid findIndex result), so the entry exists.
+        throw new Error("invariant violated: baseline ledger entry missing for a resolved lockIndex.");
+      }
       const recordedHash = baselineEntry.detail.slice(baselineEntry.detail.indexOf(":") + 1);
       if (recordedHash !== computeBaselineHash(lock)) {
         findings.push({
