@@ -23,7 +23,7 @@
     {
       "path": ".github/workflows/safeinstall-trust.yml",
       "kind": "enforcement",
-      "sha256": "e1d2f7866b9d40c941479efd6c8c2fb0e89fa8eb3b8937e0cbe2990522fc2e64",
+      "sha256": "d65b9a2e3040dce72c64bce8d584c6d2ccf0f22587b124435963e659bc7a0e73",
       "hiddenUnicode": []
     },
     {
@@ -48,6 +48,6 @@
       "unpinned": false
     }
   ],
-  "approvedAt": "2026-07-12T10:56:19.581Z",
-  "ledgerHead": "b4a182a8eed66c8ae45eab95464c43de64b89b152159455910f15ce53f967754"
+  "approvedAt": "2026-07-13T21:35:49.737Z",
+  "ledgerHead": "e7e0cdd34fb7702d217d8d3e48673b8f57c7f830dc6d99d83bb8e1df96cd81d2"
 }
