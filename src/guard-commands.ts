@@ -97,7 +97,6 @@ const NON_INSTALL_SUBCOMMANDS = new Set([
 ]);
 const NESTED_SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
 const INSTALL_HINT_PATTERN = /\b(npm|pnpm|bun|yarn)\b/i;
-const ENV_ASSIGNMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /** Standalone package-runner binaries. */
 interface RunnerConfig {

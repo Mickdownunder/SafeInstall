@@ -51,7 +51,10 @@ function classifyRegistrySpecKind(result: npa.Result): RequestedPackage["registr
     case "range":
     case "alias":
       return "range";
-    default:
+    case "git":
+    case "file":
+    case "directory":
+    case "remote":
       return undefined;
   }
 }

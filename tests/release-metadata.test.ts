@@ -61,9 +61,10 @@ describe("release metadata", () => {
     expect(packageJson.scripts).toMatchObject({
       prepack: "pnpm build",
       "pack:smoke": "node scripts/pack-smoke.mjs",
+      lint: "eslint src tests",
       // Build before test: the e2e suites run dist/cli.js via ensureBuiltCli,
       // which skips rebuilding an existing (possibly stale) dist.
-      "release:check": "pnpm typecheck && pnpm build && pnpm test && pnpm pack:smoke"
+      "release:check": "pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm pack:smoke"
     });
     expect(packageJson.publishConfig).toMatchObject({
       access: "public"
