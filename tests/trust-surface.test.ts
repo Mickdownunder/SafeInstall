@@ -3,13 +3,12 @@ import path from "node:path";
 
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
+import { detectHiddenUnicode, normalizeHiddenUnicode } from "../src/hidden-unicode";
+import { parseMcpServers } from "../src/mcp-server-parse";
 import {
   computeTrustSurfaceDrift,
-  detectHiddenUnicode,
   findTrustContext,
   isTrustSurfacePath,
-  normalizeHiddenUnicode,
-  parseMcpServers,
   snapshotTrustSurface
 } from "../src/trust-surface";
 import { cleanupTempDirs, createTempDir } from "./cli-e2e-helpers";

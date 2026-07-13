@@ -5,6 +5,7 @@ import readline from "node:readline";
 
 import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
+import { detectHiddenUnicode } from "./hidden-unicode";
 import { formatCommand } from "./output";
 import { parseCiProvider, scaffoldCiWorkflow } from "./trust-ci";
 import type { CiProvider } from "./trust-ci";
@@ -15,9 +16,7 @@ import {
   verifyLedgerChain
 } from "./trust-ledger";
 import {
-  checkTrustSurface,
   computeBaselineHash,
-  detectHiddenUnicode,
   findTrustContext,
   readTrustLock,
   snapshotTrustSurface,
@@ -27,6 +26,7 @@ import {
   TRUST_LOCK_RELATIVE_PATH
 } from "./trust-surface";
 import type { TrustSurfaceLock, TrustSurfaceMode, TrustSurfaceSnapshot } from "./trust-surface";
+import { checkTrustSurface } from "./trust-surface-check";
 import type { CliReason, CliResult } from "./types";
 
 /**
