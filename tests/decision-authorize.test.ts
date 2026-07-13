@@ -13,6 +13,7 @@ import { appendDecisionRecord } from "../src/decision-store";
 import { bindFileAsStaged, resolveGitRepo, type GitRepoContext } from "../src/git-blob";
 import { createDecisionDraft } from "./helpers/decision-fixture";
 import { commitAll, createRepoFixture, git } from "./helpers/git-fixture";
+import { present } from "./helpers/present";
 
 /**
  * The online half of L1: authorize = verify + fresh policy re-evaluation of
@@ -26,7 +27,7 @@ let registryUrl: string;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    const requestUrl = decodeURIComponent((req.url ?? "/").split("?")[0]);
+    const requestUrl = decodeURIComponent(present((req.url ?? "/").split("?")[0]));
     if (requestUrl.includes("/-/")) {
       res.writeHead(200, {
         "content-type": "application/octet-stream",
@@ -277,6 +278,6 @@ describe("decisions authorize CLI", () => {
     git(dir, "commit", "--allow-empty", "-q", "-m", "empty");
     const result = await runDecisionsFlow(dir, ["decisions", "authorize"]);
     expect(result.exitCode).toBe(1);
-    expect(result.reasons[0].code).toBe("decisions-invalid-arguments");
+    expect(present(result.reasons[0]).code).toBe("decisions-invalid-arguments");
   });
 });

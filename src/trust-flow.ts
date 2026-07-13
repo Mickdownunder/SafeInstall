@@ -151,6 +151,9 @@ function baseResult(argv: string[], overrides: Partial<CliResult>): CliResult {
 function parseMode(argv: string[]): TrustSurfaceMode | Error {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === undefined) {
+      continue;
+    }
     let value: string | undefined;
     if (token === "--mode") {
       value = argv[index + 1];
@@ -455,11 +458,11 @@ async function renderHiddenUnicodeLines(root: string, relativePath: string): Pro
   }
   const rendered: string[] = [];
   const lines = content.split("\n");
-  for (let index = 0; index < lines.length; index += 1) {
-    if (detectHiddenUnicode(lines[index]).length === 0) {
+  for (const [index, line] of lines.entries()) {
+    if (detectHiddenUnicode(line).length === 0) {
       continue;
     }
-    const escaped = [...lines[index]]
+    const escaped = [...line]
       .map((char) => {
         const codePoint = char.codePointAt(0) as number;
         return detectHiddenUnicode(char).length > 0

@@ -38,6 +38,9 @@ export function parseInitOptions(argv: string[]): InitOptions | Error {
 
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === undefined) {
+      continue;
+    }
 
     if (token === "--force") {
       options.force = true;

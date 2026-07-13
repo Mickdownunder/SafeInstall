@@ -11,6 +11,7 @@ import {
   runGuardSetupFlow
 } from "../src/guard-setup";
 import { cleanupTempDirs, createTempDir } from "./cli-e2e-helpers";
+import { present } from "./helpers/present";
 
 afterAll(async () => {
   await cleanupTempDirs();
@@ -126,7 +127,7 @@ describe("mergeClaudeSettings", () => {
     const hooks = merged?.hooks as Record<string, unknown[]>;
     expect(hooks.PostToolUse).toHaveLength(1);
     expect(hooks.PreToolUse).toHaveLength(2);
-    expect(hooks.PreToolUse[0]).toMatchObject({ matcher: "Write" });
+    expect(present(hooks.PreToolUse)[0]).toMatchObject({ matcher: "Write" });
   });
 
   it("is idempotent when the guard is already registered", () => {
@@ -162,7 +163,7 @@ describe("mergeCursorHooks", () => {
     const hooks = merged?.hooks as Record<string, unknown[]>;
     expect(hooks.afterFileEdit).toHaveLength(1);
     expect(hooks.beforeShellExecution).toHaveLength(2);
-    expect(hooks.beforeShellExecution[0]).toEqual({ command: "./hooks/audit.sh" });
+    expect(present(hooks.beforeShellExecution)[0]).toEqual({ command: "./hooks/audit.sh" });
   });
 
   it("is idempotent when the guard is already registered", () => {
@@ -283,7 +284,7 @@ describe("runGuardSetupFlow", () => {
     const result = await runGuardSetupFlow(cwd, ["guard", "install"], { clients: ["cursor"] });
     expect(result.decision).toBe("error");
     expect(result.exitCode).toBe(1);
-    expect(result.reasons[0].message).toContain("not valid JSON");
+    expect(present(result.reasons[0]).message).toContain("not valid JSON");
 
     expect(await readFile(configPath, "utf8")).toBe("{ not json");
   });

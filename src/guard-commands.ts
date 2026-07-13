@@ -142,10 +142,14 @@ function findSubcommand(tokens: ShellToken[]): ShellToken | undefined {
   // first token after the manager that is not a flag, where flags that
   // consume a value (like `-C packages/app`) also skip their value token.
   for (let index = 0; index < tokens.length; index += 1) {
-    const value = tokens[index].value;
+    const token = tokens[index];
+    if (token === undefined) {
+      continue;
+    }
+    const value = token.value;
 
     if (!value.startsWith("-")) {
-      return tokens[index];
+      return token;
     }
 
     if (!value.includes("=") && FLAGS_WITH_VALUES.has(value)) {
@@ -173,9 +177,13 @@ interface SegmentFinding {
  * explicitly requests a registry package, and a version suffix (pkg@1.2.3)
  * or scope means the runner will resolve against the registry.
  */
-function analyzeRunnerTarget(tokens: ShellToken[]): { packageHint?: string; explicitRemote: boolean } {
+function analyzeRunnerTarget(tokens: ShellToken[]): { packageHint?: string | undefined; explicitRemote: boolean } {
   for (let index = 0; index < tokens.length; index += 1) {
-    const value = tokens[index].value;
+    const token = tokens[index];
+    if (token === undefined) {
+      continue;
+    }
+    const value = token.value;
 
     if (value === "--") {
       return { packageHint: tokens[index + 1]?.value, explicitRemote: false };
@@ -252,6 +260,9 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
   }
 
   const commandToken = segment.tokens[commandIndex];
+  if (commandToken === undefined) {
+    return {};
+  }
   const executable = basename(commandToken.value);
   const rest = stripRedirections(segment.tokens.slice(commandIndex + 1));
 
@@ -280,9 +291,10 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
   if (executable === "yarn") {
     const subcommand = findSubcommand(rest);
     const normalized = subcommand?.value.toLowerCase();
-    if (normalized && RUNNER_SUBCOMMANDS.yarn[normalized]) {
+    const yarnRunner = normalized ? RUNNER_SUBCOMMANDS.yarn?.[normalized] : undefined;
+    if (yarnRunner) {
       return createRunnerFinding(
-        RUNNER_SUBCOMMANDS.yarn[normalized],
+        yarnRunner,
         rest.slice(rest.indexOf(subcommand as ShellToken) + 1),
         segmentText
       );

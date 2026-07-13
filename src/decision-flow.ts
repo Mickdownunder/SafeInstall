@@ -40,6 +40,9 @@ function parseVerifyArgs(argv: string[]): ParsedVerifyArgs | Error {
   const parsed: ParsedVerifyArgs = { allowedRegistryUrls: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === undefined) {
+      continue;
+    }
     const readValue = (flag: string): string | Error => {
       const value = token === flag ? argv[(index += 1)] : token.slice(flag.length + 1);
       if (!value) {
@@ -81,6 +84,9 @@ function readFlags(argv: string[], flags: string[]): Record<string, string> | Er
   const out: Record<string, string> = {};
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === undefined) {
+      continue;
+    }
     const flag = flags.find((name) => token === name || token.startsWith(`${name}=`));
     if (!flag) {
       return new Error(`Unknown argument: ${token}`);

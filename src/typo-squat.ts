@@ -2,6 +2,20 @@ import { TYPO_SQUAT_TARGETS } from "./typo-squat-targets";
 import type { SafeInstallConfig, TypoSquatConfig } from "./types";
 
 /**
+ * Read a cell of a Damerau-Levenshtein DP buffer. Every index passed here is
+ * in-bounds and was written earlier in the fill (row 0 is seeded up front; each
+ * later cell is assigned before it is read), so an `undefined` can only mean the
+ * buffer sizing/fill invariant was broken — a programming error, not input.
+ */
+function dpCell(buffer: number[], index: number): number {
+  const value = buffer[index];
+  if (value === undefined) {
+    throw new Error(`Damerau-Levenshtein DP buffer cell ${index} was read before being written.`);
+  }
+  return value;
+}
+
+/**
  * Damerau-Levenshtein distance with a bounded cutoff. Returns `cutoff + 1`
  * whenever the true distance exceeds the cutoff so callers can abort early
  * without computing the full matrix.
@@ -45,9 +59,9 @@ export function damerauLevenshtein(left: string, right: string, cutoff = Infinit
       const substitutionCost = left[row - 1] === right[column - 1] ? 0 : 1;
 
       current[column] = Math.min(
-        current[column - 1] + 1, // insertion
-        previous[column] + 1, // deletion
-        previous[column - 1] + substitutionCost // substitution
+        dpCell(current, column - 1) + 1, // insertion
+        dpCell(previous, column) + 1, // deletion
+        dpCell(previous, column - 1) + substitutionCost // substitution
       );
 
       if (
@@ -56,11 +70,11 @@ export function damerauLevenshtein(left: string, right: string, cutoff = Infinit
         left[row - 1] === right[column - 2] &&
         left[row - 2] === right[column - 1]
       ) {
-        current[column] = Math.min(current[column], previousPrevious[column - 2] + 1);
+        current[column] = Math.min(dpCell(current, column), dpCell(previousPrevious, column - 2) + 1);
       }
 
-      if (current[column] < minInRow) {
-        minInRow = current[column];
+      if (dpCell(current, column) < minInRow) {
+        minInRow = dpCell(current, column);
       }
     }
 
@@ -69,12 +83,12 @@ export function damerauLevenshtein(left: string, right: string, cutoff = Infinit
     }
 
     for (let column = 0; column <= rightLength; column += 1) {
-      previousPrevious[column] = previous[column];
-      previous[column] = current[column];
+      previousPrevious[column] = dpCell(previous, column);
+      previous[column] = dpCell(current, column);
     }
   }
 
-  return previous[rightLength];
+  return dpCell(previous, rightLength);
 }
 
 export interface TypoSquatSuspicion {

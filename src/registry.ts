@@ -372,7 +372,14 @@ export class RegistryClient {
     }
 
     if (!requested.registrySpecKind) {
-      return document["dist-tags"]?.latest ?? semver.rsort(versions)[0];
+      const resolved = document["dist-tags"]?.latest ?? semver.rsort(versions)[0];
+      if (resolved === undefined) {
+        // Invariant: versions is non-empty (checked above) and semver.rsort throws
+        // on invalid input rather than dropping entries, so rsort(versions)[0] is
+        // always present when no dist-tag latest exists.
+        throw new Error(`Registry error: could not resolve a version for ${requested.name}.`);
+      }
+      return resolved;
     }
 
     if (requested.registrySpecKind === "version") {

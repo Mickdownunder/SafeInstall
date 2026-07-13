@@ -12,6 +12,7 @@ import {
   snapshotTrustSurface
 } from "../src/trust-surface";
 import { cleanupTempDirs, createTempDir } from "./cli-e2e-helpers";
+import { present } from "./helpers/present";
 
 afterAll(async () => {
   await cleanupTempDirs();
@@ -99,7 +100,7 @@ describe("parseMcpServers", () => {
     const servers = parseMcpServers(".mcp.json", json);
     // real-pkg@2.0.0 is an exact pin, so this must NOT be flagged unpinned;
     // a naive firstPositional would have grabbed "real-pkg@2.0.0" or "bin".
-    expect(servers[0].unpinned).toBe(false);
+    expect(present(servers[0]).unpinned).toBe(false);
   });
 
   it("treats a full SemVer 2.0 pin (prerelease + build metadata) as pinned", () => {

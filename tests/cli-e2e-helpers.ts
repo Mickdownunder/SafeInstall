@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { present } from "./helpers/present";
+
 const execFileAsync = promisify(execFile);
 
 /**
@@ -30,7 +32,7 @@ export interface RegistryFixture {
  */
 export async function startRegistryFixture(): Promise<RegistryFixture> {
   const server: Server = createServer((req, res) => {
-    const requestUrl = decodeURIComponent((req.url ?? "/").split("?")[0]);
+    const requestUrl = decodeURIComponent(present((req.url ?? "/").split("?")[0]));
 
     // Tarball request (HEAD or GET): only the last-modified header matters.
     if (requestUrl.includes("/-/")) {

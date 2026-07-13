@@ -12,6 +12,7 @@ import {
 } from "../src/attack-lab";
 import { analyzeShellCommand } from "../src/guard-commands";
 import { createTtyHumanGate } from "../src/trust-flow";
+import { present } from "./helpers/present";
 
 /**
  * The Attack Lab is eval-system-first: this suite (a) validates every case
@@ -54,7 +55,7 @@ describe("attack lab catalogue", () => {
       // extract the first path-looking token and require the file to exist.
       const token = attackCase.regressionTest.match(/(?:^|\s)((?:tests|safeinstall-verifier)\/[\w./-]+)/);
       expect(token, `${attackCase.id} regressionTest names no file: ${attackCase.regressionTest}`).not.toBeNull();
-      const referenced = token![1];
+      const referenced = present(token?.[1]);
       if (referenced.startsWith("safeinstall-verifier/")) {
         // External repo; existence is that repo's CI concern, not this one.
         continue;

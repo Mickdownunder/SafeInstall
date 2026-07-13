@@ -38,6 +38,9 @@ const RUNNER_VALUE_FLAGS = new Set(["-c", "--call", "--shell", "--cwd"]);
 function runnerSpec(args: string[]): string | undefined {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === undefined) {
+      continue;
+    }
     if (arg === "-p" || arg === "--package") {
       return args[index + 1];
     }
