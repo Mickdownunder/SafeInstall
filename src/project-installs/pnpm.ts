@@ -23,14 +23,14 @@ interface PnpmLockfile {
 }
 
 interface PnpmImporter {
-  dependencies?: Record<string, string | PnpmImporterDependency>;
-  devDependencies?: Record<string, string | PnpmImporterDependency>;
-  optionalDependencies?: Record<string, string | PnpmImporterDependency>;
+  dependencies?: Record<string, string | PnpmImporterDependency> | undefined;
+  devDependencies?: Record<string, string | PnpmImporterDependency> | undefined;
+  optionalDependencies?: Record<string, string | PnpmImporterDependency> | undefined;
 }
 
 interface PnpmImporterDependency {
-  specifier?: string;
-  version?: string;
+  specifier?: string | undefined;
+  version?: string | undefined;
 }
 
 interface PnpmPackageEntry {
@@ -49,7 +49,7 @@ function readDirectManifestDependencies(
 
 function normalizeImporterDependency(
   entry: string | PnpmImporterDependency | undefined
-): { specifier?: string; version?: string } {
+): { specifier?: string | undefined; version?: string | undefined } {
   if (!entry) {
     return {};
   }

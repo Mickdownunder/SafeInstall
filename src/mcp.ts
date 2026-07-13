@@ -25,9 +25,9 @@ export interface CheckPackageInput {
   /** Package name, e.g. "axios" or "@scope/pkg". */
   name: string;
   /** Version or range; defaults to "latest". */
-  version?: string;
+  version?: string | undefined;
   /** Package manager hint; informational only. */
-  manager?: string;
+  manager?: string | undefined;
 }
 
 const MILLISECONDS_PER_HOUR = 1000 * 60 * 60;

@@ -16,7 +16,7 @@ export interface GuardUnanalyzableSegment {
 /** A package-runner invocation that may download and execute registry code. */
 export interface GuardRunnerMatch {
   tool: string;
-  packageHint?: string;
+  packageHint?: string | undefined;
   /** False means the runner prefers a locally installed binary. */
   fetchesRemote: boolean;
   segmentText: string;
@@ -30,5 +30,5 @@ export interface GuardCommandAnalysis {
   /** Best-effort paths written or removed by the intercepted shell command. */
   writeTargets: string[];
   /** Complete safe replacement, only when every install segment is analyzable. */
-  rewrittenCommand?: string;
+  rewrittenCommand?: string | undefined;
 }

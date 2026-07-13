@@ -255,17 +255,17 @@ export function createDefaultProvenanceDependencies(): ProvenanceDependencies {
  */
 export interface AttestationIdentity {
   hasProvenance: boolean;
-  sourceRepository?: string;
-  workflowPath?: string;
+  sourceRepository?: string | undefined;
+  workflowPath?: string | undefined;
 }
 
 export interface FetchAttestationIdentityInput {
   packageName: string;
   version: string;
   registryUrl: string;
-  diskCache?: DiskCache;
+  diskCache?: DiskCache | undefined;
   deps?: Pick<ProvenanceDependencies, "fetchAttestations">;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -338,7 +338,7 @@ export interface VerifyProvenanceInput {
   diskCache: DiskCache;
   config: ProvenanceConfig;
   deps?: ProvenanceDependencies;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**

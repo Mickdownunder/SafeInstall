@@ -57,7 +57,7 @@ export const KNOWN_LOCKFILE_NAMES = new Set([
 
 export interface DecisionVerifyOptions {
   baseRef: string;
-  headRef?: string;
+  headRef?: string | undefined;
   /** Registry URLs accepted besides the default (verifier-side input, D3). */
   allowedRegistryUrls?: string[];
 }

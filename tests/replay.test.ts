@@ -98,7 +98,7 @@ describe("attack replay: mastra (2026-06-17)", () => {
       version: entry.version,
       publishedAt: new Date(entry.publishedAt)
     }));
-    const identities = new Map<string, { hasProvenance: boolean; sourceRepository?: string }>();
+    const identities = new Map<string, { hasProvenance: boolean; sourceRepository?: string | undefined }>();
     for (const entry of cont.baseline) {
       identities.set(entry.version, { hasProvenance: true, sourceRepository: entry.repository });
     }

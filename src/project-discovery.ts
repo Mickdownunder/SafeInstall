@@ -13,7 +13,7 @@ const AMBIGUOUS_WORKSPACE_FLAGS: Record<PackageManagerName, Set<string>> = {
 export interface InvocationContext {
   invokedCwd: string;
   effectiveCwd: string;
-  packageDir?: string;
+  packageDir?: string | undefined;
 }
 
 export async function fileExists(filePath: string): Promise<boolean> {

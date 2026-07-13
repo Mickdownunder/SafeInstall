@@ -292,7 +292,7 @@ function scanWrapper(tokens: ShellToken[], wrapperIndex: number, wrapper: string
 
 export interface CommandTokenResolution {
   index: number;
-  corepackToken?: ShellToken;
+  corepackToken?: ShellToken | undefined;
   wrapperError?: string;
 }
 
