@@ -82,7 +82,7 @@ interface PublishTimeRecord {
 export class RegistryClient {
   private readonly registryUrl: string;
   private readonly diskCache: DiskCache;
-  private readonly signal?: AbortSignal;
+  private readonly signal?: AbortSignal | undefined;
   private readonly packageCache = new Map<string, RegistryPackageDocument>();
   private readonly versionCache = new Map<string, RegistryVersionManifest>();
   private readonly publishTimeCache = new Map<string, PublishTimeRecord>();
@@ -92,7 +92,7 @@ export class RegistryClient {
     registryUrl?: string;
     cacheDir?: string;
     cacheTtlMs?: number;
-    signal?: AbortSignal;
+    signal?: AbortSignal | undefined;
   }) {
     this.registryUrl = (options?.registryUrl ?? DEFAULT_REGISTRY_URL).replace(/\/+$/, "");
     this.diskCache = new DiskCache({
@@ -372,7 +372,14 @@ export class RegistryClient {
     }
 
     if (!requested.registrySpecKind) {
-      return document["dist-tags"]?.latest ?? semver.rsort(versions)[0];
+      const resolved = document["dist-tags"]?.latest ?? semver.rsort(versions)[0];
+      if (resolved === undefined) {
+        // Invariant: versions is non-empty (checked above) and semver.rsort throws
+        // on invalid input rather than dropping entries, so rsort(versions)[0] is
+        // always present when no dist-tag latest exists.
+        throw new Error(`Registry error: could not resolve a version for ${requested.name}.`);
+      }
+      return resolved;
     }
 
     if (requested.registrySpecKind === "version") {

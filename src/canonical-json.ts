@@ -78,7 +78,10 @@ function canonicalizeValue(value: unknown, pathLabel: string, out: string[]): vo
     }
     case "object":
       break;
-    default:
+    case "bigint":
+    case "symbol":
+    case "undefined":
+    case "function":
       throw new CanonicalJsonError(`Unsupported value of type ${typeof value}`, pathLabel);
   }
 

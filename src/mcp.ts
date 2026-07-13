@@ -25,9 +25,9 @@ export interface CheckPackageInput {
   /** Package name, e.g. "axios" or "@scope/pkg". */
   name: string;
   /** Version or range; defaults to "latest". */
-  version?: string;
+  version?: string | undefined;
   /** Package manager hint; informational only. */
-  manager?: string;
+  manager?: string | undefined;
 }
 
 const MILLISECONDS_PER_HOUR = 1000 * 60 * 60;
@@ -114,6 +114,11 @@ export async function checkPackage(
     deps.registryClient ?? new RegistryClient({ registryUrl: config.registryUrl });
 
   const [evaluation] = await evaluateRequestedPackages(cwd, [requested], registryClient, config);
+  if (evaluation === undefined) {
+    // Invariant: evaluateRequestedPackages returns one evaluation per input
+    // package, and we passed exactly one. A miss would be an engine bug.
+    throw new Error("evaluateRequestedPackages returned no evaluation for the requested package.");
+  }
   return evaluationToVerdict(evaluation, deps.now ?? new Date());
 }
 

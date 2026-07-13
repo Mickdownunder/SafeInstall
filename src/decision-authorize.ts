@@ -38,7 +38,7 @@ import { evaluateTransitiveDependencies } from "./transitive";
 
 export interface DecisionAuthorizeOptions {
   baseRef: string;
-  headRef?: string;
+  headRef?: string | undefined;
   allowedRegistryUrls?: string[];
 }
 

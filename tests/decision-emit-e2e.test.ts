@@ -18,6 +18,7 @@ import {
   type RegistryFixture
 } from "./cli-e2e-helpers";
 import { commitAll, git } from "./helpers/git-fixture";
+import { present } from "./helpers/present";
 
 /**
  * End-to-end: a real CLI process installing through a stub package manager in
@@ -79,7 +80,7 @@ process.exit(0);
 
     const chain = await readDecisionChain(project, "package-lock.json");
     expect(chain).toHaveLength(1);
-    const record = chain[0].record;
+    const record = present(chain[0]).record;
     expect(record.recordType).toBe("install");
     expect(record.actor).toBe("agent");
     expect(record.verdict.decision).toBe("allow");
@@ -132,7 +133,7 @@ process.exit(0);
 
     const chain = await readDecisionChain(project, "package-lock.json");
     expect(chain).toHaveLength(1);
-    const record = chain[0].record;
+    const record = present(chain[0]).record;
     expect(record.verdict.decision).toBe("block");
     expect(record.verdict.reasons.map((reason) => reason.code)).toContain("release-too-new");
     expect(record.installed).toBeNull();
@@ -159,11 +160,11 @@ process.exit(0);
 
     const chain = await readDecisionChain(project, "package-lock.json");
     expect(chain).toHaveLength(1);
-    const observation = chain[0].record.observations[0];
+    const observation = present(present(chain[0]).record.observations[0]);
     expect(observation.findings.map((finding) => finding.code)).toContain("non-registry-source");
     expect(observation.notEvaluable.releaseAge).not.toBeNull();
     expect(observation.notEvaluable.provenance).not.toBeNull();
-    expect(chain[0].record.verdict.notEvaluableCount).toBe(1);
+    expect(present(chain[0]).record.verdict.notEvaluableCount).toBe(1);
   });
 
   it("chains a second install onto the first record", async () => {
@@ -185,9 +186,9 @@ process.exit(0);
 
     const chain = await readDecisionChain(project, "package-lock.json");
     expect(chain).toHaveLength(2);
-    expect(chain[1].record.chain.prev).toBe(chain[0].digest);
+    expect(present(chain[1]).record.chain.prev).toBe(present(chain[0]).digest);
     // Continuity across the two decisions: record 2 starts where record 1 ended.
-    expect(chain[1].record.lockfile.before?.blobOid).toBe(chain[0].record.lockfile.after?.blobOid);
+    expect(present(chain[1]).record.lockfile.before?.blobOid).toBe(present(chain[0]).record.lockfile.after?.blobOid);
   });
 
   it("says so, loudly, when no record can be written (no git repository)", async () => {
@@ -237,7 +238,7 @@ process.exit(0);
     expect(withFlag.code).toBe(0);
     const chain = await readDecisionChain(project, "package-lock.json");
     expect(chain).toHaveLength(1);
-    const record = chain[0].record;
+    const record = present(chain[0]).record;
     expect(record.recordType).toBe("check");
     expect(record.installed).toBeNull();
     expect(record.lockfile.before?.blobOid).toBe(record.lockfile.after?.blobOid);
@@ -265,7 +266,7 @@ process.exit(0);
 
     const dir = decisionsDirForLockfile(project, "package-lock.json");
     const [fileName] = await readdir(dir);
-    const bytes = await readFile(path.join(dir, fileName));
+    const bytes = await readFile(path.join(dir, present(fileName)));
     // parseDecisionRecord enforces canonical bytes; a pretty-printed or
     // newline-terminated file would throw here.
     expect(() => parseDecisionRecord(bytes)).not.toThrow();

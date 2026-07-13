@@ -6,6 +6,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 
 import { RegistryClient } from "../src/registry";
 import type { RequestedPackage } from "../src/types";
+import { present } from "./helpers/present";
 
 const tempDirs: string[] = [];
 
@@ -99,16 +100,16 @@ describe("RegistryClient", () => {
     expect(result.publishTimeSource).toBe("registry-time");
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[0][0]).toBe("https://registry.npmjs.org/axios");
-    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+    expect(present(fetchMock.mock.calls[0])[0]).toBe("https://registry.npmjs.org/axios");
+    expect(present(fetchMock.mock.calls[0])[1]).toMatchObject({
       headers: {
         Accept: "application/vnd.npm.install-v1+json"
       }
     });
-    expect(fetchMock.mock.calls[0][1]?.signal).toBeDefined();
+    expect(present(fetchMock.mock.calls[0])[1]?.signal).toBeDefined();
     // The publish-time lookup is the full packument, not a tarball HEAD probe.
-    expect(fetchMock.mock.calls[2][0]).toBe("https://registry.npmjs.org/axios");
-    expect(fetchMock.mock.calls[2][1]?.method).toBeUndefined();
+    expect(present(fetchMock.mock.calls[2])[0]).toBe("https://registry.npmjs.org/axios");
+    expect(present(fetchMock.mock.calls[2])[1]?.method).toBeUndefined();
   });
 
   it("builds registry metadata requests against a configured mirror URL", async () => {
@@ -148,9 +149,9 @@ describe("RegistryClient", () => {
       registryUrl: "https://mirror.example.internal/npm/"
     })).resolvePackage(createRequestedPackage());
 
-    expect(fetchMock.mock.calls[0][0]).toBe("https://mirror.example.internal/npm/axios");
-    expect(fetchMock.mock.calls[1][0]).toBe("https://mirror.example.internal/npm/axios/1.14.0");
-    expect(fetchMock.mock.calls[2][0]).toBe("https://mirror.example.internal/npm/axios");
+    expect(present(fetchMock.mock.calls[0])[0]).toBe("https://mirror.example.internal/npm/axios");
+    expect(present(fetchMock.mock.calls[1])[0]).toBe("https://mirror.example.internal/npm/axios/1.14.0");
+    expect(present(fetchMock.mock.calls[2])[0]).toBe("https://mirror.example.internal/npm/axios");
   });
 
   it("reuses exact-version metadata from the disk cache across client instances", async () => {
@@ -253,7 +254,7 @@ describe("RegistryClient", () => {
     expect(result.publishedAt.toISOString()).toBe("2026-03-27T19:01:42.000Z");
     expect(result.publishTimeSource).toBe("tarball-last-modified");
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(fetchMock.mock.calls[3][1]).toMatchObject({
+    expect(present(fetchMock.mock.calls[3])[1]).toMatchObject({
       method: "HEAD"
     });
   });

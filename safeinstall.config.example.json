@@ -27,7 +27,8 @@
     "mode": "warn",
     "requireFor": [],
     "trustedPublishers": {},
-    "offlineBehavior": "fail-closed"
+    "offlineBehavior": "fail-closed",
+    "toolingUnavailable": "warn"
   },
   "transitive": {
     "mode": "warn",

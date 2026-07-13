@@ -22,7 +22,6 @@ import type {
 } from "./types";
 
 const ATTESTATION_CACHE_NAMESPACE = "registry-attestations-v1";
-const ATTESTATION_CACHE_TTL_MS = 60 * 60 * 1000;
 const ATTESTATION_FETCH_TIMEOUT_MS = 15_000;
 const SLSA_PREDICATE_TYPE_PREFIX = "https://slsa.dev/provenance";
 const GITHUB_URL_PREFIX = "https://github.com/";
@@ -256,17 +255,17 @@ export function createDefaultProvenanceDependencies(): ProvenanceDependencies {
  */
 export interface AttestationIdentity {
   hasProvenance: boolean;
-  sourceRepository?: string;
-  workflowPath?: string;
+  sourceRepository?: string | undefined;
+  workflowPath?: string | undefined;
 }
 
 export interface FetchAttestationIdentityInput {
   packageName: string;
   version: string;
   registryUrl: string;
-  diskCache?: DiskCache;
+  diskCache?: DiskCache | undefined;
   deps?: Pick<ProvenanceDependencies, "fetchAttestations">;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -296,7 +295,7 @@ export async function fetchAttestationIdentity(
       if (rawResponse && input.diskCache) {
         await input.diskCache.setJson(ATTESTATION_CACHE_NAMESPACE, cacheKey, rawResponse);
       }
-    } catch (error) {
+    } catch {
       const shutdownError = getShutdownSignalError(input.signal);
       if (shutdownError) {
         throw shutdownError;
@@ -339,7 +338,7 @@ export interface VerifyProvenanceInput {
   diskCache: DiskCache;
   config: ProvenanceConfig;
   deps?: ProvenanceDependencies;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**

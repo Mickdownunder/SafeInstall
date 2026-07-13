@@ -8,6 +8,7 @@ import { verifyDecisions } from "../src/decision-verify";
 import { bindFileAsStaged, resolveGitRepo, type GitRepoContext } from "../src/git-blob";
 import { createDecisionDraft } from "./helpers/decision-fixture";
 import { commitAll, createRepoFixture } from "./helpers/git-fixture";
+import { present } from "./helpers/present";
 
 const tempDirs: string[] = [];
 
@@ -142,7 +143,7 @@ describe("verifyDecisions", () => {
 
     const dir = decisionsDirForLockfile(fixture.dir, "pnpm-lock.yaml");
     const [fileName] = await readdir(dir);
-    const filePath = path.join(dir, fileName);
+    const filePath = path.join(dir, present(fileName));
     const tampered = (await readFile(filePath, "utf8")).replace('"decision":"allow"', '"decision":"block"');
     await writeFile(filePath, tampered);
     const head = commitAll(fixture.dir, "tampered record");

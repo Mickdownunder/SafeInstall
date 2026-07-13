@@ -57,7 +57,7 @@ export const KNOWN_LOCKFILE_NAMES = new Set([
 
 export interface DecisionVerifyOptions {
   baseRef: string;
-  headRef?: string;
+  headRef?: string | undefined;
   /** Registry URLs accepted besides the default (verifier-side input, D3). */
   allowedRegistryUrls?: string[];
 }
@@ -108,8 +108,16 @@ async function readRecordsAtHead(
       continue; // decisions.lock or unrelated layout — not a record file.
     }
     const [slugDir, fileName] = segments;
+    if (slugDir === undefined || fileName === undefined) {
+      continue;
+    }
     const match = RECORD_FILE_PATTERN.exec(fileName);
     if (!match) {
+      continue;
+    }
+    const seqDigits = match[1];
+    const digestPrefix = match[2];
+    if (seqDigits === undefined || digestPrefix === undefined) {
       continue;
     }
 
@@ -132,7 +140,7 @@ async function readRecordsAtHead(
       continue;
     }
 
-    if (!digest.startsWith(match[2]) || Number(match[1]) !== record.chain.seq) {
+    if (!digest.startsWith(digestPrefix) || Number(seqDigits) !== record.chain.seq) {
       findings.push({
         code: "decisions-name-mismatch",
         message: `${filePath} does not match its content (digest/seq) — the record was renamed or edited.`
@@ -359,6 +367,9 @@ export async function verifyDecisions(
 
     const boundary = chain[boundaryIndex];
     const last = chain[chain.length - 1];
+    if (boundary === undefined || last === undefined) {
+      continue;
+    }
     const baseOk =
       boundary.record.lockfile.before === null
         ? true

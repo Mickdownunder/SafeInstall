@@ -35,7 +35,7 @@ export type GuardClient = "claude" | "codex" | "cursor";
 export interface GuardDecision {
   action: "allow" | "deny" | "ask";
   /** SafeInstall-routed replacement used by clients that support input rewriting. */
-  updatedCommand?: string;
+  updatedCommand?: string | undefined;
   /** Short, human-facing explanation (shown in the client UI). */
   userMessage?: string;
   /** Detailed instruction fed back to the model. */
@@ -43,7 +43,7 @@ export interface GuardDecision {
 }
 
 export type GuardEventResult =
-  | { kind: "shell-command"; command: string; cwd?: string }
+  | { kind: "shell-command"; command: string; cwd?: string | undefined }
   | { kind: "not-applicable"; reason: string };
 
 /** Extract the shell command from a hook event payload, if there is one. */

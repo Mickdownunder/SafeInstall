@@ -13,7 +13,7 @@
   "vulnerableVersion": "<= 0.13.0 — provenance collapsed 'verification tool absent' into the same 'invalid' verdict as 'bundle failed to verify', blocking fail-closed",
   "defense": "defended",
   "expectedVerdict": "warning: provenance NOT verified (sigstore not installed) — the install proceeds; the tool-absent state is reported as status 'tooling-unavailable', never 'invalid'",
-  "regressionTest": "tests/policy.test.ts > warns but does NOT block when the sigstore tool is unavailable (bootstrap deadlock fix)",
+  "regressionTest": "tests/policy.test.ts > warns but does NOT block when the sigstore tool is unavailable (warn mode, the default)",
   "disclosure": "public",
   "provenance": "Found live during the 0.13.0 release verification (issue #56, finding 2). Fix: a distinct SigstoreToolingUnavailableError → status 'tooling-unavailable' → loud warning, not a block."
 }

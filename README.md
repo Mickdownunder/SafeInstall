@@ -421,7 +421,8 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
     "trustedPublishers": {
       "axios": "axios/axios"
     },
-    "offlineBehavior": "fail-closed"
+    "offlineBehavior": "fail-closed",
+    "toolingUnavailable": "warn"
   },
   "transitive": {
     "mode": "warn",
@@ -450,6 +451,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `provenance.requireFor` | Package names (glob supported) for which provenance is required even in `"warn"` mode |
 | `provenance.trustedPublishers` | Map of package name pattern → expected `owner/repo` slug; mismatches always block |
 | `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cached attestation |
+| `provenance.toolingUnavailable` | `"warn"` (default) proceeds with a loud warning when the `sigstore` verifier is not installed; `"fail-closed"` treats a missing verifier as suspicious and blocks every install until it is present (installing `sigstore` itself stays exempt, so it can never deadlock) |
 | `transitive.mode` | `"off"` / `"warn"` / `"block"` — evaluate the full lockfile tree, not just direct deps |
 | `transitive.checks` | Which checks run transitively: `"install-script"` and/or `"untrusted-source"` |
 | `continuity.mode` | `"off"` / `"warn"` / `"block"` — detect provenance downgrades and source-repo changes against a learned per-package baseline |

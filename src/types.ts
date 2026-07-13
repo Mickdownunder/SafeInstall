@@ -33,6 +33,14 @@ export interface ProvenanceConfig {
   requireFor: string[];
   trustedPublishers: Record<string, TrustedPublisherPattern>;
   offlineBehavior: "fail-closed" | "allow-cached";
+  /**
+   * What to do when the sigstore verifier itself is not installed, so no
+   * package's provenance can be checked at all. "warn" (default) degrades to a
+   * loud warning — provenance is simply not enforced this run. "fail-closed"
+   * treats a missing verifier as suspicious and blocks every install; the
+   * sigstore bootstrap install is always exempt, since it cannot verify itself.
+   */
+  toolingUnavailable: "warn" | "fail-closed";
 }
 
 export type ProvenanceVerificationStatus =
@@ -45,9 +53,9 @@ export type ProvenanceVerificationStatus =
 export interface ProvenanceVerificationResult {
   status: ProvenanceVerificationStatus;
   sourceRepository?: string;
-  sourceRef?: string;
-  workflowPath?: string;
-  builderId?: string;
+  sourceRef?: string | undefined;
+  workflowPath?: string | undefined;
+  builderId?: string | undefined;
   error?: string;
 }
 
@@ -78,9 +86,9 @@ export interface ContinuityResult {
   status: ContinuityStatus;
   sampledVersions?: number;
   baselineProvenanceRate?: number;
-  baselineRepository?: string;
+  baselineRepository?: string | undefined;
   targetHasProvenance?: boolean;
-  targetRepository?: string;
+  targetRepository?: string | undefined;
   error?: string;
 }
 
@@ -109,7 +117,7 @@ export interface RequestedPackage {
   raw: string;
   requested: string;
   sourceType: SourceType;
-  registrySpecKind?: "tag" | "version" | "range";
+  registrySpecKind?: "tag" | "version" | "range" | undefined;
 }
 
 export interface ProjectInstallResolution {
@@ -119,9 +127,9 @@ export interface ProjectInstallResolution {
 }
 
 export interface ProjectDependencyState {
-  declaredSpec?: string;
-  declaredSourceType?: SourceType;
-  installedVersion?: string;
+  declaredSpec?: string | undefined;
+  declaredSourceType?: SourceType | undefined;
+  installedVersion?: string | undefined;
 }
 
 /**
@@ -142,8 +150,8 @@ export interface ResolvedRegistryPackage {
 
 export interface PackageEvaluation {
   requested: RequestedPackage;
-  priorState?: ProjectDependencyState;
-  resolvedRegistryPackage?: ResolvedRegistryPackage;
+  priorState?: ProjectDependencyState | undefined;
+  resolvedRegistryPackage?: ResolvedRegistryPackage | undefined;
   blockedReasons: PolicyBlockReason[];
   warnings: string[];
   infos: string[];
@@ -152,7 +160,7 @@ export interface PackageEvaluation {
    * derived from Sigstore provenance or the continuity baseline when
    * available. Undefined for packages without usable attestation data.
    */
-  sourceRepository?: string;
+  sourceRepository?: string | undefined;
 }
 
 export type PolicyBlockCode =
@@ -164,6 +172,7 @@ export type PolicyBlockCode =
   | "attestation-missing"
   | "attestation-invalid"
   | "attestation-unreachable"
+  | "attestation-tooling-unavailable"
   | "publisher-mismatch"
   | "package-resolution-failed"
   | "transitive-install-script"
@@ -198,7 +207,7 @@ export interface CliAffectedPackage {
   name: string;
   requested: string;
   sourceType: SourceType;
-  resolvedVersion?: string;
+  resolvedVersion?: string | undefined;
   reasons: CliReason[];
   warnings: string[];
   infos: string[];
@@ -207,14 +216,14 @@ export interface CliAffectedPackage {
 export interface CliExecutionInfo {
   ranPackageManager: boolean;
   packageManagerExitCode?: number;
-  stdout?: string;
-  stderr?: string;
+  stdout?: string | undefined;
+  stderr?: string | undefined;
 }
 
 export interface CliResult {
   command: string[];
   commandString: string;
-  configPath?: string;
+  configPath?: string | undefined;
   configLabel?: string;
   decision: CliDecision;
   exitCode: number;
@@ -227,5 +236,5 @@ export interface CliResult {
   infos: string[];
   affectedPackages: CliAffectedPackage[];
   execution?: CliExecutionInfo;
-  details?: Record<string, unknown>;
+  details?: Record<string, unknown> | undefined;
 }

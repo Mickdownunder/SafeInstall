@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { present } from "./helpers/present";
+
 const projectRoot = path.resolve(__dirname, "..");
 
 describe("release metadata", () => {
@@ -26,7 +28,7 @@ describe("release metadata", () => {
 
     expect(packageJson.private).not.toBe(true);
     expect(packageJson.name).toBe("safeinstall-cli");
-    expect(packageJson.version).toBe("0.13.1");
+    expect(packageJson.version).toBe("0.14.0");
     expect(packageJson.license).toBe("MIT");
 
     // The heavy, capability-rich deps (sigstore, MCP SDK) must NOT be installed
@@ -61,9 +63,10 @@ describe("release metadata", () => {
     expect(packageJson.scripts).toMatchObject({
       prepack: "pnpm build",
       "pack:smoke": "node scripts/pack-smoke.mjs",
+      lint: "eslint src tests",
       // Build before test: the e2e suites run dist/cli.js via ensureBuiltCli,
       // which skips rebuilding an existing (possibly stale) dist.
-      "release:check": "pnpm typecheck && pnpm build && pnpm test && pnpm pack:smoke"
+      "release:check": "pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm pack:smoke"
     });
     expect(packageJson.publishConfig).toMatchObject({
       access: "public"
@@ -86,7 +89,7 @@ describe("release metadata", () => {
     const sectionMatch = /^## Supported versions\n([\s\S]*?)(?=^## )/m.exec(securityMd);
     expect(sectionMatch, "SECURITY.md must have a '## Supported versions' section").not.toBeNull();
 
-    const rows = sectionMatch![1]
+    const rows = present(sectionMatch?.[1])
       .split("\n")
       .filter((line) => line.trim().startsWith("|"))
       .map((line) =>
@@ -101,9 +104,11 @@ describe("release metadata", () => {
     expect(dataRows).toHaveLength(2);
 
     const [supportedRow, unsupportedRow] = dataRows;
-    expect(supportedRow[0]).toBe(`${majorMinor}.x`);
-    expect(supportedRow[1]).toBe("Yes");
-    expect(unsupportedRow[0]).toBe(`< ${majorMinor}`);
-    expect(unsupportedRow[1]).toBe(`No (upgrade to the latest ${majorMinor}.x release)`);
+    const supported = present(supportedRow);
+    const unsupported = present(unsupportedRow);
+    expect(supported[0]).toBe(`${majorMinor}.x`);
+    expect(supported[1]).toBe("Yes");
+    expect(unsupported[0]).toBe(`< ${majorMinor}`);
+    expect(unsupported[1]).toBe(`No (upgrade to the latest ${majorMinor}.x release)`);
   });
 });

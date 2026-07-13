@@ -11,6 +11,7 @@ import {
   readDecisionChain
 } from "../src/decision-store";
 import { createDecisionDraft } from "./helpers/decision-fixture";
+import { present } from "./helpers/present";
 
 const tempDirs: string[] = [];
 
@@ -51,7 +52,7 @@ describe("appendDecisionRecord", () => {
 
     const chain = await readDecisionChain(root, "pnpm-lock.yaml");
     expect(chain.map((entry) => entry.seq)).toEqual([1, 2]);
-    expect(chain[1].record.chain.prev).toBe(chain[0].digest);
+    expect(present(chain[1]).record.chain.prev).toBe(present(chain[0]).digest);
   });
 
   it("keeps chains for different lockfile paths independent", async () => {
@@ -101,7 +102,7 @@ describe("readDecisionChain", () => {
     await appendDecisionRecord(root, draft());
     const dir = decisionsDirForLockfile(root, "pnpm-lock.yaml");
     const [first] = (await readdir(dir)).sort();
-    await rm(path.join(dir, first));
+    await rm(path.join(dir, present(first)));
 
     await expect(readDecisionChain(root, "pnpm-lock.yaml")).rejects.toThrow(/expected seq 1/);
   });

@@ -25,7 +25,8 @@ function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallCo
       mode: "off",
       requireFor: [],
       trustedPublishers: {},
-      offlineBehavior: "fail-closed"
+      offlineBehavior: "fail-closed",
+      toolingUnavailable: "warn"
     },
     transitive: {
       mode: "off",
@@ -275,7 +276,8 @@ describe("evaluatePackage", () => {
             mode: "require",
             requireFor: [],
             trustedPublishers: { axios: "axios/axios" },
-            offlineBehavior: "fail-closed"
+            offlineBehavior: "fail-closed",
+            toolingUnavailable: "warn"
           }
         }),
         provenanceResult: {
@@ -474,7 +476,8 @@ describe("evaluatePackage", () => {
               mode: "off",
               requireFor: [],
               trustedPublishers: {},
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: { status: "missing" }
@@ -493,7 +496,8 @@ describe("evaluatePackage", () => {
               mode: "require",
               requireFor: [],
               trustedPublishers: {},
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: { status: "missing" }
@@ -512,7 +516,8 @@ describe("evaluatePackage", () => {
               mode: "warn",
               requireFor: ["axios"],
               trustedPublishers: {},
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: { status: "missing" }
@@ -531,7 +536,8 @@ describe("evaluatePackage", () => {
               mode: "warn",
               requireFor: [],
               trustedPublishers: {},
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: { status: "missing" }
@@ -552,7 +558,8 @@ describe("evaluatePackage", () => {
               mode: "warn",
               requireFor: [],
               trustedPublishers: {},
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: { status: "invalid", error: "signature mismatch" }
@@ -562,11 +569,12 @@ describe("evaluatePackage", () => {
       expect(result.blockedReasons.map((reason) => reason.code)).toContain("attestation-invalid");
     });
 
-    it("warns but does NOT block when the sigstore tool is unavailable (bootstrap deadlock fix)", () => {
+    it("warns but does NOT block when the sigstore tool is unavailable (warn mode, the default)", () => {
       // The tool being absent means provenance cannot be evaluated for any
-      // package — blocking would deadlock the very install that brings
-      // sigstore. Even under the strictest config (require + fail-closed) it
-      // degrades to a loud warning, not a block.
+      // package. In the default warn mode (toolingUnavailable: "warn") this
+      // degrades to a loud warning, not a block — even under mode: "require" —
+      // so a fresh environment without sigstore is not bricked. The opt-in
+      // fail-closed behaviour is covered by the two tests below.
       const result = evaluatePackage(
         createInput({
           config: createConfig({
@@ -575,7 +583,8 @@ describe("evaluatePackage", () => {
               mode: "require",
               requireFor: ["axios"],
               trustedPublishers: {},
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: { status: "tooling-unavailable", error: "sigstore not installed" }
@@ -585,6 +594,61 @@ describe("evaluatePackage", () => {
       expect(result.blockedReasons).toHaveLength(0);
       expect(result.warnings.some((warning) => warning.includes("NOT verified"))).toBe(true);
       expect(result.warnings.some((warning) => warning.includes("sigstore"))).toBe(true);
+    });
+
+    it("blocks when the sigstore tool is unavailable and toolingUnavailable is fail-closed", () => {
+      // Opt-in strict mode: a missing verifier is itself suspicious (an attacker
+      // with node_modules write access could remove sigstore to slip provenance
+      // past the check), so every non-bootstrap install is blocked until it is
+      // reinstalled. Closes the warn-mode known-gap.
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "warn",
+              requireFor: [],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "fail-closed"
+            }
+          }),
+          provenanceResult: { status: "tooling-unavailable", error: "sigstore not installed" }
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toContain("attestation-tooling-unavailable");
+    });
+
+    it("exempts the sigstore bootstrap install even under toolingUnavailable fail-closed", () => {
+      // sigstore cannot verify its own install (it is not present yet), so
+      // blocking it would deadlock the very install that re-enables provenance.
+      // The bootstrap is always allowed with a warning, never blocked.
+      const result = evaluatePackage(
+        createInput({
+          requested: {
+            name: "sigstore",
+            raw: "sigstore",
+            requested: "latest",
+            sourceType: "registry",
+            registrySpecKind: "tag"
+          },
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "warn",
+              requireFor: [],
+              trustedPublishers: {},
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "fail-closed"
+            }
+          }),
+          provenanceResult: { status: "tooling-unavailable", error: "sigstore not installed" }
+        })
+      );
+
+      expect(result.blockedReasons).toHaveLength(0);
+      expect(result.warnings.some((warning) => warning.includes("bootstrap"))).toBe(true);
     });
 
     it("still blocks a genuinely invalid attestation even in the same strict config (attacker case)", () => {
@@ -598,7 +662,8 @@ describe("evaluatePackage", () => {
               mode: "require",
               requireFor: ["axios"],
               trustedPublishers: {},
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: { status: "invalid", error: "signature mismatch" }
@@ -617,7 +682,8 @@ describe("evaluatePackage", () => {
               mode: "require",
               requireFor: [],
               trustedPublishers: {},
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: { status: "unreachable", error: "ETIMEDOUT" }
@@ -636,7 +702,8 @@ describe("evaluatePackage", () => {
               mode: "require",
               requireFor: [],
               trustedPublishers: {},
-              offlineBehavior: "allow-cached"
+              offlineBehavior: "allow-cached",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: { status: "unreachable", error: "ETIMEDOUT" }
@@ -656,7 +723,8 @@ describe("evaluatePackage", () => {
               mode: "warn",
               requireFor: [],
               trustedPublishers: { axios: "axios/axios" },
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: {
@@ -678,7 +746,8 @@ describe("evaluatePackage", () => {
               mode: "require",
               requireFor: [],
               trustedPublishers: { axios: "axios/axios" },
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: {
@@ -700,7 +769,8 @@ describe("evaluatePackage", () => {
               mode: "require",
               requireFor: [],
               trustedPublishers: {},
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: {
@@ -722,7 +792,8 @@ describe("evaluatePackage", () => {
               mode: "warn",
               requireFor: [],
               trustedPublishers: {},
-              offlineBehavior: "fail-closed"
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
             }
           }),
           provenanceResult: {

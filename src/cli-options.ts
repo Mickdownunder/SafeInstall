@@ -1,7 +1,7 @@
 export interface ParsedCliOptions {
   args: string[];
   json: boolean;
-  configPath?: string;
+  configPath?: string | undefined;
 }
 
 export function parseCliOptions(argv: string[]): ParsedCliOptions {
@@ -11,6 +11,9 @@ export function parseCliOptions(argv: string[]): ParsedCliOptions {
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === undefined) {
+      continue;
+    }
 
     if (token === "--json") {
       json = true;

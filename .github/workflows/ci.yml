@@ -33,13 +33,29 @@ jobs:
 
       - run: pnpm build
 
+  # ESLint is OS-independent, so it runs once instead of across the test matrix.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
   # Stable aggregate check for branch protection: require "ci-ok" instead of
   # per-OS matrix job names, which change when the matrix changes.
   ci-ok:
-    needs: [test]
+    needs: [test, lint]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Fail if the test matrix did not succeed
-        if: needs.test.result != 'success'
+      - name: Fail if a required job did not succeed
+        if: needs.test.result != 'success' || needs.lint.result != 'success'
         run: exit 1

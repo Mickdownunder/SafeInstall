@@ -18,6 +18,7 @@ import {
   writeLedgerHeadMirror
 } from "../src/trust-ledger";
 import { cleanupTempDirs, createTempDir } from "./cli-e2e-helpers";
+import { present } from "./helpers/present";
 
 afterAll(async () => {
   await cleanupTempDirs();
@@ -170,7 +171,7 @@ describe("runTrustLockFlow", () => {
     const root = await seedProject();
     const result = await runTrustLockFlow(root, ["trust", "lock", "--ci", "jenkins"]);
     expect(result.decision).toBe("error");
-    expect(result.reasons[0].code).toBe("trust-invalid-arguments");
+    expect(present(result.reasons[0]).code).toBe("trust-invalid-arguments");
   });
 
   it("locks without a CI anchor when the registry is down, and says so loudly", async () => {
@@ -425,7 +426,7 @@ describe("trust unlock", () => {
     };
     const unlock = await runTrustUnlockFlow(root, ["trust", "unlock"], { humanGate: noTty });
     expect(unlock.decision).toBe("block");
-    expect(unlock.reasons[0].code).toBe("trust-unlock-not-interactive");
+    expect(present(unlock.reasons[0]).code).toBe("trust-unlock-not-interactive");
 
     // The baseline must still be intact after a refused unlock.
     const status = await runTrustStatusFlow(root, ["trust", "status"]);
@@ -500,7 +501,7 @@ describe("runTrustStatusFlow", () => {
     const result = await runTrustStatusFlow(root, ["trust", "status", "--require-lock"]);
     expect(result.decision).toBe("block");
     expect(result.exitCode).toBe(2);
-    expect(result.reasons[0].code).toBe("trust-lock-required");
+    expect(present(result.reasons[0]).code).toBe("trust-lock-required");
   });
 });
 
@@ -544,7 +545,7 @@ describe("runTrustApproveFlow", () => {
     };
     const approve = await runTrustApproveFlow(root, ["trust", "approve"], { humanGate: noTty });
     expect(approve.decision).toBe("block");
-    expect(approve.reasons[0].code).toBe("trust-approve-not-interactive");
+    expect(present(approve.reasons[0]).code).toBe("trust-approve-not-interactive");
   });
 });
 

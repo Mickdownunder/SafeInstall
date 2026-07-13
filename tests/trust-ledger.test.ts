@@ -12,6 +12,7 @@ import {
   verifyLedgerChain
 } from "../src/trust-ledger";
 import { cleanupTempDirs, createTempDir } from "./cli-e2e-helpers";
+import { present } from "./helpers/present";
 
 afterAll(async () => {
   await cleanupTempDirs();
@@ -46,7 +47,7 @@ describe("trust ledger", () => {
 
     const ledgerPath = path.join(root, ".safeinstall", "ledger.jsonl");
     const lines = (await readFile(ledgerPath, "utf8")).trim().split("\n");
-    const first = JSON.parse(lines[0]);
+    const first = JSON.parse(present(lines[0]));
     first.detail = "forged";
     await writeFile(ledgerPath, `${JSON.stringify(first)}\n${lines[1]}\n`);
 

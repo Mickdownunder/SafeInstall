@@ -64,7 +64,7 @@ function createAffectedPackage(evaluation: PackageEvaluation) {
 export async function runCheckFlow(
   cwd: string,
   argv: string[],
-  options: { signal?: AbortSignal; configPath?: string } = {}
+  options: { signal?: AbortSignal; configPath?: string | undefined } = {}
 ): Promise<CliResult> {
   throwIfAborted(options.signal);
 

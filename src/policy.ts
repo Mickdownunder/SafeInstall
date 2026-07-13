@@ -51,11 +51,11 @@ export interface EvaluatePackageInput {
   config: SafeInstallConfig;
   requested: RequestedPackage;
   now: Date;
-  priorState?: ProjectDependencyState;
-  resolvedRegistryPackage?: ResolvedRegistryPackage;
+  priorState?: ProjectDependencyState | undefined;
+  resolvedRegistryPackage?: ResolvedRegistryPackage | undefined;
   priorLifecycleScripts?: InstallLifecycleScriptName[];
-  provenanceResult?: ProvenanceVerificationResult;
-  continuityResult?: ContinuityResult;
+  provenanceResult?: ProvenanceVerificationResult | undefined;
+  continuityResult?: ContinuityResult | undefined;
   /**
    * Error captured when registry metadata resolution failed (package does
    * not exist, network error, 5xx, etc.). If a typo-squat check fires on
@@ -64,7 +64,7 @@ export interface EvaluatePackageInput {
    * block is added so the user sees a real error message rather than a
    * silent, empty allow.
    */
-  resolutionError?: Error;
+  resolutionError?: Error | undefined;
 }
 
 export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation {
@@ -335,16 +335,44 @@ function applyProvenanceDecision(
 
   if (result.status === "tooling-unavailable") {
     // The sigstore tool is absent, so provenance cannot be evaluated for ANY
-    // package — an environment state, not a verdict on this one. Blocking here
-    // would deadlock the bootstrap install that brings sigstore itself. Warn
-    // loudly instead: the policy is NOT being enforced, and the fix is named.
-    // This does not weaken the other layers (release age, typo-squat, sources),
-    // and the residual — an attacker removing sigstore to slip provenance — is
-    // a documented known-gap in the Attack Lab, not silently swallowed here.
+    // package — an environment state, not a verdict on this one.
+    //
+    // The sigstore package cannot verify its own bootstrap install (it is not
+    // present yet), so installing sigstore itself is ALWAYS exempt: blocking it
+    // would deadlock the very install that re-enables verification.
+    const isSigstoreBootstrap = requested === "sigstore";
+
+    // `toolingUnavailable: "fail-closed"` (opt-in) treats a missing verifier as
+    // suspicious and blocks — closing the known-gap where an attacker with
+    // node_modules write access removes sigstore to slip provenance past the
+    // check. The default "warn" keeps the old behaviour so a fresh environment
+    // (no sigstore yet) is not bricked.
+    if (config.toolingUnavailable === "fail-closed" && !isSigstoreBootstrap) {
+      evaluation.blockedReasons.push({
+        code: "attestation-tooling-unavailable",
+        message:
+          `Blocked: provenance cannot be verified for ${requested} because the 'sigstore' package is ` +
+          `not installed, and policy requires provenance tooling (provenance.toolingUnavailable: "fail-closed"). ` +
+          `A missing verifier is itself suspicious.`,
+        suggestion:
+          "Install sigstore (npm install sigstore) so provenance can be verified, or set " +
+          "provenance.toolingUnavailable to \"warn\" to allow installs without it."
+      });
+      return;
+    }
+
+    // warn (default), or the sigstore bootstrap under fail-closed: the policy is
+    // NOT being enforced this run, and the fix is named. This does not weaken the
+    // other layers (release age, typo-squat, sources). The residual — an attacker
+    // removing sigstore to slip provenance — is closeable with fail-closed above;
+    // in warn mode it stays a documented known-gap in the Attack Lab.
     evaluation.warnings.push(
-      `Provenance NOT verified for ${requested}: the 'sigstore' package is not installed, ` +
-        `so provenance enforcement is inactive for every package. Install it (npm install sigstore) ` +
-        `to enable verification.`
+      isSigstoreBootstrap
+        ? `Provenance NOT verified for ${requested}: sigstore cannot verify its own bootstrap install; ` +
+            `provenance enforcement activates once it is installed.`
+        : `Provenance NOT verified for ${requested}: the 'sigstore' package is not installed, ` +
+            `so provenance enforcement is inactive for every package. Install it (npm install sigstore) ` +
+            `to enable verification.`
     );
     return;
   }
