@@ -42,6 +42,6 @@ jobs:
       # runs trust status against the candidate, which it treats strictly as
       # data. Bumping this SHA is an enforcement-zone change requiring review.
       - name: SafeInstall trusted verification
-        uses: Mickdownunder/safeinstall-verifier@ff2165456b3cfc0245d0f85be6da5645bd58bee9 # v0.1.1 (safeinstall-cli 0.13.0)
+        uses: Mickdownunder/safeinstall-verifier@a3da984c3ec1cbcebbd837e7d54dac0e35051bf2 # v0.1.2 (safeinstall-cli 0.14.0)
         with:
           candidate-path: candidate
