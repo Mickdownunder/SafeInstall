@@ -33,6 +33,14 @@ export interface ProvenanceConfig {
   requireFor: string[];
   trustedPublishers: Record<string, TrustedPublisherPattern>;
   offlineBehavior: "fail-closed" | "allow-cached";
+  /**
+   * What to do when the sigstore verifier itself is not installed, so no
+   * package's provenance can be checked at all. "warn" (default) degrades to a
+   * loud warning — provenance is simply not enforced this run. "fail-closed"
+   * treats a missing verifier as suspicious and blocks every install; the
+   * sigstore bootstrap install is always exempt, since it cannot verify itself.
+   */
+  toolingUnavailable: "warn" | "fail-closed";
 }
 
 export type ProvenanceVerificationStatus =
@@ -164,6 +172,7 @@ export type PolicyBlockCode =
   | "attestation-missing"
   | "attestation-invalid"
   | "attestation-unreachable"
+  | "attestation-tooling-unavailable"
   | "publisher-mismatch"
   | "package-resolution-failed"
   | "transitive-install-script"

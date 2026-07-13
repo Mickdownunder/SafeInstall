@@ -30,7 +30,8 @@ function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallCo
       mode: "off",
       requireFor: [],
       trustedPublishers: {},
-      offlineBehavior: "fail-closed"
+      offlineBehavior: "fail-closed",
+      toolingUnavailable: "warn"
     },
     transitive: {
       mode: "off",

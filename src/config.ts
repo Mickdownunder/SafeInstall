@@ -33,7 +33,8 @@ const KNOWN_PROVENANCE_KEYS = new Set<keyof SafeInstallConfig["provenance"]>([
   "mode",
   "requireFor",
   "trustedPublishers",
-  "offlineBehavior"
+  "offlineBehavior",
+  "toolingUnavailable"
 ]);
 
 const KNOWN_TRANSITIVE_KEYS = new Set<keyof SafeInstallConfig["transitive"]>(["mode", "checks"]);
@@ -43,6 +44,7 @@ const KNOWN_CONTINUITY_KEYS = new Set<keyof SafeInstallConfig["continuity"]>(["m
 const TYPO_SQUAT_MODES = new Set(["off", "warn", "block"]);
 const PROVENANCE_MODES = new Set(["off", "warn", "require"]);
 const OFFLINE_BEHAVIORS = new Set(["fail-closed", "allow-cached"]);
+const TOOLING_UNAVAILABLE_BEHAVIORS = new Set(["warn", "fail-closed"]);
 const TRANSITIVE_MODES = new Set(["off", "warn", "block"]);
 const TRANSITIVE_CHECKS = new Set(["install-script", "untrusted-source"]);
 const CONTINUITY_MODES = new Set(["off", "warn", "block"]);
@@ -95,7 +97,8 @@ export function createDefaultConfig(): SafeInstallConfig {
       mode: "off",
       requireFor: [],
       trustedPublishers: {},
-      offlineBehavior: "fail-closed"
+      offlineBehavior: "fail-closed",
+      toolingUnavailable: "warn"
     },
     transitive: {
       mode: "off",
@@ -199,11 +202,19 @@ function validateProvenance(
     );
   }
 
+  const toolingUnavailable = input.toolingUnavailable ?? defaults.toolingUnavailable;
+  if (!TOOLING_UNAVAILABLE_BEHAVIORS.has(toolingUnavailable)) {
+    throw new Error(
+      `Config error: provenance.toolingUnavailable must be "warn" or "fail-closed".`
+    );
+  }
+
   return {
     mode,
     requireFor: [...requireFor],
     trustedPublishers: { ...trustedPublishers },
-    offlineBehavior
+    offlineBehavior,
+    toolingUnavailable
   };
 }
 

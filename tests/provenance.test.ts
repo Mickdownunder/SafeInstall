@@ -36,6 +36,7 @@ function createConfig(overrides: Partial<ProvenanceConfig> = {}): ProvenanceConf
     requireFor: [],
     trustedPublishers: {},
     offlineBehavior: "fail-closed",
+    toolingUnavailable: "warn",
     ...overrides
   };
 }
