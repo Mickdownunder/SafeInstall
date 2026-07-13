@@ -29,7 +29,8 @@ const config: SafeInstallConfig = {
     mode: "off",
     requireFor: [],
     trustedPublishers: {},
-    offlineBehavior: "fail-closed"
+    offlineBehavior: "fail-closed",
+    toolingUnavailable: "warn"
   },
   transitive: {
     mode: "off",

@@ -22,7 +22,7 @@ function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallCo
       bun: { ignoreScripts: true }
     },
     typoSquat: { mode: "off", minNameLength: 4, ignore: [] },
-    provenance: { mode: "off", requireFor: [], trustedPublishers: {}, offlineBehavior: "fail-closed" },
+    provenance: { mode: "off", requireFor: [], trustedPublishers: {}, offlineBehavior: "fail-closed", toolingUnavailable: "warn" },
     transitive: { mode: "off", checks: ["install-script", "untrusted-source"] },
     continuity: { mode: "off", baselineSize: 5 },
     ...overrides

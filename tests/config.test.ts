@@ -169,7 +169,8 @@ describe("config", () => {
               axios: "axios/axios",
               "@sigstore/*": "sigstore/*"
             },
-            offlineBehavior: "allow-cached"
+            offlineBehavior: "allow-cached",
+            toolingUnavailable: "fail-closed"
           }
         },
         null,
@@ -185,6 +186,18 @@ describe("config", () => {
       "@sigstore/*": "sigstore/*"
     });
     expect(config.provenance.offlineBehavior).toBe("allow-cached");
+    expect(config.provenance.toolingUnavailable).toBe("fail-closed");
+  });
+
+  it("defaults provenance.toolingUnavailable to warn when omitted", async () => {
+    const cwd = await createTempDir("safeinstall-config-provenance-tooling-default-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ provenance: { mode: "require" } }, null, 2)
+    );
+
+    const { config } = await loadConfig(cwd);
+    expect(config.provenance.toolingUnavailable).toBe("warn");
   });
 
   it("rejects invalid provenance mode values", async () => {
@@ -205,6 +218,16 @@ describe("config", () => {
     );
 
     await expect(loadConfig(cwd)).rejects.toThrow('provenance.offlineBehavior must be "fail-closed" or "allow-cached"');
+  });
+
+  it("rejects invalid provenance toolingUnavailable values", async () => {
+    const cwd = await createTempDir("safeinstall-config-provenance-invalid-tooling-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ provenance: { toolingUnavailable: "block" } }, null, 2)
+    );
+
+    await expect(loadConfig(cwd)).rejects.toThrow('provenance.toolingUnavailable must be "warn" or "fail-closed"');
   });
 
   it("rejects unknown keys inside provenance", async () => {
