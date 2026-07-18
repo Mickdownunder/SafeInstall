@@ -92,7 +92,7 @@
 
 ### Security
 
-- **Hardened the agent guard against shell-parser bypasses.** Package-manager and wrapper names are now normalized case-insensitively, leading file-descriptor redirections are analyzed before command classification, wrapper options are parsed conservatively, and ambiguous `env --split-string` forms fail closed. Remote project scaffolding through package runners follows the runner approval path, while path-qualified package-manager invocations are rewritten consistently through SafeInstall.
+- **Hardened the shell guard against shell-parser bypasses.** Package-manager and wrapper names are now normalized case-insensitively, leading file-descriptor redirections are analyzed before command classification, wrapper options are parsed conservatively, and ambiguous `env --split-string` forms fail closed. Remote project scaffolding through package runners follows the runner approval path, while path-qualified package-manager invocations are rewritten consistently through SafeInstall.
 - **Added a permanent adversarial regression corpus and property-based fuzzing.** Captured bypass classes now run in the normal test suite alongside an independent reference detector, and the standalone harness supports million-command campaigns for deeper parser validation.
 
 ### Changed
@@ -145,7 +145,7 @@
 
 ### Added
 
-- **Agent guard: enforced install gating for AI coding agents.** The MCP tool is advisory — an agent *can* call it. The new guard is enforcement: `safeinstall guard install` registers SafeInstall as a pre-shell-execution hook for **Claude Code** (`PreToolUse`/`Bash` in `.claude/settings.json`) and **Cursor** (`beforeShellExecution` in `.cursor/hooks.json`, with `failClosed: true`), so every shell command an agent runs is intercepted before execution.
+- **Shell guard: enforced install gating for AI coding agents.** The MCP tool is advisory — an agent *can* call it. The new guard is enforcement: `safeinstall guard install` registers SafeInstall as a pre-shell-execution hook for **Claude Code** (`PreToolUse`/`Bash` in `.claude/settings.json`) and **Cursor** (`beforeShellExecution` in `.cursor/hooks.json`, with `failClosed: true`), so every shell command an agent runs is intercepted before execution.
 
   The guard (`safeinstall guard <claude|cursor>`) never evaluates policy itself. It detects package installs — including aliases (`npm i`, `bun a`, `npm ci`), env-var prefixes, wrappers like `sudo`/`env`, chained commands, pipes, and redirections — and **denies them with the exact rewritten command routed through the SafeInstall CLI** (`cd app && npm i axios && npm test` → "run `cd app && safeinstall npm install axios && npm test` instead"). Routing through the CLI matters more than a plain allow/deny: a vetted-but-raw `npm install` would still execute lifecycle scripts; through SafeInstall it gets the full policy evaluation *and* runs with scripts disabled. Blocking becomes steering: a well-behaved agent self-corrects in one step. The guard needs no network access and answers in milliseconds.
 
