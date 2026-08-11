@@ -11,7 +11,7 @@
 
 If you discover a security vulnerability in SafeInstall, **do not open a public issue.** Instead, report it privately via email:
 
-**Michael@acpip.io**
+**office@cyntro.at**
 
 Include:
 - A description of the vulnerability

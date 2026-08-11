@@ -85,7 +85,7 @@ Examples:
 
 ## Security issues
 
-If you discover a security vulnerability, please report it privately via email to **Michael@acpip.io** instead of opening a public issue. Security reports will be acknowledged within 48 hours.
+If you discover a security vulnerability, please report it privately via email to **office@cyntro.at** instead of opening a public issue. Security reports will be acknowledged within 48 hours.
 
 ## License
 
