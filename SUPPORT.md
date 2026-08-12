@@ -39,7 +39,7 @@ Use the command that matches the package manager and workflow you expected to us
 
 ## Known Limits
 
-- Supported package managers are npm, pnpm, and bun. yarn is not supported: yarn installs cannot be policy-checked, and the agent guard denies them.
+- Supported package managers are npm, pnpm, and bun. yarn is not supported: yarn installs cannot be policy-checked, and the shell guard denies them.
 - No bun lockfile-aware project install analysis. `safeinstall bun install` uses manifest-based analysis of `package.json`; lockfile-aware project installs exist for npm and pnpm only.
 - Transitive dependency policy (opt-in via `transitive.mode`) runs only the `install-script` and `untrusted-source` checks. Transitive install-script detection works for npm lockfiles only (pnpm lockfiles do not record script presence). Release-age, typo-squat, provenance, and continuity checks apply to direct dependencies only.
 - No selective lifecycle-script execution. `allowedScripts` affects only the policy verdict; installs are still forwarded with `--ignore-scripts` while `packageManagerDefaults.<manager>.ignoreScripts` is true (the default).

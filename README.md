@@ -26,7 +26,7 @@
 SafeInstall runs your **policy before your package manager** — locally, blocking by default. One tool, three layers of defense:
 
 - 🧑‍💻 **For the humans who install** — prefix any command: `safeinstall pnpm add axios`. Policy runs, then pnpm. Release age, install scripts, untrusted sources, typo-squats, and cryptographic provenance are [checked before anything touches disk](#policy-defaults).
-- 🤖 **For the AI agents that install for you** — an [MCP tool](#mcp-server--ai-agents) agents can call, plus a [shell guard](#agent-guard--enforcement-not-advice) that intercepts install commands in Claude Code, Codex, and Cursor *before they run*. Best-effort shell interception — one defense layer that fires even when the agent isn't cooperating, not a lossless guarantee.
+- 🤖 **For the AI agents that install for you** — an [MCP tool](#mcp-server--ai-agents) agents can call, plus a [shell guard](#shell-guard--enforcement-not-advice) that intercepts install commands in Claude Code, Codex, and Cursor *before they run*. Best-effort shell interception — one defense layer that fires even when the agent isn't cooperating, not a lossless guarantee.
 - 🔒 **For the files that program the agents** — the [Agent Trust Surface](#agent-trust-surface--self-defending-policy): a committed hash baseline of your config, hooks, rules, and MCP files, reconciled locally and re-verified in CI, so tampering with the rules surfaces as drift instead of silently owning every future session — with a fully consistent rewrite caught by human review of the diff, not the automated check alone.
 
 ---
@@ -89,7 +89,7 @@ npm install -g safeinstall-cli
 ## Quickstart
 
 ```bash
-safeinstall init                      # config + agent guard hooks + trust lock, in one command
+safeinstall init                      # config + shell guard hooks + trust lock, in one command
 safeinstall pnpm add axios            # policy runs, then pnpm
 safeinstall npm install               # lockfile-aware project install
 safeinstall check                     # audit direct deps against policy
@@ -300,7 +300,7 @@ The MCP SDK ships as an **optional dependency**, lazily loaded only when `safein
 
 ---
 
-## Agent guard — enforcement, not advice
+## Shell guard — enforcement, not advice
 
 The MCP tool is advisory: an agent *can* consult it. The guard is a stronger layer: it hooks into the agent's shell layer and screens commands *before they run*, firing even when the agent doesn't know SafeInstall exists. This is best-effort shell interception — one layer of defense in depth, not a complete boundary; its command parsing is not exhaustive (see [Guard limitations](#guard-limitations)).
 
