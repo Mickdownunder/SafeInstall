@@ -8,6 +8,15 @@ import { present } from "./helpers/present";
 const projectRoot = path.resolve(__dirname, "..");
 
 describe("release metadata", () => {
+  it("keeps the MCP registry package version in sync with the CLI", async () => {
+    const packageJson = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8")) as { version: string };
+    const server = JSON.parse(await readFile(path.join(projectRoot, "server.json"), "utf8")) as {
+      version: string; packages: Array<{ identifier: string; version: string }>;
+    };
+    expect(server.version).toBe(packageJson.version);
+    expect(server.packages.find(entry => entry.identifier === "safeinstall-cli")?.version).toBe(packageJson.version);
+  });
+
   it("declares publish-safe package metadata", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(projectRoot, "package.json"), "utf8")
@@ -28,7 +37,7 @@ describe("release metadata", () => {
 
     expect(packageJson.private).not.toBe(true);
     expect(packageJson.name).toBe("safeinstall-cli");
-    expect(packageJson.version).toBe("0.14.0");
+    expect(packageJson.version).toBe("0.15.0");
     expect(packageJson.license).toBe("MIT");
 
     // The heavy, capability-rich deps (sigstore, MCP SDK) must NOT be installed

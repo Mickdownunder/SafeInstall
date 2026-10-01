@@ -4,8 +4,8 @@
 
 | Version | Supported |
 |:---|:---|
-| 0.14.x | Yes |
-| < 0.14 | No (upgrade to the latest 0.14.x release) |
+| 0.15.x | Yes |
+| < 0.15 | No (upgrade to the latest 0.15.x release) |
 
 ## Reporting a vulnerability
 
@@ -96,4 +96,4 @@ control.
 
 SafeInstall is published to npm with [Sigstore provenance attestations](https://docs.npmjs.com/generating-provenance-statements) via GitHub Actions trusted publishing. Every release is cryptographically traceable to a specific commit and workflow run.
 
-Last verified: 2026-07-12
+Last verified: 2026-10-01

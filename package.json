@@ -1,8 +1,8 @@
 {
   "name": "safeinstall-cli",
   "mcpName": "io.github.Mickdownunder/safeinstall",
-  "version": "0.14.0",
-  "description": "Local-first CLI that blocks risky npm, pnpm, and bun installs before they run. Open source.",
+  "version": "0.15.0",
+  "description": "Local-first policy and artifact-bound install gate for npm and pnpm. Open source.",
   "packageManager": "pnpm@10.17.0",
   "license": "MIT",
   "keywords": [
