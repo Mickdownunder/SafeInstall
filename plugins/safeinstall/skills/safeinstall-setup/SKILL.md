@@ -13,7 +13,10 @@ root, never a guessed cache path or a global `safeinstall` binary. Quote all pat
 Do not assume `PLUGIN_ROOT` is exported in an ordinary shell tool; it is a hook variable.
 
 1. Resolve the user's intended project to an absolute directory. If there are
-   multiple plausible projects, ask which one. Check Node.js is at least 20.
+   multiple plausible projects, ask which one. Check Node.js satisfies
+   `^22.22.2 || ^24.15.0 || >=26.0.0`, required by bundled signature verification.
+   If unsupported, ask the user to select a supported runtime; do not install one
+   or weaken provenance policy automatically.
 2. Call the plugin's `protection_status` with that `projectPath`. Report policy
    presence, trust drift, and the distinction between policy and hook activation.
 3. Explain the writes before asking permission: starter `safeinstall.config.json`

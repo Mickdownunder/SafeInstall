@@ -13,11 +13,12 @@ const scratch = await mkdtemp(path.join(os.tmpdir(), "safeinstall-client-smoke-"
 const env = { ...process.env, CODEX_HOME: path.join(scratch, "codex-home") };
 const proofDir = path.join(root, "dist", "plugins-verification");
 const proof = { checkedAt: new Date().toISOString(), passed: false };
+const marketplacePath = path.resolve(process.env.SAFEINSTALL_TEST_MARKETPLACE_PATH || path.join(root, "dist", "plugins"));
 let server;
 try {
   await mkdir(env.CODEX_HOME);
   proof.client = (await exec("codex", ["--version"], { env })).stdout.trim();
-  proof.marketplace = JSON.parse((await exec("codex", ["plugin", "marketplace", "add", path.join(root, "dist", "plugins"), "--json"], { env, cwd: scratch })).stdout);
+  proof.marketplace = JSON.parse((await exec("codex", ["plugin", "marketplace", "add", marketplacePath, "--json"], { env, cwd: scratch })).stdout);
   const installed = JSON.parse((await exec("codex", ["plugin", "add", "safeinstall@safeinstall-local", "--json"], { env, cwd: scratch })).stdout);
   proof.installedVersion = installed.version;
   const config = JSON.parse((await exec("codex", ["mcp", "list", "--json"], { env, cwd: scratch })).stdout).find(item => item.name === "safeinstall");
@@ -74,7 +75,7 @@ try {
   proof.skills = ["safeinstall-setup", "safeinstall-check", "safeinstall-install", "safeinstall-status"].filter(name => skillText.includes(name));
   assert.equal(proof.skills.length, 4);
   proof.hookTrustGranted = false;
-  const archive = path.join(root, "dist", `safeinstall-plugin-${installed.version}.tgz`);
+  const archive = path.resolve(process.env.SAFEINSTALL_TEST_ARCHIVE_PATH || path.join(root, "dist", `safeinstall-plugin-${installed.version}.tgz`));
   proof.archiveSha256 = createHash("sha256").update(await readFile(archive)).digest("hex");
   proof.passed = true;
 } catch (error) {

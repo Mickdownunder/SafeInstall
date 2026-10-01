@@ -116,7 +116,10 @@ function cli(args) {
 
 const mode = process.argv[2];
 Promise.resolve().then(() => {
-  if (Number(process.versions.node.split(".")[0]) < 20) throw new Error("SafeInstall requires Node.js 20 or newer.");
+  const req = createRequire(path.join(runtime, "package.json"));
+  if (!req("semver").satisfies(process.versions.node, "^22.22.2 || ^24.15.0 || >=26.0.0")) {
+    throw new Error("SafeInstall plugin requires Node.js 22.22.2+ (22.x), 24.15.0+ (24.x), or 26+. Bundled signature verification does not support this Node version.");
+  }
   if (mode === "guard") return guard();
   if (mode === "mcp") return mcp();
   if (mode === "cli") return cli(process.argv.slice(3));

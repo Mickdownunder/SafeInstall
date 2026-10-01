@@ -13,7 +13,7 @@
       "hooks": "./hooks/hooks.json",
       "interface": {
         "displayName": "SafeInstall",
-        "shortDescription": "Check first. Install through policy.",
+        "shortDescription": "Package checks. Safer installs.",
         "longDescription": "Local package checks, controlled npm and pnpm installs, and project trust-surface inspection using the existing SafeInstall engine. No API key required. Review and trust the bundled hook separately to enable shell protection.",
         "developerName": "Cyntro Systems GmbH",
         "category": "Developer Tools",

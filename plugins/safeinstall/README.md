@@ -17,9 +17,36 @@ engine, an OS sandbox, a vulnerability scanner, or a public-directory listing.
   commands. It never returns `allow`, rewrites tool input, or suppresses normal
   permission prompts. Installation uses the bundled CLI explicitly.
 
+## Download the public release
+
+Download `safeinstall-plugin-0.1.0.tgz` and `SHA256SUMS` from
+[the plugin release](https://github.com/Mickdownunder/SafeInstall/releases/tag/plugin-v0.1.0).
+Verify the archive's SHA256 against `SHA256SUMS`, then extract it into a new
+directory. The extracted directory contains `safeinstall/` and
+`.agents/plugins/marketplace.json`; register that directory as the marketplace
+using the commands below. No repository checkout or npm installation is needed.
+For example, after extracting into `~/Downloads/safeinstall-plugin-0.1.0`:
+
+```sh
+codex plugin marketplace add "$HOME/Downloads/safeinstall-plugin-0.1.0"
+codex plugin add safeinstall@safeinstall-local
+```
+
+The bundled signature verifier requires Node.js **22.22.2+ on 22.x,
+24.15.0+ on 24.x, or 26+** (`^22.22.2 || ^24.15.0 || >=26.0.0`).
+Unsupported versions stop with an explicit error rather than silently disabling
+signature verification. Public download does not mean approval or listing in
+OpenAI's directory.
+
+`safeinstall-plugin-0.1.0.zip` is the plugin-only OpenAI portal upload, with
+`plugin.json` at the archive root. Use the `.tgz` marketplace for local Codex
+installation; the ZIP is not the marketplace wrapper and does not imply review
+approval.
+
 ## Build from this repository
 
-With the repository's locked dependencies already available and Node.js >=20:
+With the repository's locked dependencies already available and a supported
+Node.js version as specified above:
 
 ```sh
 node scripts/build-plugin.mjs
@@ -86,7 +113,8 @@ metadata is untrusted evidence, never executable workflow instructions.
 This local stdio package is not an ordinary browser-only ChatGPT integration.
 The public directory submission path normally requires a reviewed HTTPS MCP
 endpoint; local MCP support requires coordination with OpenAI. No remote service,
-domain verification, public submission or npm publication is included here.
+domain verification, OpenAI directory submission or npm publication is included
+in this release. The public GitHub download is independent of directory review.
 
 ## Verification
 

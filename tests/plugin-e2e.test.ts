@@ -45,6 +45,20 @@ beforeAll(async () => {
 afterAll(cleanupTempDirs);
 
 describe("extracted SafeInstall plugin", () => {
+  it("rejects unsupported Node versions before loading the engine, including fail-closed hooks", async () => {
+    for (const version of ["20.19.0", "22.22.0", "22.22.1", "23.0.0", "24.14.0", "25.3.0"]) {
+      // Run the actual distributed entry with only the reported version changed.
+      const script = `Object.defineProperty(process.versions, 'node', { value: ${JSON.stringify(version)} }); process.argv = [process.execPath, ${JSON.stringify(runner)}, 'cli', '--version']; require(${JSON.stringify(runner)});`;
+      await expect(exec(process.execPath, ["-e", script])).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("requires Node.js") });
+    }
+    for (const version of ["22.22.2", "24.15.0", "26.0.0"]) {
+      const script = `Object.defineProperty(process.versions, 'node', { value: ${JSON.stringify(version)} }); process.argv = [process.execPath, ${JSON.stringify(runner)}, 'cli', '--version']; require(${JSON.stringify(runner)});`;
+      expect((await exec(process.execPath, ["-e", script])).stdout.trim()).toBe(engineVersion);
+    }
+    const script = `Object.defineProperty(process.versions, 'node', { value: '22.22.1' }); process.argv = [process.execPath, ${JSON.stringify(runner)}, 'guard']; require(${JSON.stringify(runner)});`;
+    await expect(exec(process.execPath, ["-e", script])).rejects.toMatchObject({ code: 2, stdout: expect.stringContaining('"permissionDecision":"deny"') });
+  });
+
   it("contains the runtime dependency graph as regular files for host cache copying", async () => {
     const inventory = JSON.parse(await readFile(path.join(plugin, "runtime", "inventory.json"), "utf8")) as {
       cliVersion: string; lockfileSha256: string; packages: Array<{ name: string; path: string; version: string }>;
