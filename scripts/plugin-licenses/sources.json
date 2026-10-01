@@ -1,0 +1,32 @@
+[
+  {
+    "name": "@npmcli/agent",
+    "version": "5.0.2",
+    "license": "ISC",
+    "file": "ISC.txt",
+    "sha256": "a2b0b40d54947a653af2f56f9c8eddcf773e1549f140c76e0959c211aa645b8d",
+    "source": "https://spdx.org/licenses/ISC.html",
+    "packageSource": "https://registry.npmjs.org/@npmcli%2fagent/5.0.2",
+    "attribution": "Published package author: GitHub Inc. The package and upstream commit 3fadae4d3ea4cc6c73003db2b42456afab9e3cdd supply no license file or copyright notice. Standard ISC terms are reproduced below; author metadata is not asserted to be a copyright ownership statement."
+  },
+  {
+    "name": "@sigstore/verify",
+    "version": "4.1.0",
+    "license": "Apache-2.0",
+    "file": "Apache-2.0-sigstore.txt",
+    "sha256": "364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0",
+    "source": "https://raw.githubusercontent.com/sigstore/sigstore-js/d406ea60b342ca37cdeecd7afedb992cd189db92/LICENSE",
+    "packageSource": "https://registry.npmjs.org/@sigstore%2fverify/4.1.0",
+    "attribution": "Exact upstream LICENSE at the published release commit, including Copyright 2023 The Sigstore Authors. Existing source copyright headers remain unchanged."
+  },
+  {
+    "name": "proxy-agent-negotiate",
+    "version": "1.1.0",
+    "license": "MIT",
+    "file": "MIT.txt",
+    "sha256": "9645fb6e878aebd5e959be648a71973a108d4aa0d18eee478d0579066ad99958",
+    "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.28.0/json/details/MIT.json",
+    "packageSource": "https://registry.npmjs.org/proxy-agent-negotiate/1.1.0",
+    "attribution": "Published package author: Nathan Rajlich <nathan@tootallnate.net>. The package and its upstream directory at release commit b7e5f7ccce1a3ac5b339cc4c587974e8989cbc16 supply no license file or copyright notice. Standard MIT terms are reproduced below; no copyright owner or year is invented from author metadata."
+  }
+]

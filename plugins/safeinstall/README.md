@@ -3,7 +3,7 @@
 Last verified: 2026-10-01
 
 The existing SafeInstall engine, packaged for local Codex/ChatGPT Work plugin
-hosts. Plugin version **0.1.0** bundles CLI **0.15.0**. It is not a new policy
+hosts. Plugin version **0.1.1** bundles CLI **0.15.0**. It is not a new policy
 engine, an OS sandbox, a vulnerability scanner, or a public-directory listing.
 
 ## What you get
@@ -19,16 +19,16 @@ engine, an OS sandbox, a vulnerability scanner, or a public-directory listing.
 
 ## Download the public release
 
-Download `safeinstall-plugin-0.1.0.tgz` and `SHA256SUMS` from
-[the plugin release](https://github.com/Mickdownunder/SafeInstall/releases/tag/plugin-v0.1.0).
+Download `safeinstall-plugin-0.1.1.tgz` and `SHA256SUMS` from
+[the plugin release](https://github.com/Mickdownunder/SafeInstall/releases/tag/plugin-v0.1.1).
 Verify the archive's SHA256 against `SHA256SUMS`, then extract it into a new
 directory. The extracted directory contains `safeinstall/` and
 `.agents/plugins/marketplace.json`; register that directory as the marketplace
 using the commands below. No repository checkout or npm installation is needed.
-For example, after extracting into `~/Downloads/safeinstall-plugin-0.1.0`:
+For example, after extracting into `~/Downloads/safeinstall-plugin-0.1.1`:
 
 ```sh
-codex plugin marketplace add "$HOME/Downloads/safeinstall-plugin-0.1.0"
+codex plugin marketplace add "$HOME/Downloads/safeinstall-plugin-0.1.1"
 codex plugin add safeinstall@safeinstall-local
 ```
 
@@ -38,10 +38,13 @@ Unsupported versions stop with an explicit error rather than silently disabling
 signature verification. Public download does not mean approval or listing in
 OpenAI's directory.
 
-`safeinstall-plugin-0.1.0.zip` is the plugin-only OpenAI portal upload, with
-`plugin.json` at the archive root. Use the `.tgz` marketplace for local Codex
-installation; the ZIP is not the marketplace wrapper and does not imply review
-approval.
+`safeinstall-plugin-0.1.1.zip` is a plugin-only distribution archive with
+`plugin.json` at the archive root, not an eligible public-directory submission.
+The [current submission rules](https://developers.openai.com/plugins/deploy/submission)
+exclude lifecycle hooks. This package contains a hook and local stdio MCP; the
+ordinary MCP submission path expects a public HTTPS endpoint, while local MCP
+support requires coordination with OpenAI. Use the `.tgz` marketplace for local
+Codex installation. Neither archive is an approved OpenAI directory listing.
 
 ## Build from this repository
 
@@ -53,10 +56,15 @@ node scripts/build-plugin.mjs
 ```
 
 The output is `dist/plugins/` (local marketplace with a `safeinstall/` plugin)
-and `dist/safeinstall-plugin-0.1.0.tgz` (the same marketplace and plugin).
+and `dist/safeinstall-plugin-0.1.1.tgz` (the same marketplace and plugin).
 The builder compiles the current engine, includes runtime dependencies and
 required MCP/Sigstore peers, retains dependency licenses, and creates
 `runtime/inventory.json` with package versions and the source lockfile digest.
+`THIRD_PARTY_NOTICES` includes full license terms for the three dependencies
+whose published packages omit license files, using version-pinned, hash-checked
+local supplements. Builds make no license-fetch network requests and refuse
+unreviewed missing license texts. Existing dependency license/notice files are
+retained unchanged.
 Runtime dependencies are regular files (including nested version conflicts),
 not symlinks that the host's plugin cache copier may skip. The builder refuses
 an installed pnpm graph whose lockfile differs from the repository lockfile.
@@ -111,8 +119,9 @@ contact Sigstore services. Policies and trust state remain local; package
 metadata is untrusted evidence, never executable workflow instructions.
 
 This local stdio package is not an ordinary browser-only ChatGPT integration.
-The public directory submission path normally requires a reviewed HTTPS MCP
-endpoint; local MCP support requires coordination with OpenAI. No remote service,
+Lifecycle hooks are currently excluded from public-directory submission. The
+ordinary MCP submission path requires a reviewed HTTPS endpoint; local MCP
+support requires coordination with OpenAI. No remote service,
 domain verification, OpenAI directory submission or npm publication is included
 in this release. The public GitHub download is independent of directory review.
 
