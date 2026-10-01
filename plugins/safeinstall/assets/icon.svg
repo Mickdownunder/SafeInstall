@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="SafeInstall">
+  <rect width="128" height="128" rx="28" fill="#102D2A"/>
+  <path d="M64 19 99 33v29c0 24-15 39-35 48-20-9-35-24-35-48V33Z" fill="#16A085"/>
+  <path d="m45 63 13 13 27-30" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

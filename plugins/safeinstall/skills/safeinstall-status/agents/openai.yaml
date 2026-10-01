@@ -1,0 +1,4 @@
+interface:
+  display_name: "Protection status"
+  short_description: "Inspect policy and trust drift without making changes"
+  default_prompt: "Use $safeinstall-status to inspect this project's protection."

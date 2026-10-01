@@ -1,0 +1,4 @@
+interface:
+  display_name: "Check a package"
+  short_description: "Inspect package policy before an installation"
+  default_prompt: "Use $safeinstall-check to check this package before installing it."
