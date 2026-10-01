@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{
+        "type": "command",
+        "command": "node \"${PLUGIN_ROOT}/scripts/run.cjs\" guard",
+        "timeout": 60,
+        "statusMessage": "Checking SafeInstall package and project protection"
+      }]
+    }]
+  }
+}

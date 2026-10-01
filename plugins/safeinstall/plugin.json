@@ -1,0 +1,30 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "safeinstall",
+  "version": "0.1.0",
+  "description": "Check npm packages and install dependencies through SafeInstall's artifact-bound policy gate.",
+  "author": { "name": "Cyntro Systems GmbH", "email": "office@cyntro.at" },
+  "homepage": "https://safeinstall.dev",
+  "repository": "https://github.com/Mickdownunder/SafeInstall",
+  "license": "MIT",
+  "keywords": ["npm", "pnpm", "supply-chain", "security"],
+  "extensions": {
+    "com.openai": {
+      "hooks": "./hooks/hooks.json",
+      "interface": {
+        "displayName": "SafeInstall",
+        "shortDescription": "Check first. Install through policy.",
+        "longDescription": "Local package checks, controlled npm and pnpm installs, and project trust-surface inspection using the existing SafeInstall engine. No API key required. Review and trust the bundled hook separately to enable shell protection.",
+        "developerName": "Cyntro Systems GmbH",
+        "category": "Developer Tools",
+        "capabilities": ["read", "write"],
+        "websiteURL": "https://safeinstall.dev",
+        "supportURL": "https://github.com/Mickdownunder/SafeInstall/issues",
+        "defaultPrompt": ["Check this package before installing it.", "Set up SafeInstall in this project.", "Show this project's protection status."],
+        "brandColor": "#16A085",
+        "logo": "./assets/icon.svg",
+        "composerIcon": "./assets/icon.svg"
+      }
+    }
+  }
+}

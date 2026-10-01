@@ -1,0 +1,4 @@
+interface:
+  display_name: "Install with SafeInstall"
+  short_description: "Install dependencies through the artifact-bound gate"
+  default_prompt: "Use $safeinstall-install to add this dependency safely."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Set up SafeInstall"
+  short_description: "Set up project policy and review hook activation"
+  default_prompt: "Use $safeinstall-setup to set up protection in this project."
