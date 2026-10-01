@@ -37,14 +37,15 @@ export function buildPackageManagerCommand(
 ): { command: string; args: string[] } {
   const args = [...managerArgs, command, ...forwardedArgs];
   const ignoreScriptsFlag = IGNORE_SCRIPTS_FLAG[manager];
-
-  if (
-    config.packageManagerDefaults[manager].ignoreScripts &&
-    !args.includes(ignoreScriptsFlag) &&
-    !args.some((arg) => arg.startsWith(`${ignoreScriptsFlag}=`))
-  ) {
+  if (args.some((arg) => arg === "--no-ignore-scripts" ||
+      (arg.startsWith(`${ignoreScriptsFlag}=`) && arg !== `${ignoreScriptsFlag}=true`))) {
+    throw new Error("Install scripts cannot be enabled through SafeInstall.");
+  }
+  if (!args.includes(ignoreScriptsFlag) && !args.includes(`${ignoreScriptsFlag}=true`)) {
     args.push(ignoreScriptsFlag);
   }
+  args.push(`--registry=${config.registryUrl}`);
+  if (manager === "pnpm") args.push("--ignore-pnpmfile");
 
   return {
     command: manager,

@@ -8,6 +8,7 @@ import {
   createStubPackageManager,
   createTempDir,
   ensureBuiltCli,
+  FIXTURE_INTEGRITY,
   mkdirp,
   projectRoot,
   readLoggedArgs,
@@ -145,7 +146,7 @@ importers:
 packages:
 
   axios@1.14.0:
-    resolution: {integrity: sha512-test}
+    resolution: {integrity: ${FIXTURE_INTEGRITY}}
 `
     );
 
@@ -158,11 +159,12 @@ packages:
     });
 
     expect(result.code).toBe(0);
-    expect(result.stderr).toContain("Allowed: policy checks passed.");
+    expect(result.stderr).toContain("Policy checks passed; verifying install artifacts.");
     expect(result.stdout).toContain("stub-ok");
 
     const loggedArgs = await readLoggedArgs(stub.logPath);
-    expect(loggedArgs).toEqual(["install", "--ignore-scripts"]);
+    expect(loggedArgs).toEqual(["install", `--dir=${cwd.split(path.sep).join("/")}`, "--global=false",
+      "--frozen-lockfile", "--ignore-scripts", `--registry=${registry.url}`, "--ignore-pnpmfile"]);
   });
 
   it("captures package manager output in json mode for allowed installs", async () => {
@@ -239,8 +241,8 @@ packages:
         },
         "node_modules/axios": {
           version: "1.14.0",
-          resolved: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
-          integrity: "sha512-test"
+          resolved: `${registry.url}/axios/-/axios-1.14.0.tgz`,
+          integrity: FIXTURE_INTEGRITY
         }
       }
     });
@@ -259,7 +261,7 @@ importers:
 packages:
 
   axios@1.14.0:
-    resolution: {integrity: sha512-test}
+    resolution: {integrity: ${FIXTURE_INTEGRITY}}
 `
     );
 
@@ -319,7 +321,7 @@ importers:
 packages:
 
   axios@1.14.0:
-    resolution: {integrity: sha512-test}
+    resolution: {integrity: ${FIXTURE_INTEGRITY}}
 `
     );
 
@@ -335,7 +337,8 @@ packages:
     expect(result.stderr).toContain("Using config:");
     expect(result.stderr).toContain("safeinstall.config.json");
     const loggedArgs = await readLoggedArgs(stub.logPath);
-    expect(loggedArgs).toEqual(["install", "--ignore-scripts"]);
+    expect(loggedArgs).toEqual(["install", `--dir=${packageDir.split(path.sep).join("/")}`, "--global=false",
+      "--frozen-lockfile", "--ignore-scripts", `--registry=${registry.url}`, "--ignore-pnpmfile"]);
   });
 
   it("supports npm ci from a workspace package subdirectory using the root lockfile", async () => {
@@ -378,8 +381,8 @@ packages:
         },
         "node_modules/axios": {
           version: "1.14.0",
-          resolved: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
-          integrity: "sha512-test"
+          resolved: `${registry.url}/axios/-/axios-1.14.0.tgz`,
+          integrity: FIXTURE_INTEGRITY
         }
       }
     });
@@ -394,7 +397,8 @@ packages:
 
     expect(result.code).toBe(0);
     const loggedArgs = await readLoggedArgs(stub.logPath);
-    expect(loggedArgs).toEqual(["ci", "--ignore-scripts"]);
+    expect(loggedArgs).toEqual(["ci", `--prefix=${cwd.split(path.sep).join("/")}`, "--global=false",
+      "--ignore-scripts", `--registry=${registry.url}`]);
   });
 
   it("supports pre-command target-directory flags like pnpm -C packages/app install", async () => {
@@ -428,7 +432,7 @@ importers:
 packages:
 
   axios@1.14.0:
-    resolution: {integrity: sha512-test}
+    resolution: {integrity: ${FIXTURE_INTEGRITY}}
 `
     );
 
@@ -442,7 +446,8 @@ packages:
 
     expect(result.code).toBe(0);
     const loggedArgs = await readLoggedArgs(stub.logPath);
-    expect(loggedArgs).toEqual(["-C", "packages/app", "install", "--ignore-scripts"]);
+    expect(loggedArgs).toEqual(["-C", "packages/app", "install", `--dir=${packageDir.split(path.sep).join("/")}`,
+      "--global=false", "--frozen-lockfile", "--ignore-scripts", `--registry=${registry.url}`, "--ignore-pnpmfile"]);
   });
 
   it("fails closed on ambiguous workspace-targeting flags", async () => {
@@ -487,7 +492,7 @@ setTimeout(() => process.exit(97), 15000);
       });
       await mkdirp(path.join(cwd, "packages", "local"));
 
-      const { child, result } = await spawnCli(["pnpm", "add", "./packages/local"], {
+      const { child, result } = await spawnCli(["pnpm", "add", "axios@1.13.2"], {
         cwd,
         env: {
           ...process.env,
@@ -497,10 +502,10 @@ setTimeout(() => process.exit(97), 15000);
 
       // Wait for evidence that the CLI has finished its startup phase and
       // registered its signal handlers, rather than sleeping a fixed amount.
-      // `Allowed: policy checks passed.` is printed right before the package
+      // The artifact-verification message is printed right before the package
       // manager is spawned — by this point the signal handler is definitely
       // active and we are mid-install, which is exactly the state under test.
-      await waitForStderr(child, "Allowed: policy checks passed.", 5000);
+      await waitForStderr(child, "Policy checks passed; verifying install artifacts.", 5000);
       child.kill("SIGINT");
 
       const interrupted = await result;

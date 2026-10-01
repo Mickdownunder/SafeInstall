@@ -66,16 +66,16 @@ describe("buildPackageManagerCommand", () => {
     const built = buildPackageManagerCommand("pnpm", [], "add", ["axios"], config);
     expect(built).toEqual({
       command: "pnpm",
-      args: ["add", "axios", "--ignore-scripts"]
+      args: ["add", "axios", "--ignore-scripts", "--registry=https://registry.npmjs.org", "--ignore-pnpmfile"]
     });
   });
 
   it("does not duplicate ignore-scripts when already present", () => {
     const built = buildPackageManagerCommand("npm", [], "install", ["axios", "--ignore-scripts"], config);
-    expect(built.args).toEqual(["install", "axios", "--ignore-scripts"]);
+    expect(built.args).toEqual(["install", "axios", "--ignore-scripts", "--registry=https://registry.npmjs.org"]);
   });
 
-  it("respects per-manager script forwarding override", () => {
+  it("keeps scripts disabled even when legacy configuration requests execution", () => {
     const built = buildPackageManagerCommand(
       "bun",
       [],
@@ -90,12 +90,18 @@ describe("buildPackageManagerCommand", () => {
       }
     );
 
-    expect(built.args).toEqual(["add", "elysia"]);
+    expect(built.args).toEqual(["add", "elysia", "--ignore-scripts", "--registry=https://registry.npmjs.org"]);
   });
 
   it("preserves manager args before the command", () => {
     const built = buildPackageManagerCommand("pnpm", ["-C", "packages/app"], "install", [], config);
-    expect(built.args).toEqual(["-C", "packages/app", "install", "--ignore-scripts"]);
+    expect(built.args).toEqual(["-C", "packages/app", "install", "--ignore-scripts", "--registry=https://registry.npmjs.org", "--ignore-pnpmfile"]);
+  });
+
+  it.each(["npm", "pnpm", "bun"] as const)("rejects script-enabling flags for %s", (manager) => {
+    for (const flag of ["--ignore-scripts=false", "--no-ignore-scripts"]) {
+      expect(() => buildPackageManagerCommand(manager, [], "install", [flag], config)).toThrow("cannot be enabled");
+    }
   });
 });
 

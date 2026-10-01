@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  The install gate for <strong>npm</strong>, <strong>pnpm</strong>, and <strong>bun</strong> — for the humans who type <code>install</code>, the AI agents that run it for them, and the config that programs those agents.<br />
+  The artifact-bound install gate for <strong>npm</strong> and <strong>pnpm</strong> — for the humans who type <code>install</code>, the AI agents that run it for them, and the config that programs those agents.<br />
   Policy runs first. Then your package manager. Not the other way around.<br /><br />
   Local-first · No cloud · No account · MIT · Free forever
 </p>
@@ -25,7 +25,7 @@
 
 SafeInstall runs your **policy before your package manager** — locally, blocking by default. One tool, three layers of defense:
 
-- 🧑‍💻 **For the humans who install** — prefix any command: `safeinstall pnpm add axios`. Policy runs, then pnpm. Release age, install scripts, untrusted sources, typo-squats, and cryptographic provenance are [checked before anything touches disk](#policy-defaults).
+- 🧑‍💻 **For the humans who install** — prefix supported install commands: `safeinstall pnpm add axios`. Policy runs first; the resolved lockfile is then checked against the approved version and SHA-512 before the frozen install. Release age, install scripts, untrusted sources, typo-squats, and cryptographic provenance are [policy checks](#policy-defaults).
 - 🤖 **For the AI agents that install for you** — an [MCP tool](#mcp-server--ai-agents) agents can call, plus a [shell guard](#agent-guard--enforcement-not-advice) that intercepts install commands in Claude Code, Codex, and Cursor *before they run*. Best-effort shell interception — one defense layer that fires even when the agent isn't cooperating, not a lossless guarantee.
 - 🔒 **For the files that program the agents** — the [Agent Trust Surface](#agent-trust-surface--self-defending-policy): a committed hash baseline of your config, hooks, rules, and MCP files, reconciled locally and re-verified in CI, so tampering with the rules surfaces as drift instead of silently owning every future session — with a fully consistent rewrite caught by human review of the diff, not the automated check alone.
 
@@ -100,22 +100,16 @@ safeinstall check                     # audit direct deps against policy
 ## How it works
 
 ```
-┌─────────────────────┐     ┌──────────────┐     ┌─────────────────┐
-│  safeinstall pnpm   │ ──▶ │  Resolve &   │ ──▶ │  Policy check   │
-│  add axios          │     │  fetch meta  │     │  (age, scripts, │
-└─────────────────────┘     └──────────────┘     │  sources, ...)  │
-                                                  └────────┬────────┘
-                                                           │
-                                                 ┌─────────▼─────────┐
-                                          pass → │  Invoke pnpm add  │
-                                          fail → │  Exit 2 (blocked) │
-                                                 └───────────────────┘
+Resolve → Policy → Lockfile-only preparation → Verify artifact binding → Frozen install
+                      Any failed policy or binding check → Exit 2 (blocked)
 ```
 
-1. Resolves what would be installed
+1. Resolves the requested version and captures the registry's tarball URL and SHA-512
 2. Fetches registry metadata (publish time, declared scripts)
 3. Evaluates policy rules
-4. Blocks (exit 2) or invokes the real package manager
+4. For explicit package additions, pins the evaluated version and runs a scripts-disabled, lockfile-only preparation
+5. Checks every direct registry dependency in the affected lockfile scope against its evaluated version, SHA-512, and tarball URL where recorded; applies configured transitive checks
+6. Runs `npm ci` or `pnpm install --frozen-lockfile` with scripts disabled and the configured registry enforced; rejects manifest/lockfile changes during evaluation or installation
 
 No registry proxy. No tarball rewriting. No cloud dependency.
 
@@ -160,7 +154,7 @@ Two checks run transitively, both read directly from the lockfile with **zero ex
 - **`install-script`** — flags transitive packages that declare a lifecycle script (the `ua-parser-js` attack class: a deeply nested dependency running code at install time). npm records this in the lockfile; pnpm lockfiles do not, so this check is npm-only for now.
 - **`untrusted-source`** — flags transitive packages resolving from git, url, or tarball sources instead of the registry. Works for both npm and pnpm.
 
-Release-age, typo-squat, and provenance are deliberately **not** run transitively — they would either flood you with noise or require a registry round-trip per package. Transitive evaluation applies to `safeinstall check` and project installs (`pnpm install`, `npm ci`), which have a resolved lockfile.
+Release-age, typo-squat, and provenance are deliberately **not** run transitively — they would either flood you with noise or require a registry round-trip per package. Transitive evaluation applies to `safeinstall check`, project installs, and the prepared lockfile for explicit npm/pnpm additions.
 
 ```json
 {
@@ -200,13 +194,12 @@ Default mode is `"off"`. Opt in by setting `provenance.mode` to `"warn"` or `"re
 # Ad-hoc installs
 safeinstall pnpm add axios
 safeinstall npm install react@19.2.0
-safeinstall bun add zod
 
 # Project installs (lockfile-aware for npm/pnpm)
 safeinstall pnpm install
 safeinstall npm ci
 
-# Monorepo — target one package
+# Monorepo — select a package; shared-lockfile installs review all importers
 safeinstall pnpm -C packages/app install
 safeinstall npm --prefix packages/app ci
 
@@ -244,7 +237,15 @@ For `pnpm install` and `npm install` / `npm ci`, dependency versions come from t
 - Stale, missing, or mismatched lockfile entries **fail closed**
 - If `packageManager` is set in `package.json`, using a different CLI is blocked
 - Workspace-targeting flags (`--filter`, `--workspace`) are blocked — use `-C` or `--prefix`
-- `bun install` uses manifest-oriented analysis (full lockfile parity not yet implemented)
+- `bun add` / `bun install` fail closed until artifact-bound Bun installation is implemented; `check` and MCP policy queries remain available
+
+### Artifact-bound installation contract
+
+Installation requires one canonical SHA-512 digest in the checked registry manifest and the matching lockfile entry. SHA-1-only or missing-integrity entries block. A different command-line registry, script-enabling flags, global installs, and unknown installation options block. Registry selection in environment variables or scoped `.npmrc` settings cannot authorize a different artifact: the resulting lockfile must still match the checked binding.
+
+Explicit additions resolve into a lockfile with the evaluated exact version before installation. Preparation can update `package.json` and the lockfile, and can populate the manager's cache, even if the later binding/policy check blocks. Those files are left for inspection, not automatically rolled back. npm's frozen phase uses `ci`, which replaces `node_modules`. Shared workspace lockfiles cause all recorded importers' direct dependencies to be reviewed under the selected policy, not just the selected package.
+
+Lifecycle scripts are always disabled, including when legacy `packageManagerDefaults.*.ignoreScripts` is `false`. `allowedScripts` permits a policy exception, not script execution. pnpm's executable `.pnpmfile.cjs` hooks are disabled too. Explicit non-registry additions currently block; existing local/workspace dependencies remain governed by `allowedSources` and are not claimed to have registry-artifact binding.
 
 ---
 
@@ -439,11 +440,11 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 |:---|:---|
 | `minimumCliVersion` | Optional. Lowest safeinstall-cli version whose behavior this project's protections assume (exact semver). An older running CLI **warns** — in the guard, `install`/`check`, and `trust status` — but never hard-fails |
 | `minimumReleaseAgeHours` | Minimum age in hours for registry versions |
-| `registryUrl` | npm-compatible registry URL for metadata (mirrors, Artifactory, Verdaccio) |
+| `registryUrl` | npm-compatible registry URL for metadata and installation (mirrors, Artifactory, Verdaccio) |
 | `allowedScripts` | Per-package lifecycle script exceptions |
 | `allowedSources` | Permitted source types |
 | `allowedPackages` | Names that skip release-age, install-script, and typo-squat checks (with warning). Source, trust-downgrade, and provenance checks still apply. |
-| `packageManagerDefaults` | Per-manager flags forwarded to the tool |
+| `packageManagerDefaults` | Legacy configuration; lifecycle scripts remain disabled even when `ignoreScripts` is `false` |
 | `typoSquat.mode` | `"off"` / `"warn"` / `"block"` — how to handle suspected typo-squats |
 | `typoSquat.minNameLength` | Minimum package name length to check (shorter names are skipped) |
 | `typoSquat.ignore` | Known legitimate lookalikes to skip, lowercased on load |
@@ -622,7 +623,7 @@ To enforce policy during the actual install step (not just a check):
 | Input | Default | Description |
 |:---|:---|:---|
 | `mode` | `check` | `check` audits deps; `install` runs the package manager through SafeInstall |
-| `package-manager` | `pnpm` | `npm`, `pnpm`, or `bun` (install mode only) |
+| `package-manager` | `pnpm` | `npm` or `pnpm` for installation; `bun` fails closed |
 | `args` | | Additional arguments forwarded to the package manager |
 | `config-path` | | Explicit path to `safeinstall.config.json` (auto-discovered if omitted) |
 | `version` | `latest` | SafeInstall CLI version to install |
@@ -646,7 +647,8 @@ To enforce policy during the actual install step (not just a check):
 - **Native builds (`binding.gyp`)** are caught via the install-script check: npm normalizes `binding.gyp` into a `node-gyp rebuild` install script at publish time, so it is present in the registry metadata SafeInstall already reads — no tarball download required. The residual edge is a package published through a non-standard client that omits this normalization while still shipping a `binding.gyp`; detecting that would require tarball content inspection, which is out of scope (see *What it does not do*).
 - **`peerDependencies`** not evaluated unless also declared as direct dependencies
 - **Trust downgrade detection** requires prior install state in `node_modules`
-- **`bun install`** uses manifest-only analysis (lockfile parity not yet implemented); transitive evaluation is npm/pnpm only
+- **Bun installation** fails closed; an artifact-binding adapter is not implemented
+- **Trusted execution boundary** — this is not an OS sandbox. It relies on a trusted npm/pnpm binary enforcing frozen-lockfile integrity, the selected registry metadata, and the local filesystem not being controlled by a concurrent attacker. It does not prove package code benign, inspect every transitive artifact against registry policy, or isolate runtime execution
 - **Typo-squat target list** is curated and refreshed manually between releases; brand new packages published in the last day may not yet appear
 - **Provenance verification** supports GitHub Actions trusted publishers on the public Sigstore root only (GitLab CI, self-hosted Sigstore currently out of scope)
 - **Git sources** are identified by URL for allowlist purposes, not by inferred package name — conflating registry `axios` with `github:any-fork/axios` would be dangerous
@@ -657,7 +659,7 @@ To enforce policy during the actual install step (not just a check):
 - Vulnerability scanning or CVE databases
 - Registry proxying or tarball rewriting
 - Malware detection or package content analysis
-- Selective lifecycle script execution (forwards `--ignore-scripts` by default)
+- Selective lifecycle script execution (always forces `--ignore-scripts`)
 
 ---
 
@@ -690,7 +692,7 @@ MIT — see [LICENSE](./LICENSE).
 
 SafeInstall is provided as-is under the MIT license. It is a policy tool that enforces configurable rules on package installs. It does not guarantee the safety of any package, does not detect all supply-chain attacks, and does not replace professional security review. Use at your own risk. The authors are not liable for any damages arising from the use of this software.
 
-Last verified: 2026-07-10
+Last verified: 2026-10-01
 
 ---
 

@@ -58,13 +58,7 @@ async function createGitProject(): Promise<string> {
 describe("decision record emission (e2e)", () => {
   it("writes an actor-tagged allow record for a stub-executed install and verifies it end to end", async () => {
     const project = await createGitProject();
-    // The stub "installs" by writing the lockfile the real manager would.
-    const lockfilePath = path.join(project, "package-lock.json");
-    const stub = await createStubPackageManager("npm", {
-      script: `require("node:fs").writeFileSync(${JSON.stringify(lockfilePath)}, JSON.stringify({ lockfileVersion: 3, packages: {} }) + "\\n");
-process.exit(0);
-`
-    });
+    const stub = await createStubPackageManager("npm");
     commitAll(project, "base");
 
     const result = await runCli(["npm", "install", "left-pad@1.13.2", "--json"], {
@@ -156,10 +150,11 @@ process.exit(0);
       }
     });
 
-    expect(result.code).toBe(0);
+    expect(result.code).toBe(2);
 
     const chain = await readDecisionChain(project, "package-lock.json");
     expect(chain).toHaveLength(1);
+    expect(present(chain[0]).record.verdict.decision).toBe("block");
     const observation = present(present(chain[0]).record.observations[0]);
     expect(observation.findings.map((finding) => finding.code)).toContain("non-registry-source");
     expect(observation.notEvaluable.releaseAge).not.toBeNull();
@@ -169,20 +164,15 @@ process.exit(0);
 
   it("chains a second install onto the first record", async () => {
     const project = await createGitProject();
-    const lockfilePath = path.join(project, "package-lock.json");
-    const stub = await createStubPackageManager("npm", {
-      script: `require("node:fs").writeFileSync(${JSON.stringify(lockfilePath)}, JSON.stringify({ lockfileVersion: 3, seq: process.hrtime.bigint().toString() }) + "\\n");
-process.exit(0);
-`
-    });
+    const stub = await createStubPackageManager("npm");
     commitAll(project, "base");
     const env = {
       ...process.env,
       PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
     };
 
-    await runCli(["npm", "install", "left-pad@1.13.2", "--json"], { cwd: project, env });
-    await runCli(["npm", "install", "left-pad@1.14.0", "--json"], { cwd: project, env });
+    expect((await runCli(["npm", "install", "left-pad@1.13.2", "--json"], { cwd: project, env })).code).toBe(0);
+    expect((await runCli(["npm", "install", "left-pad@1.14.0", "--json"], { cwd: project, env })).code).toBe(0);
 
     const chain = await readDecisionChain(project, "package-lock.json");
     expect(chain).toHaveLength(2);
@@ -248,21 +238,17 @@ process.exit(0);
 describe("decision record file hygiene (e2e)", () => {
   it("writes records as exactly the canonical bytes", async () => {
     const project = await createGitProject();
-    const lockfilePath = path.join(project, "package-lock.json");
-    const stub = await createStubPackageManager("npm", {
-      script: `require("node:fs").writeFileSync(${JSON.stringify(lockfilePath)}, "{}\\n");
-process.exit(0);
-`
-    });
+    const stub = await createStubPackageManager("npm");
     commitAll(project, "base");
 
-    await runCli(["npm", "install", "left-pad@1.13.2", "--json"], {
+    const result = await runCli(["npm", "install", "left-pad@1.13.2", "--json"], {
       cwd: project,
       env: {
         ...process.env,
         PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
       }
     });
+    expect(result.code).toBe(0);
 
     const dir = decisionsDirForLockfile(project, "package-lock.json");
     const [fileName] = await readdir(dir);

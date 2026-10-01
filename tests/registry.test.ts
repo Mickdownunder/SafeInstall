@@ -56,6 +56,15 @@ async function createClient(
 }
 
 describe("RegistryClient", () => {
+  it.each([{ name: "different-package", version: "1.14.0" }, { name: "axios", version: "9.9.9" }])(
+    "rejects version manifests with a different identity: %j", async (manifest) => {
+      const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(manifest));
+      vi.stubGlobal("fetch", fetchMock);
+      await expect((await createClient()).resolvePackage(createRequestedPackage({
+        raw: "axios@1.14.0", requested: "1.14.0", registrySpecKind: "version"
+      }))).rejects.toThrow("identity");
+    });
+
   it("takes the publish time from the registry time map as the primary source", async () => {
     const fetchMock = vi
       .fn()
@@ -78,7 +87,8 @@ describe("RegistryClient", () => {
             postinstall: "node install.js"
           },
           dist: {
-            tarball: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz"
+            tarball: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+            integrity: "sha512-checked-artifact"
           }
         })
       )
@@ -95,6 +105,10 @@ describe("RegistryClient", () => {
     const result = await (await createClient()).resolvePackage(createRequestedPackage());
 
     expect(result.resolvedVersion).toBe("1.14.0");
+    expect(result.artifact).toEqual({
+      tarballUrl: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+      integrity: "sha512-checked-artifact"
+    });
     expect(result.lifecycleScripts).toEqual(["postinstall"]);
     expect(result.publishedAt.toISOString()).toBe("2026-03-27T19:01:42.000Z");
     expect(result.publishTimeSource).toBe("registry-time");

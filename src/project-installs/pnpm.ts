@@ -122,6 +122,14 @@ function findPackageEntry(
     return packages[legacyKey];
   }
 
+  // pnpm v9 stores peer context in importer/snapshot keys, but the archive's
+  // integrity remains under the peer-independent name@version package key.
+  const version = extractSemverPrefix(versionRef);
+  if (version && versionRef.startsWith(`${version}(`)) {
+    const artifactEntry = packages[`${name}@${version}`];
+    if (artifactEntry) return artifactEntry;
+  }
+
   const matchingKey = Object.keys(packages).find((entryKey) => entryKey === exactKey || entryKey.startsWith(`${exactKey}(`));
   if (matchingKey) {
     return packages[matchingKey];
@@ -246,6 +254,8 @@ export async function loadPnpmProjectInstallTargets(
 
     targets.push({
       manifestSpec,
+      integrity: packageEntry?.resolution?.integrity,
+      tarballUrl: packageEntry?.resolution?.tarball,
       requested:
         sourceType === "registry" && packageVersion
           ? createRegistryRequestedPackage(name, packageVersion)

@@ -41,14 +41,14 @@ async function resolveNpmLockfilePath(effectiveCwd: string): Promise<string | un
   let currentDir = path.resolve(effectiveCwd);
 
   while (true) {
-    const packageLockPath = path.join(currentDir, "package-lock.json");
-    if (await fileExists(packageLockPath)) {
-      return packageLockPath;
-    }
-
     const shrinkwrapPath = path.join(currentDir, "npm-shrinkwrap.json");
     if (await fileExists(shrinkwrapPath)) {
       return shrinkwrapPath;
+    }
+
+    const packageLockPath = path.join(currentDir, "package-lock.json");
+    if (await fileExists(packageLockPath)) {
+      return packageLockPath;
     }
 
     const parentDir = path.dirname(currentDir);
@@ -117,8 +117,8 @@ export async function loadNpmProjectInstallTargets(
     }
 
     const resolvedPackageEntry =
-      lockfile.packages?.[`node_modules/${name}`] ??
       lockfile.packages?.[`${packageEntryKey ? `${packageEntryKey}/` : ""}node_modules/${name}`] ??
+      lockfile.packages?.[`node_modules/${name}`] ??
       lockfile.dependencies?.[name];
 
     if (!resolvedPackageEntry) {
@@ -135,6 +135,8 @@ export async function loadNpmProjectInstallTargets(
 
     targets.push({
       manifestSpec,
+      integrity: resolvedPackageEntry.integrity,
+      tarballUrl: resolvedPackageEntry.resolved,
       requested:
         sourceType === "registry" && resolvedPackageEntry.version
           ? createRegistryRequestedPackage(name, resolvedPackageEntry.version)

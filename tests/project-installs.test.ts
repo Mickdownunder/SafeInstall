@@ -74,6 +74,31 @@ describe("classifyResolvedSource", () => {
 });
 
 describe("loadPnpmProjectInstallTargets", () => {
+  it("reads artifact integrity from peer-independent package keys in modern lockfiles", async () => {
+    const cwd = await createTempProject({
+      "package.json": JSON.stringify({ dependencies: { vitest: "4.1.11" } }),
+      "pnpm-lock.yaml": `lockfileVersion: '9.0'
+importers:
+  .:
+    dependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@25.9.1)(vite@8.1.4)
+packages:
+  vitest@4.1.11:
+    resolution: {integrity: sha512-approved}
+snapshots:
+  vitest@4.1.11(@types/node@25.9.1)(vite@8.1.4): {}
+`
+    });
+    const result = await loadPnpmProjectInstallTargets(cwd, cwd);
+    expect(result.issues).toEqual([]);
+    expect(present(result.targets[0])).toMatchObject({
+      integrity: "sha512-approved",
+      requested: { name: "vitest", requested: "4.1.11", sourceType: "registry" }
+    });
+  });
+
   it("resolves direct registry dependencies to pinned versions from pnpm-lock.yaml", async () => {
     const cwd = await createTempProject({
       "package.json": JSON.stringify(

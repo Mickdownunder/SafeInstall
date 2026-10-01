@@ -11,12 +11,12 @@ inputs:
     description: >
       "check" evaluates direct dependencies against policy without
       installing. "install" runs the package manager through SafeInstall
-      so policy is enforced before any packages are written to disk.
+      so policy and artifact binding are enforced before installation.
     required: false
     default: "check"
   package-manager:
     description: >
-      Package manager to use in install mode (npm, pnpm, or bun).
+      Package manager to use in install mode (npm or pnpm; bun fails closed).
       Ignored in check mode.
     required: false
     default: "pnpm"
@@ -36,8 +36,9 @@ inputs:
   version:
     description: >
       SafeInstall CLI version to install. Defaults to the latest
-      published version. Pin to a specific version for reproducible
-      builds.
+      published version. Accepts an exact version or a named dist-tag,
+      not shell expressions or version ranges. Pin an exact version
+      for reproducible builds.
     required: false
     default: "latest"
   verify-trust:
@@ -70,7 +71,12 @@ runs:
   steps:
     - name: Install SafeInstall CLI
       shell: bash
-      run: npm install -g "safeinstall-cli@${{ inputs.version }}"
+      env:
+        SAFEINSTALL_CLI_VERSION: ${{ inputs.version }}
+      run: |
+        set -e
+        node -e 'if (!/^(?:[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?|[A-Za-z][A-Za-z0-9._-]*)$/.test(process.env.SAFEINSTALL_CLI_VERSION || "")) { console.error("Invalid SafeInstall version: expected an exact version or dist-tag."); process.exit(2); }'
+        npm install -g "safeinstall-cli@${SAFEINSTALL_CLI_VERSION}" --ignore-scripts
 
     - name: Verify trust surface
       if: ${{ inputs.verify-trust == 'true' }}

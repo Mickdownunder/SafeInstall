@@ -24,10 +24,12 @@ interface RegistryPackageVersionDocument {
 }
 
 interface RegistryVersionManifest {
+  name?: string;
   version?: string;
   scripts?: Partial<Record<InstallLifecycleScriptName, string>>;
   dist?: {
     tarball?: string;
+    integrity?: string;
   };
 }
 
@@ -108,6 +110,10 @@ export class RegistryClient {
         ? requested.requested
         : this.resolveVersion(await this.fetchPackageDocument(requested.name), requested);
     const versionDoc = await this.fetchVersionManifest(requested.name, resolvedVersion);
+    if ((versionDoc.name !== undefined && versionDoc.name !== requested.name) ||
+        (versionDoc.version !== undefined && versionDoc.version !== resolvedVersion)) {
+      throw new Error(`Registry error: manifest identity does not match ${requested.name}@${resolvedVersion}.`);
+    }
     const publishTime = await this.fetchPublishedAt(requested.name, resolvedVersion, versionDoc);
     const lifecycleScripts = this.collectLifecycleScripts(versionDoc.scripts);
 
@@ -116,7 +122,10 @@ export class RegistryClient {
       resolvedVersion,
       publishedAt: publishTime.publishedAt,
       publishTimeSource: publishTime.source,
-      lifecycleScripts
+      lifecycleScripts,
+      ...(typeof versionDoc.dist?.tarball === "string" && typeof versionDoc.dist.integrity === "string"
+        ? { artifact: { tarballUrl: versionDoc.dist.tarball, integrity: versionDoc.dist.integrity } }
+        : {})
     };
   }
 
