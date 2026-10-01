@@ -3,7 +3,7 @@ import { loadConfig } from "./config";
 import { captureDecisionState, emitDecisionRecord } from "./decision-emit";
 import { evaluateRequestedPackages } from "./evaluations";
 import { formatCommand, printConfigInfo, printWarnings } from "./output";
-import { runPackageManager } from "./package-managers";
+import { InstallBindingError, installOptionReasons, runBoundInstall } from "./install-binding";
 import { loadManifestDependencies } from "./project-state";
 import { hasAmbiguousWorkspaceFlags, resolveInvocationContext } from "./project-discovery";
 import { loadProjectInstallTargetsForManager } from "./project-installs";
@@ -299,7 +299,7 @@ export async function runInstallFlow(
   ];
   const infos = evaluations.flatMap((evaluation) => evaluation.infos);
   const directBlockReasons = blocked.flatMap((evaluation) => evaluation.blockedReasons);
-  const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons];
+  const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons, ...installOptionReasons(plan, config)];
 
   // Bind the repository state BEFORE the package manager can change it: the
   // decision record's before/after lockfile bindings are what CI later
@@ -362,21 +362,41 @@ export async function runInstallFlow(
     if (!decisionState.captured) {
       console.error(`Info: Decision record not written: ${decisionState.skippedReason}.`);
     }
-    console.error("Allowed: policy checks passed.");
+    console.error("Policy checks passed; verifying install artifacts.");
   }
 
   throwIfAborted(options.signal);
 
-  const execution = await runPackageManager({
-    manager: plan.manager,
-    managerArgs: plan.managerArgs,
-    command: plan.command,
-    forwardedArgs: plan.forwardedArgs,
-    config,
-    cwd,
-    signal: options.signal,
-    stdio: options.jsonMode ? "pipe" : "inherit"
-  });
+  let bound;
+  try {
+    bound = await runBoundInstall({ plan, evaluations, registryClient, config, cwd,
+      packageDir: invocation.packageDir ?? invocation.effectiveCwd, signal: options.signal,
+      stdio: options.jsonMode ? "pipe" : "inherit" });
+  } catch (error) {
+    if (!(error instanceof InstallBindingError)) throw error;
+    if (decisionState.captured) {
+      const emitted = await emitDecisionRecord({ capture: decisionState.captured, recordType: "install",
+        argv, packageManager: plan.manager, config, evaluations, decision: "block",
+        reasons: error.reasons, installed: null });
+      if (emitted.info) infos.push(emitted.info);
+      if (emitted.warning) warnings.push(emitted.warning);
+    }
+    return { mode: "install", decision: "block", exitCode: 2,
+      exitCodeMeaning: "The install was blocked because its artifact binding could not be verified.",
+      command: argv, commandString, configPath: path, configLabel: configLabel(path),
+      packageManager: plan.manager, reasons: error.reasons, summary: "Install blocked: artifact binding failed.",
+      warnings, infos, affectedPackages: evaluations.map(createAffectedPackage),
+      execution: { ranPackageManager: error.ranPackageManager } };
+  }
+  const { execution } = bound;
+  const additional = bound.evaluations.filter((evaluation) => !evaluations.includes(evaluation));
+  const addedWarnings = [...additional.flatMap((evaluation) => evaluation.warnings), ...bound.warnings]
+    .filter((warning) => !warnings.includes(warning));
+  warnings.push(...addedWarnings);
+  infos.push(...additional.flatMap((evaluation) => evaluation.infos));
+  if (!options.jsonMode) {
+    for (const warning of addedWarnings) console.error(`Warning: ${warning}`);
+  }
 
   if (decisionState.captured) {
     const emitted = await emitDecisionRecord({
@@ -385,7 +405,7 @@ export async function runInstallFlow(
       argv,
       packageManager: plan.manager,
       config,
-      evaluations,
+      evaluations: bound.evaluations,
       decision: "allow",
       reasons: [],
       installed: execution.code === 0
@@ -424,14 +444,7 @@ export async function runInstallFlow(
         : `Allowed by policy, but ${plan.manager} exited with code ${execution.code}.`,
     warnings,
     infos,
-    affectedPackages: plan.packages.map((requested) => ({
-      name: requested.name,
-      requested: requested.raw,
-      sourceType: requested.sourceType,
-      reasons: [],
-      warnings: [],
-      infos: []
-    })),
+    affectedPackages: bound.evaluations.map(createAffectedPackage),
     execution: {
       ranPackageManager: true,
       packageManagerExitCode: execution.code,

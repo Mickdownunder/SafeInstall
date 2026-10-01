@@ -146,6 +146,7 @@ export interface ResolvedRegistryPackage {
   publishedAt: Date;
   publishTimeSource: PublishTimeSource;
   lifecycleScripts: InstallLifecycleScriptName[];
+  artifact?: { tarballUrl: string; integrity: string };
 }
 
 export interface PackageEvaluation {

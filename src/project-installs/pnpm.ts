@@ -246,6 +246,8 @@ export async function loadPnpmProjectInstallTargets(
 
     targets.push({
       manifestSpec,
+      integrity: packageEntry?.resolution?.integrity,
+      tarballUrl: packageEntry?.resolution?.tarball,
       requested:
         sourceType === "registry" && packageVersion
           ? createRegistryRequestedPackage(name, packageVersion)

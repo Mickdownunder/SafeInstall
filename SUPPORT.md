@@ -39,11 +39,12 @@ Use the command that matches the package manager and workflow you expected to us
 
 ## Known Limits
 
-- Supported package managers are npm, pnpm, and bun. yarn is not supported: yarn installs cannot be policy-checked, and the agent guard denies them.
-- No bun lockfile-aware project install analysis. `safeinstall bun install` uses manifest-based analysis of `package.json`; lockfile-aware project installs exist for npm and pnpm only.
+- Artifact-bound installation supports npm and pnpm. Bun installs fail closed until an artifact-binding adapter exists. yarn is not supported, and the agent guard denies yarn installs.
+- Install binding requires canonical SHA-512 metadata and matching lockfile entries. Global installs, explicit non-registry additions, conflicting registries, script-enabling flags, and unknown options block.
+- Explicit additions prepare a lockfile before frozen installation. Failed checks can leave manifest/lockfile changes for inspection. npm's frozen phase uses `ci`, replacing `node_modules`; shared-lockfile workspaces review all recorded importers.
 - Transitive dependency policy (opt-in via `transitive.mode`) runs only the `install-script` and `untrusted-source` checks. Transitive install-script detection works for npm lockfiles only (pnpm lockfiles do not record script presence). Release-age, typo-squat, provenance, and continuity checks apply to direct dependencies only.
-- No selective lifecycle-script execution. `allowedScripts` affects only the policy verdict; installs are still forwarded with `--ignore-scripts` while `packageManagerDefaults.<manager>.ignoreScripts` is true (the default).
+- No selective lifecycle-script execution. `allowedScripts` affects only the policy verdict; installation always disables lifecycle scripts and pnpmfile hooks, regardless of legacy `ignoreScripts` configuration.
 - Provenance verification supports GitHub Actions trusted publishers on the public Sigstore trust root only.
 - No CVE scanning and no package content or malware analysis — SafeInstall is a policy gate over registry metadata and lockfiles.
 
-Last verified: 2026-07-09
+Last verified: 2026-10-01

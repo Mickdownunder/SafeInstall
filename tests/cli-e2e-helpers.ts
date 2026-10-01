@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
 import os from "node:os";
@@ -15,6 +15,7 @@ const execFileAsync = promisify(execFile);
  * any minimumReleaseAgeHours check passes, so age is deterministic.
  */
 const FIXTURE_PUBLISH_DATE = "Mon, 01 Jan 2018 00:00:00 GMT";
+export const FIXTURE_INTEGRITY = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
 
 export interface RegistryFixture {
   url: string;
@@ -54,7 +55,7 @@ export async function startRegistryFixture(): Promise<RegistryFixture> {
       res.end(
         JSON.stringify({
           version,
-          dist: { tarball: `${base}/${name}/-/${name}-${version}.tgz` },
+          dist: { tarball: `${base}/${name}/-/${name}-${version}.tgz`, integrity: FIXTURE_INTEGRITY },
           scripts: {}
         })
       );
@@ -70,7 +71,7 @@ export async function startRegistryFixture(): Promise<RegistryFixture> {
           versions: Object.fromEntries(
             versions.map((entry) => [
               entry,
-              { version: entry, dist: { tarball: `${base}/${name}/-/${name}-${entry}.tgz` } }
+              { version: entry, dist: { tarball: `${base}/${name}/-/${name}-${entry}.tgz`, integrity: FIXTURE_INTEGRITY } }
             ])
           ),
           time: Object.fromEntries(versions.map((entry) => [entry, "2018-01-01T00:00:00.000Z"]))
@@ -94,14 +95,14 @@ export async function startRegistryFixture(): Promise<RegistryFixture> {
 }
 
 export const projectRoot = path.resolve(__dirname, "..");
-export const cliPath = path.join(projectRoot, "dist", "cli.js");
+export const cliPath = process.env.SAFEINSTALL_TEST_CLI_PATH ?? path.join(projectRoot, "dist", "cli.js");
 const tscPath = path.join(projectRoot, "node_modules", "typescript", "bin", "tsc");
 let buildPromise: Promise<void> | undefined;
 
 const tempDirs: string[] = [];
 
 export async function createTempDir(prefix: string): Promise<string> {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const tempDir = await realpath(await mkdtemp(path.join(os.tmpdir(), prefix)));
   tempDirs.push(tempDir);
   return tempDir;
 }
@@ -264,12 +265,62 @@ export async function createStubPackageManager(
     behavior?.script ??
     `const args = process.argv.slice(2);
 require("node:fs").writeFileSync(${JSON.stringify(logPath)}, args.length > 0 ? args.join("\\n") + "\\n" : "\\n");
+require("node:fs").appendFileSync(${JSON.stringify(logPath + ".calls")}, JSON.stringify(args) + "\\n");
+${exitCode === 0 ? stubLockfilePreparation(name) : ""}
 ${stdout ? `process.stdout.write(${JSON.stringify(`${stdout}\n`)});\n` : ""}${stderr ? `process.stderr.write(${JSON.stringify(`${stderr}\n`)});\n` : ""}process.exit(${exitCode});
 `;
 
   await writeStubExecutable(dir, name, script);
 
   return { dir, logPath };
+}
+
+// CLI protocol fixtures model resolution separately from the frozen install.
+// Actual archive integrity and manager behavior are covered by real-manager E2Es.
+function stubLockfilePreparation(manager: "npm" | "pnpm"): string {
+  return `
+if (args.includes("--package-lock-only") || args.includes("--lockfile-only")) {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const context = args.filter(arg => arg.startsWith("--prefix=") || arg.startsWith("--dir=")).at(-1);
+  const dir = context ? context.slice(context.indexOf("=") + 1) : process.cwd();
+  const manifestPath = path.join(dir, "package.json");
+  const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, "utf8")) : { name: "fixture", version: "1.0.0" };
+  const field = args.includes("-D") || args.includes("--save-dev") ? "devDependencies" : "dependencies";
+  const valueFlags = new Set(["-C", "--dir", "--cwd", "--prefix", "--registry", "--cache", "--store-dir", "--save-prefix"]);
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg.startsWith("-")) { if (!arg.includes("=") && valueFlags.has(arg)) index++; continue; }
+    if (["add", "install", "i"].includes(arg)) continue;
+    const match = arg.match(/^(.+)@([^@]+)$/);
+    if (!match) throw new Error("Fixture expected an exact, pinned registry argument: " + arg);
+    (manifest[field] ??= {})[match[1]] = match[2];
+  }
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  let configDir = dir;
+  while (!fs.existsSync(path.join(configDir, "safeinstall.config.json")) && path.dirname(configDir) !== configDir) configDir = path.dirname(configDir);
+  const registry = JSON.parse(fs.readFileSync(path.join(configDir, "safeinstall.config.json"), "utf8")).registryUrl;
+  const deps = { ...manifest.dependencies, ...manifest.devDependencies, ...manifest.optionalDependencies };
+  const integrity = ${JSON.stringify(FIXTURE_INTEGRITY)};
+  if (${JSON.stringify(manager)} === "npm") {
+    const packages = { "": manifest };
+    for (const [name, version] of Object.entries(deps)) packages["node_modules/" + name] = { version, integrity, resolved: registry + "/" + name + "/-/" + name + "-" + version + ".tgz" };
+    fs.writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages }));
+  } else {
+    const importer = {};
+    const packages = {};
+    for (const depField of ["dependencies", "devDependencies", "optionalDependencies"]) {
+      if (!manifest[depField]) continue;
+      importer[depField] = {};
+      for (const [name, version] of Object.entries(manifest[depField])) {
+        importer[depField][name] = { specifier: version, version };
+        packages[name + "@" + version] = { resolution: { integrity } };
+      }
+    }
+    fs.writeFileSync(path.join(dir, "pnpm-lock.yaml"), JSON.stringify({ lockfileVersion: "9.0", importers: { ".": importer }, packages }));
+  }
+}
+`;
 }
 
 export async function writeJson(filePath: string, value: unknown): Promise<void> {

@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -56,9 +56,16 @@ describe("CLI workspace/root edge cases", () => {
     });
 
     expect(result.code).toBe(0);
-    expect(result.stderr).toContain("Allowed: policy checks passed.");
+    expect(result.stderr).toContain("Policy checks passed; verifying install artifacts.");
     const loggedArgs = await readLoggedArgs(stub.logPath);
-    expect(loggedArgs).toEqual(["add", "axios@1.13.2", "-D", "--ignore-scripts"]);
+    expect(loggedArgs).toEqual(["install", `--dir=${packageDir.split(path.sep).join("/")}`, "--global=false",
+      "--frozen-lockfile", "--ignore-scripts", `--registry=${registry.url}`, "--ignore-pnpmfile"]);
+    const calls = (await readFile(stub.logPath + ".calls", "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain("axios@1.13.2");
+    expect(calls[0]).toContain("-D");
+    expect(calls[0]).toContain("--lockfile-only");
+    expect(JSON.parse(await readFile(path.join(packageDir, "package.json"), "utf8")).devDependencies.axios).toBe("1.13.2");
   });
 
   it("supports npm install with --prefix for one target package", async () => {
@@ -85,7 +92,8 @@ describe("CLI workspace/root edge cases", () => {
 
     expect(result.code).toBe(0);
     const loggedArgs = await readLoggedArgs(stub.logPath);
-    expect(loggedArgs).toEqual(["--prefix", "packages/app", "install", "axios@1.13.2", "--ignore-scripts"]);
+    expect(loggedArgs).toEqual(["--prefix", "packages/app", "ci",
+      `--prefix=${packageDir.split(path.sep).join("/")}`, "--global=false", "--ignore-scripts", `--registry=${registry.url}`]);
   });
 
   it("blocks pnpm install from a subpackage when the importer is missing from the lockfile", async () => {

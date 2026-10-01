@@ -26,7 +26,8 @@ function printHelp(): void {
   process.stdout.write(
     [
       "Usage:",
-      "  safeinstall <npm|pnpm|bun> <install-command> [...args]",
+      "  safeinstall <npm|pnpm> <install-command> [...args]",
+      "  Bun installs fail closed until artifact binding is implemented.",
       "  safeinstall check [--record]",
       "  safeinstall init [--force] [--client claude,codex,cursor] [--no-guard] [--no-lock] [--mode warn|strict]",
       "  safeinstall mcp",
