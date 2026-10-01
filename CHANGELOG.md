@@ -7,7 +7,9 @@
 - Bind npm/pnpm installs to the version, tarball URL, and SHA-512 evaluated by policy. Explicit additions prepare a lockfile with exact versions before a frozen install; shared workspace lockfiles review all recorded importers. Reject mismatched bindings, conflicting registries, script-enabling flags, global installs, and unsupported options.
 - Force lifecycle scripts off regardless of legacy configuration, and disable pnpmfile hooks.
 - Match npm's shrinkwrap precedence and prefer a workspace's nested dependency entry over its hoisted entry.
+- Read pnpm peer-context importer references against the peer-independent artifact entry, retaining SHA-512 checks for packages with peers.
 - Pass GitHub Action version inputs through a validated environment variable instead of interpolating them into shell code; disable lifecycle scripts when installing the CLI.
+- Update the development dependency lockfile and pin patched transitive versions for the optional MCP SDK and build/test tools. These overrides protect repository development; optional SDK consumers must update their own dependency graph separately.
 
 ### Breaking changes
 
