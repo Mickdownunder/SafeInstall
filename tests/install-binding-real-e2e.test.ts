@@ -15,7 +15,7 @@ const name = "binding-fixture";
 const portable = (file: string) => file.split(path.sep).join("/");
 type Attack = "none" | "tag-race" | "manifest-swap" | "bytes-swap";
 
-async function fixture(attack: Attack, manager: "npm" | "pnpm") {
+async function fixture(attack: Attack, manager: "npm" | "pnpm", withPeer = false) {
   const cwd = await createTempDir("safeinstall-artifact-e2e-");
   const marker = path.join(cwd, "script-ran");
   const archives = new Map<string, Buffer>();
@@ -24,6 +24,7 @@ async function fixture(attack: Attack, manager: "npm" | "pnpm") {
     await mkdirp(path.join(dir, "package"));
     await writeJson(path.join(dir, "package", "package.json"), {
       name, version,
+      ...(withPeer ? { peerDependencies: { "binding-peer": "1.0.0" } } : {}),
       scripts: { postinstall: `node -e "require('node:fs').writeFileSync(process.env.SAFEINSTALL_ATTACK_MARKER, 'executed')"` }
     });
     await writeFile(path.join(dir, "package", "index.js"), `module.exports = "${version}";\n`);
@@ -40,6 +41,7 @@ async function fixture(attack: Attack, manager: "npm" | "pnpm") {
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const manifest = (version: string, swap = false) => ({
       name, version, scripts: {},
+      ...(withPeer ? { peerDependencies: { "binding-peer": "1.0.0" } } : {}),
       dist: { tarball: `${base}/${name}/-/${name}-${version}.tgz`, integrity: integrity(swap ? "9.9.9" : version) }
     });
     if (url.includes("/-/")) {
@@ -70,7 +72,12 @@ async function fixture(attack: Attack, manager: "npm" | "pnpm") {
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const registry = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   await writeJson(path.join(cwd, "package.json"), { name: "binding-consumer", version: "1.0.0", private: true,
-    ...(manager === "pnpm" ? { packageManager: "pnpm@10.17.0" } : {}) });
+    ...(manager === "pnpm" ? { packageManager: "pnpm@10.17.0" } : {}),
+    ...(withPeer ? { dependencies: { "binding-peer": "file:peer" } } : {}) });
+  if (withPeer) {
+    await mkdirp(path.join(cwd, "peer"));
+    await writeJson(path.join(cwd, "peer", "package.json"), { name: "binding-peer", version: "1.0.0" });
+  }
   await writeDefaultConfig(cwd, { registryUrl: registry });
   await writeFile(path.join(cwd, "empty.npmrc"), "");
   await writeFile(path.join(cwd, "global.npmrc"), "");
@@ -202,4 +209,22 @@ describe("artifact binding with real package managers and real archives", () => 
       expect(JSON.parse(result.stdout).execution.ranPackageManager).toBe(false);
     } finally { await f.close(); }
   });
+
+  it("pnpm: peer-context snapshots retain artifact binding and reject a changed digest", async () => {
+    const f = await fixture("none", "pnpm", true);
+    try {
+      const args = ["--json", "pnpm", "add", `${name}@1.0.0`, "--store-dir", portable(path.join(f.cwd, "store"))];
+      const result = await runCli(args, { cwd: f.cwd, env: f.env });
+      expect(result.code, result.stdout + result.stderr).toBe(0);
+      const lockPath = path.join(f.cwd, "pnpm-lock.yaml");
+      const raw = await readFile(lockPath, "utf8");
+      expect(raw).toContain("1.0.0(binding-peer@");
+      expect(await exists(f.marker)).toBe(false);
+      await writeFile(lockPath, raw.replace(f.integrity, `sha512-${Buffer.alloc(64, 9).toString("base64")}`));
+      const tampered = await runCli(["--json", "pnpm", "install"], { cwd: f.cwd, env: f.env });
+      expect(tampered.code, tampered.stdout + tampered.stderr).toBe(2);
+      expect(JSON.parse(tampered.stdout).execution.ranPackageManager).toBe(false);
+      expect(await exists(f.marker)).toBe(false);
+    } finally { await f.close(); }
+  }, 30000);
 });
