@@ -69,6 +69,8 @@ describe("extracted SafeInstall plugin", () => {
     expect(inventory.packages.map(item => item.name)).toContain("@modelcontextprotocol/sdk");
     expect(inventory.packages.map(item => item.name)).not.toContain("typescript");
     expect(inventory.packages.map(item => item.name)).not.toContain("vitest");
+    const runtimePackage = JSON.parse(await readFile(path.join(plugin, "runtime", "package.json"), "utf8"));
+    expect(runtimePackage.engines.node).toBe("^22.22.2 || ^24.15.0 || >=26.0.0");
     async function walk(dir: string): Promise<void> {
       for (const entry of await readdir(dir)) {
         const file = path.join(dir, entry);

@@ -16,7 +16,6 @@ import {
 } from "node:fs/promises";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -175,7 +174,10 @@ export async function buildPlugin(options = {}) {
     throw new Error("Plugin manifest must have a valid semantic version.");
   }
   const distPlugins = path.join(project, "dist", "plugins");
-  const stageParent = await mkdtemp(path.join(os.tmpdir(), "safeinstall-plugin-build-"));
+  // Atomic renames must stay on the output volume. On Windows the checkout
+  // and OS temp directory commonly live on different drives.
+  await mkdir(distPlugins, { recursive: true });
+  const stageParent = await mkdtemp(path.join(distPlugins, ".safeinstall-stage-"));
   const stage = path.join(stageParent, "safeinstall");
   const buildOut = path.join(stageParent, "engine-dist");
   const packageDir = path.join(stage, "runtime");
@@ -184,7 +186,6 @@ export async function buildPlugin(options = {}) {
   const directRoots = new Map();
   const placements = [];
   try {
-    await mkdir(distPlugins, { recursive: true });
     await assertContainedLinks(source, source);
     await cp(source, stage, { recursive: true, dereference: true, errorOnExist: true });
     await cp(path.join(project, "LICENSE"), path.join(stage, "LICENSE"));
@@ -265,7 +266,7 @@ export async function buildPlugin(options = {}) {
     }
 
     const rootVersions = Object.fromEntries([...primary].map(([name, record]) => [name, record.version]));
-    await writeFile(path.join(packageDir, "package.json"), `${JSON.stringify({ name: "safeinstall-plugin-runtime", version: rootPackage.version, private: true, type: "commonjs", engines: rootPackage.engines, dependencies: rootVersions }, null, 2)}\n`);
+    await writeFile(path.join(packageDir, "package.json"), `${JSON.stringify({ name: "safeinstall-plugin-runtime", version: rootPackage.version, private: true, type: "commonjs", engines: { node: "^22.22.2 || ^24.15.0 || >=26.0.0" }, dependencies: rootVersions }, null, 2)}\n`);
     await writeFile(path.join(packageDir, "inventory.json"), `${JSON.stringify({ cliVersion: rootPackage.version, lockfileSha256: hash(lock), uniquePackageCount: records.size, packages: placements.sort((a, b) => a.path.localeCompare(b.path)) }, null, 2)}\n`);
     const marketplace = { name: "safeinstall-local", interface: { displayName: "SafeInstall" }, plugins: [{ name: "safeinstall", source: { source: "local", path: "./safeinstall" }, policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" }, category: "Developer Tools" }] };
     const marketplaceFile = path.join(stageParent, ".agents", "plugins", "marketplace.json");
