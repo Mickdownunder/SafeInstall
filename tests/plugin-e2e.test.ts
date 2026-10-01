@@ -12,6 +12,7 @@ const exec = promisify(execFile);
 let plugin: string;
 let runner: string;
 let engineVersion: string;
+let pluginVersion: string;
 
 async function run(args: string[], cwd: string, input?: string, env = process.env) {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
@@ -36,15 +37,29 @@ function decision(stdout: string) {
 
 beforeAll(async () => {
   engineVersion = (JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8")) as { version: string }).version;
+  pluginVersion = (JSON.parse(await readFile(path.join(projectRoot, "plugins", "safeinstall", "plugin.json"), "utf8")) as { version: string }).version;
   await exec(process.execPath, [path.join(projectRoot, "scripts", "build-plugin.mjs")], { cwd: projectRoot, timeout: 90000 });
   const extracted = await createTempDir("safeinstall-plugin-extracted-");
-  await exec("tar", ["-xzf", path.join(projectRoot, "dist", "safeinstall-plugin-0.1.0.tgz"), "-C", extracted]);
+  await exec("tar", ["-xzf", path.join(projectRoot, "dist", `safeinstall-plugin-${pluginVersion}.tgz`), "-C", extracted]);
   plugin = path.join(extracted, "safeinstall");
   runner = path.join(plugin, "scripts", "run.cjs");
 }, 100000);
 afterAll(cleanupTempDirs);
 
 describe("extracted SafeInstall plugin", () => {
+  it("ships full reviewed license texts for dependencies that omit their own license files", async () => {
+    const notices = await readFile(path.join(plugin, "THIRD_PARTY_NOTICES"), "utf8");
+    const sources = JSON.parse(await readFile(path.join(projectRoot, "scripts", "plugin-licenses", "sources.json"), "utf8")) as Array<{ name: string; version: string; file: string; sha256: string }>;
+    for (const source of sources) {
+      const text = (await readFile(path.join(projectRoot, "scripts", "plugin-licenses", source.file), "utf8")).replace(/\r\n/g, "\n");
+      expect(createHash("sha256").update(text).digest("hex")).toBe(source.sha256);
+      expect(notices).toContain(`## ${source.name}@${source.version}`);
+      expect(notices).toContain(text.trimEnd());
+    }
+    // Previously present upstream license files are retained byte-for-byte.
+    expect(await readFile(path.join(plugin, "runtime", "node_modules", "semver", "LICENSE"))).toEqual(await readFile(path.join(projectRoot, "node_modules", "semver", "LICENSE")));
+  });
+
   it("rejects unsupported Node versions before loading the engine, including fail-closed hooks", async () => {
     for (const version of ["20.19.0", "22.22.0", "22.22.1", "23.0.0", "24.14.0", "25.3.0"]) {
       // Run the actual distributed entry with only the reported version changed.

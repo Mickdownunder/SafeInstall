@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "safeinstall",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Check npm packages and install dependencies through SafeInstall's artifact-bound policy gate.",
   "author": { "name": "Cyntro Systems GmbH", "email": "office@cyntro.at" },
   "homepage": "https://safeinstall.dev",

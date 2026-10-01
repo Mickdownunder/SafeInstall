@@ -18,6 +18,7 @@ import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createThirdPartyNotices } from "./plugin-licenses.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = (file, args, options) => new Promise((resolve, reject) => {
@@ -236,6 +237,9 @@ export async function buildPlugin(options = {}) {
       catch (error) { throw new Error(`Plugin-required peer ${name} missing: ${error.message}`); }
       directRoots.set(name, await discover(name, dependencyRoot));
     }
+
+    const thirdPartyNotices = await createThirdPartyNotices(records.values());
+    await writeFile(path.join(stage, "THIRD_PARTY_NOTICES"), thirdPartyNotices);
 
     const primary = new Map([...records.values()].map((record) => [record.name, record]));
     for (const [name, record] of directRoots) primary.set(name, record);
