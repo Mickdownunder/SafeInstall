@@ -1,8 +1,15 @@
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import {
+  decisionRecordDigest,
+  decisionRecordFileName,
+  encodeDecisionRecord,
+  parseDecisionRecord,
+  type DecisionRecord
+} from "../src/decision-record";
 import { appendDecisionRecord, decisionsDirForLockfile } from "../src/decision-store";
 import { verifyDecisions } from "../src/decision-verify";
 import { bindFileAsStaged, resolveGitRepo, type GitRepoContext } from "../src/git-blob";
@@ -41,6 +48,22 @@ async function recordLockfileChange(fixture: Fixture, newContent: string): Promi
   await writeFile(path.join(fixture.dir, "pnpm-lock.yaml"), newContent);
   const after = (await bindFileAsStaged(fixture.repo, "pnpm-lock.yaml")) ?? null;
   await appendDecisionRecord(fixture.dir, createDecisionDraft({ lockfilePath: "pnpm-lock.yaml", before, after }));
+}
+
+/**
+ * What a parallel branch contributes on merge: a record at the same chain
+ * position as `fileName`, differing by `overrides`.
+ */
+async function writeSiblingOf(
+  dir: string,
+  fileName: string,
+  overrides: Partial<DecisionRecord>
+): Promise<string> {
+  const original = parseDecisionRecord(await readFile(path.join(dir, fileName)));
+  const bytes = encodeDecisionRecord({ ...original, ...overrides, chain: original.chain });
+  const siblingName = decisionRecordFileName(original.chain.seq, decisionRecordDigest(bytes));
+  await writeFile(path.join(dir, siblingName), bytes);
+  return siblingName;
 }
 
 describe("verifyDecisions", () => {
@@ -188,6 +211,58 @@ describe("verifyDecisions", () => {
     expect(result.ok).toBe(true);
     expect(result.verifiedPaths).toEqual([]);
     expect(result.infos.some((info) => info.includes("No lockfile changes"))).toBe(true);
+  });
+
+  it("verifies a chain whose merged branches left siblings identical except createdAt, and reports them", async () => {
+    const fixture = await createBaseFixture();
+    await recordLockfileChange(fixture, "lockfileVersion: 9\npackages:\n  left-pad@1.3.0: {}\n");
+    const dir = decisionsDirForLockfile(fixture.dir, "pnpm-lock.yaml");
+    const [kept] = await readdir(dir);
+    const duplicate = await writeSiblingOf(dir, present(kept), { createdAt: "2026-07-11T12:00:30.000Z" });
+    const head = commitAll(fixture.dir, "merge of two branches that ran the same install");
+
+    const result = await verifyDecisions(fixture.dir, { baseRef: fixture.base, headRef: head });
+
+    expect(result.findings).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.verifiedPaths).toEqual(["pnpm-lock.yaml"]);
+    expect(result.infos.some((info) => info.includes(duplicate) && info.includes(present(kept)))).toBe(true);
+  });
+
+  it("fails a chain forked into siblings that record different decisions, naming the files", async () => {
+    const fixture = await createBaseFixture();
+    await recordLockfileChange(fixture, "lockfileVersion: 9\npackages:\n  left-pad@1.3.0: {}\n");
+    const dir = decisionsDirForLockfile(fixture.dir, "pnpm-lock.yaml");
+    const [kept] = await readdir(dir);
+    const divergent = await writeSiblingOf(dir, present(kept), {
+      createdAt: "2026-07-11T12:00:30.000Z",
+      verdict: { decision: "block", reasons: [{ code: "too-new", message: "too new" }], notEvaluableCount: 0 }
+    });
+    const head = commitAll(fixture.dir, "merge of two branches with different decisions");
+
+    const result = await verifyDecisions(fixture.dir, { baseRef: fixture.base, headRef: head });
+
+    expect(result.ok).toBe(false);
+    const fork = result.findings.find((finding) => finding.code === "decisions-chain-fork");
+    expect(fork?.message).toContain(present(kept));
+    expect(fork?.message).toContain(divergent);
+  });
+
+  it("verifies the hand-repaired form: siblings set aside in a subdirectory are not chain records", async () => {
+    const fixture = await createBaseFixture();
+    await recordLockfileChange(fixture, "lockfileVersion: 9\npackages:\n  left-pad@1.3.0: {}\n");
+    const dir = decisionsDirForLockfile(fixture.dir, "pnpm-lock.yaml");
+    const [kept] = await readdir(dir);
+    const duplicate = await writeSiblingOf(dir, present(kept), { createdAt: "2026-07-11T12:00:30.000Z" });
+    await mkdir(path.join(dir, "gabelung"));
+    await rename(path.join(dir, duplicate), path.join(dir, "gabelung", duplicate));
+    const head = commitAll(fixture.dir, "fork resolved by hand");
+
+    const result = await verifyDecisions(fixture.dir, { baseRef: fixture.base, headRef: head });
+
+    expect(result.findings).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.infos.some((info) => info.includes(duplicate))).toBe(false);
   });
 
   it("errors on unresolvable refs and outside git repositories", async () => {

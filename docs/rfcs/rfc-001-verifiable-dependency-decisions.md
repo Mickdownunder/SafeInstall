@@ -356,6 +356,18 @@ section now so records remain comparable.
   (exclusive create, token-checked release, rename-based steal of stale
   locks) — that pattern already survived concurrent-writer review; a
   second starter fails closed with the holder's PID + start time.
+- **Parallel branches** are not serialized by any lock: two branches that
+  each append a record at the same position leave sibling records (same
+  seq, same prev) after their merge. Both readers — the local store and
+  `decisions verify` — apply one rule (`src/decision-chain.ts`): siblings
+  byte-identical except `createdAt` record the same decision, so the one a
+  later record continues, else the earliest, is the chain record and the
+  rest are reported as duplicates; siblings that differ otherwise, or of
+  which more than one was continued, fail with every file named. Repair is
+  a reviewed commit that moves the superseded siblings unchanged into a
+  subdirectory of the chain directory (evidence, not chain; neither reader
+  reads subdirectories). Choosing between different decisions is never
+  automatic.
 - **Registry mutation between S1 and S6:** irrelevant to integrity — all
   binding is to committed blob identity; CI re-observes metadata itself
   from the pinned registry root (D3).

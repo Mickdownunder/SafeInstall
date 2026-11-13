@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 
 import { DEFAULT_REGISTRY_URL } from "./config";
+import { describeResolvedDuplicate, resolveChainForks } from "./decision-chain";
 import {
   DECISION_GENESIS_DIGEST,
   DECISIONS_RELATIVE_DIR,
@@ -30,7 +31,8 @@ import {
  * - every record blob at HEAD is canonical, schema-valid, named by its
  *   digest, and stored under its lockfile path's slug directory;
  * - per lockfile path, records form one linked chain (seq continuity, digest
- *   linkage, before/after continuity);
+ *   linkage, before/after continuity); sibling records left by merged
+ *   branches resolve only when identical except createdAt (decision-chain);
  * - PR-level completeness: the set of lockfile paths changed between base
  *   and head equals the set covered by chains that span exactly base -> head
  *   (M4's unrecorded-second-lockfile is a deterministic failure);
@@ -166,11 +168,33 @@ async function readRecordsAtHead(
   return byLockfile;
 }
 
+/**
+ * Resolve sibling records from merged branches (decision-chain, the same rule
+ * the local store applies), then check linkage. Returns the linear chain, or
+ * undefined after recording why it does not verify.
+ */
 function verifyChainLinkage(
   lockfilePath: string,
-  chain: StoredAtHead[],
-  findings: DecisionVerifyFinding[]
-): boolean {
+  records: StoredAtHead[],
+  findings: DecisionVerifyFinding[],
+  infos: string[]
+): StoredAtHead[] | undefined {
+  const slugDir = records[0]?.slugDir ?? lockfilePathSlug(lockfilePath);
+  const resolution = resolveChainForks(
+    lockfilePath,
+    `${DECISIONS_RELATIVE_DIR}/${slugDir}/`,
+    DECISION_GENESIS_DIGEST,
+    records.map((entry) => ({ ...entry, label: entry.filePath }))
+  );
+  if (resolution.failure) {
+    findings.push(resolution.failure);
+    return undefined;
+  }
+  for (const resolved of resolution.duplicates) {
+    infos.push(describeResolvedDuplicate(lockfilePath, resolved));
+  }
+  const chain = resolution.chain;
+
   let prevDigest = DECISION_GENESIS_DIGEST;
   let prevAfter: DecisionBinding = null;
   for (const [index, entry] of chain.entries()) {
@@ -179,14 +203,14 @@ function verifyChainLinkage(
         code: "decisions-chain-gap",
         message: `Chain for ${lockfilePath} jumps to seq ${entry.seq} at position ${index + 1} — records were removed or renumbered.`
       });
-      return false;
+      return undefined;
     }
     if (entry.record.chain.prev !== prevDigest) {
       findings.push({
         code: "decisions-chain-broken",
         message: `Chain for ${lockfilePath} breaks at seq ${entry.seq}: prev digest does not match the preceding record.`
       });
-      return false;
+      return undefined;
     }
     if (index > 0) {
       const before = entry.record.lockfile.before;
@@ -198,13 +222,13 @@ function verifyChainLinkage(
           code: "decisions-state-discontinuity",
           message: `Chain for ${lockfilePath} at seq ${entry.seq}: 'before' state does not equal the previous record's 'after' state.`
         });
-        return false;
+        return undefined;
       }
     }
     prevDigest = entry.digest;
     prevAfter = entry.record.lockfile.after;
   }
-  return true;
+  return chain;
 }
 
 async function verifyAnchoredBinding(
@@ -332,8 +356,8 @@ export async function verifyDecisions(
   const recordsByLockfile = await readRecordsAtHead(repo, headCommit, findings);
 
   for (const lockfilePath of changed) {
-    const chain = recordsByLockfile.get(lockfilePath);
-    if (!chain || chain.length === 0) {
+    const records = recordsByLockfile.get(lockfilePath);
+    if (!records || records.length === 0) {
       findings.push({
         code: "decisions-missing",
         message:
@@ -342,7 +366,8 @@ export async function verifyDecisions(
       });
       continue;
     }
-    if (!verifyChainLinkage(lockfilePath, chain, findings)) {
+    const chain = verifyChainLinkage(lockfilePath, records, findings, infos);
+    if (!chain) {
       continue;
     }
 
@@ -396,9 +421,10 @@ export async function verifyDecisions(
 
   // Chains for unchanged lockfiles are inert history (§9): linkage is still
   // required to hold, but no base/head anchoring applies in this delta.
-  for (const [lockfilePath, chain] of recordsByLockfile) {
+  for (const [lockfilePath, records] of recordsByLockfile) {
     if (!changed.includes(lockfilePath)) {
-      if (verifyChainLinkage(lockfilePath, chain, findings)) {
+      const chain = verifyChainLinkage(lockfilePath, records, findings, infos);
+      if (chain) {
         infos.push(`${lockfilePath}: ${chain.length} record(s) of prior history verified (path unchanged in this delta).`);
       }
     }
