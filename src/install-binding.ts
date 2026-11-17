@@ -34,6 +34,110 @@ export function sha512Integrity(raw: string | undefined): string | undefined {
   return digest.length === 64 && digest.toString("base64") === encoded ? entry : undefined;
 }
 
+/**
+ * Bind lockfile registry targets to the exact artifacts returned by the
+ * registry evaluation. Check and authorization flows use this before they
+ * can report allow; install mode performs the same comparison in
+ * `verifyTargets` immediately before the frozen package-manager install.
+ */
+export function lockfileArtifactBindingReasons(
+  targets: ProjectInstallTargetsResult,
+  evaluations: PackageEvaluation[]
+): CliReason[] {
+  if (targets.issues.length > 0 || !targets.lockfilePath) {
+    return [{
+      code: "artifact-binding-failed",
+      message: `Check blocked: ${targets.issues.join(" ") || "no resolved lockfile was available for artifact binding."}`
+    }];
+  }
+
+  const reasons: CliReason[] = [];
+  for (const evaluation of evaluations) {
+    if (evaluation.requested.sourceType !== "registry") continue;
+
+    const resolved = evaluation.resolvedRegistryPackage;
+    if (!resolved) {
+      // Registry resolution failures already fail closed in the policy
+      // evaluation. Only add a binding reason if no policy reason did so.
+      if (evaluation.blockedReasons.length === 0) {
+        reasons.push({
+          code: "artifact-binding-failed",
+          message: `Check blocked: ${evaluation.requested.name} has no checked registry artifact to bind to the lockfile.`
+        });
+      }
+      continue;
+    }
+
+    const expectedIntegrity = sha512Integrity(resolved.artifact?.integrity);
+    if (!resolved.artifact || !expectedIntegrity) {
+      reasons.push({
+        code: "artifact-binding-failed",
+        message: `Check blocked: ${evaluation.requested.name} has no valid SHA-512 artifact binding in the checked registry manifest.`
+      });
+      continue;
+    }
+
+    const matches = targets.targets.filter((target) =>
+      target.requested.name === evaluation.requested.name &&
+      target.requested.requested === resolved.resolvedVersion
+    );
+    if (matches.length === 0) {
+      reasons.push({
+        code: "artifact-binding-failed",
+        message: `Check blocked: the lockfile has no target for ${evaluation.requested.name}@${resolved.resolvedVersion}.`
+      });
+      continue;
+    }
+
+    let expectedTarballUrl: string;
+    try {
+      expectedTarballUrl = new URL(resolved.artifact.tarballUrl).href;
+    } catch {
+      reasons.push({
+        code: "artifact-binding-failed",
+        message: `Check blocked: ${evaluation.requested.name} has an invalid tarball URL in the checked registry manifest.`
+      });
+      continue;
+    }
+
+    for (const target of matches) {
+      if (
+        target.requested.sourceType !== "registry" ||
+        sha512Integrity(target.integrity) !== expectedIntegrity
+      ) {
+        reasons.push({
+          code: "artifact-binding-failed",
+          message: `Check blocked: the lockfile does not bind ${evaluation.requested.name}@${resolved.resolvedVersion} to its checked registry SHA-512.`
+        });
+        break;
+      }
+
+      if (target.tarballUrl) {
+        let actualTarballUrl: string;
+        try {
+          actualTarballUrl = new URL(target.tarballUrl).href;
+        } catch {
+          reasons.push({
+            code: "artifact-binding-failed",
+            message: `Check blocked: the lockfile has an invalid tarball URL for ${evaluation.requested.name}.`
+          });
+          break;
+        }
+
+        if (actualTarballUrl !== expectedTarballUrl) {
+          reasons.push({
+            code: "artifact-binding-failed",
+            message: `Check blocked: the lockfile tarball for ${evaluation.requested.name} differs from the checked registry artifact.`
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  return reasons;
+}
+
 interface ApprovedArtifact {
   name: string;
   version: string;
