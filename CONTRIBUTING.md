@@ -19,12 +19,13 @@ pnpm install
 
 ```bash
 pnpm typecheck          # TypeScript strict-mode check
+pnpm lint               # ESLint over src/ and tests/
 pnpm test               # Run the full test suite (vitest)
 pnpm build              # Compile to dist/
 pnpm dev                # Build and run the CLI locally
 ```
 
-All three gates — typecheck, test, build — must pass before submitting a pull request.
+All four gates — typecheck, lint, test, build — must pass before submitting a pull request. CI runs the same gates on Linux, macOS, and Windows.
 
 ## Running the CLI locally
 
@@ -58,8 +59,8 @@ Examples:
 
 1. Fork the repository and create a branch from `main`.
 2. Make your changes in focused, reviewable commits.
-3. Run `pnpm typecheck && pnpm test && pnpm build` and confirm everything passes.
-4. Open a pull request against `main` with a clear title and description.
+3. Run `pnpm typecheck && pnpm lint && pnpm test && pnpm build` and confirm everything passes.
+4. Open a pull request against `main` with a clear title and description. The pull request template lists what a reviewer needs.
 5. Respond to review feedback promptly.
 
 ## What makes a good contribution
@@ -91,4 +92,4 @@ If you discover a security vulnerability, please report it privately via email t
 
 By contributing, you agree that your contributions will be licensed under the [MIT License](./LICENSE).
 
-Last verified: 2026-07-09
+Last verified: 2026-11-17
