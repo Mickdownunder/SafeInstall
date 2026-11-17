@@ -221,20 +221,46 @@ describe("evaluateTransitivePackages", () => {
     expect(result.warnings).toHaveLength(0);
   });
 
-  it("does not flag workspace/file/directory sources as untrusted", () => {
-    const localDep: TransitivePackage = {
-      name: "local",
-      version: "1.0.0",
-      sourceType: "workspace",
-      hasInstallScript: false
-    };
-    const result = evaluateTransitivePackages(
-      [localDep],
-      createConfig({
-        transitive: { mode: "block", checks: ["untrusted-source"] },
-        allowedSources: ["registry"]
-      })
-    );
-    expect(result.blockedReasons).toHaveLength(0);
-  });
+  it.each(["workspace", "file", "directory"] as const)(
+    "blocks a transitive %s source omitted from allowedSources",
+    (sourceType) => {
+      const localDep: TransitivePackage = {
+        name: "local",
+        version: "1.0.0",
+        sourceType,
+        hasInstallScript: false
+      };
+      const result = evaluateTransitivePackages(
+        [localDep],
+        createConfig({
+          transitive: { mode: "block", checks: ["untrusted-source"] },
+          allowedSources: ["registry"]
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toContain(
+        "transitive-untrusted-source"
+      );
+      expect(result.untrustedSourcePackages).toContain(`local@1.0.0 (${sourceType})`);
+    }
+  );
+
+  it.each(["workspace", "file", "directory"] as const)(
+    "allows a transitive %s source when configured",
+    (sourceType) => {
+      const localDep: TransitivePackage = {
+        name: "local",
+        version: "1.0.0",
+        sourceType,
+        hasInstallScript: false
+      };
+      const result = evaluateTransitivePackages(
+        [localDep],
+        createConfig({
+          transitive: { mode: "block", checks: ["untrusted-source"] }
+        })
+      );
+      expect(result.blockedReasons).toHaveLength(0);
+    }
+  );
 });

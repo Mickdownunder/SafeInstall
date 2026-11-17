@@ -19,10 +19,6 @@ function isPackageAllowlisted(config: SafeInstallConfig, packageName: string): b
   return config.allowedPackages.includes(packageName.toLowerCase());
 }
 
-function isSourcePolicyRelevant(sourceType: RequestedPackage["sourceType"]): boolean {
-  return sourceType !== "workspace" && sourceType !== "file" && sourceType !== "directory";
-}
-
 function allowedLifecycleScripts(
   config: SafeInstallConfig,
   packageName: string
@@ -106,10 +102,7 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
     }
   }
 
-  if (
-    isSourcePolicyRelevant(input.requested.sourceType) &&
-    !input.config.allowedSources.includes(input.requested.sourceType)
-  ) {
+  if (!input.config.allowedSources.includes(input.requested.sourceType)) {
     evaluation.blockedReasons.push({
       code: "untrusted-source",
       message: `Blocked: untrusted source (${input.requested.sourceType}).`,
@@ -122,7 +115,10 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
     priorSourceType === "registry" &&
     (input.requested.sourceType === "git" ||
       input.requested.sourceType === "url" ||
-      input.requested.sourceType === "tarball")
+      input.requested.sourceType === "tarball" ||
+      input.requested.sourceType === "workspace" ||
+      input.requested.sourceType === "file" ||
+      input.requested.sourceType === "directory")
   ) {
     evaluation.blockedReasons.push({
       code: "trust-level-dropped",

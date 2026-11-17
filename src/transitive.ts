@@ -44,16 +44,6 @@ interface PnpmLockfileTree {
   >;
 }
 
-const SOURCE_NOT_POLICY_RELEVANT: ReadonlySet<SourceType> = new Set<SourceType>([
-  "workspace",
-  "file",
-  "directory"
-]);
-
-function isSourcePolicyRelevant(sourceType: SourceType): boolean {
-  return !SOURCE_NOT_POLICY_RELEVANT.has(sourceType);
-}
-
 function extractNpmName(packageKey: string): string | undefined {
   const marker = "node_modules/";
   const index = packageKey.lastIndexOf(marker);
@@ -206,7 +196,6 @@ export function evaluateTransitivePackages(
     }
     if (
       checkUntrustedSource &&
-      isSourcePolicyRelevant(pkg.sourceType) &&
       !config.allowedSources.includes(pkg.sourceType)
     ) {
       evaluation.untrustedSourcePackages.push(`${label(pkg)} (${pkg.sourceType})`);

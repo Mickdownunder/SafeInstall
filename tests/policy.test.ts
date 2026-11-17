@@ -122,14 +122,18 @@ describe("evaluatePackage", () => {
     expect(result.blockedReasons.map((reason) => reason.code)).toContain("untrusted-source");
   });
 
-  it("does not block local workspace sources by default", () => {
+  it.each([
+    ["workspace", "workspace:*"],
+    ["file", "file:./shared.tgz"],
+    ["directory", "file:./shared"]
+  ] as const)("allows configured %s sources by default", (sourceType, requested) => {
     const result = evaluatePackage(
       createInput({
         requested: {
           name: "@repo/shared",
-          raw: "@repo/shared@workspace:*",
-          requested: "workspace:*",
-          sourceType: "workspace"
+          raw: `@repo/shared@${requested}`,
+          requested,
+          sourceType
         },
         resolvedRegistryPackage: undefined
       })
@@ -138,14 +142,39 @@ describe("evaluatePackage", () => {
     expect(result.blockedReasons.map((reason) => reason.code)).not.toContain("untrusted-source");
   });
 
-  it("does not treat registry to workspace changes as trust downgrades", () => {
+  it.each([
+    ["workspace", "workspace:*"],
+    ["file", "file:./shared.tgz"],
+    ["directory", "file:./shared"]
+  ] as const)("blocks %s sources omitted from allowedSources", (sourceType, requested) => {
+    const result = evaluatePackage(
+      createInput({
+        config: createConfig({ allowedSources: ["registry"] }),
+        requested: {
+          name: "@repo/shared",
+          raw: `@repo/shared@${requested}`,
+          requested,
+          sourceType
+        },
+        resolvedRegistryPackage: undefined
+      })
+    );
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toContain("untrusted-source");
+  });
+
+  it.each([
+    ["workspace", "workspace:*"],
+    ["file", "file:./shared.tgz"],
+    ["directory", "file:./shared"]
+  ] as const)("treats registry to %s changes as trust downgrades", (sourceType, requested) => {
     const result = evaluatePackage(
       createInput({
         requested: {
           name: "@repo/shared",
-          raw: "@repo/shared@workspace:*",
-          requested: "workspace:*",
-          sourceType: "workspace"
+          raw: `@repo/shared@${requested}`,
+          requested,
+          sourceType
         },
         priorState: {
           installedVersion: "1.0.0",
@@ -156,7 +185,7 @@ describe("evaluatePackage", () => {
       })
     );
 
-    expect(result.blockedReasons.map((reason) => reason.code)).not.toContain("trust-level-dropped");
+    expect(result.blockedReasons.map((reason) => reason.code)).toContain("trust-level-dropped");
   });
 
   it("blocks trust downgrade when scripts are newly introduced", () => {

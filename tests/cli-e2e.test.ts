@@ -167,6 +167,55 @@ packages:
       "--frozen-lockfile", "--ignore-scripts", `--registry=${registry.url}`, "--ignore-pnpmfile"]);
   });
 
+  it("blocks a project install with a local source omitted from allowedSources", async () => {
+    const cwd = await createTempDir("safeinstall-e2e-local-source-");
+    const stub = await createStubPackageManager("npm", { stdout: "should-not-run" });
+    const manifest = {
+      name: "demo",
+      version: "1.0.0",
+      packageManager: "npm@10.8.0",
+      dependencies: { "local-lib": "file:./local-lib" }
+    };
+
+    await writeJson(path.join(cwd, "package.json"), manifest);
+    await writeDefaultConfig(cwd, { allowedSources: ["registry"] });
+    await writeJson(path.join(cwd, "package-lock.json"), {
+      name: "demo",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      packages: {
+        "": manifest,
+        "node_modules/local-lib": { resolved: "local-lib", link: true },
+        "local-lib": { name: "local-lib", version: "1.0.0" }
+      }
+    });
+
+    const result = await runCli(["--json", "npm", "install"], {
+      cwd,
+      env: {
+        ...process.env,
+        PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+      }
+    });
+
+    expect(result.code).toBe(2);
+    const payload = JSON.parse(result.stdout);
+    expect(payload).toMatchObject({
+      mode: "install",
+      decision: "block",
+      execution: { ranPackageManager: false }
+    });
+    expect(payload.reasons.map((reason: { code: string }) => reason.code)).toContain(
+      "untrusted-source"
+    );
+    expect(payload.affectedPackages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "local-lib", sourceType: "file" })
+      ])
+    );
+    await expect(readFile(stub.logPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("captures package manager output in json mode for allowed installs", async () => {
     const cwd = await createTempDir("safeinstall-e2e-json-");
     const stub = await createStubPackageManager("npm", {

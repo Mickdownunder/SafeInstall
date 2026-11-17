@@ -47,6 +47,28 @@ function lockfileWith(transitive: Record<string, unknown>): string {
 }
 
 describe("transitive evaluation through runCheckFlow", () => {
+  it("blocks a direct local source omitted from allowedSources", async () => {
+    const cwd = await createProject({
+      "package.json": PACKAGE_JSON,
+      "package-lock.json": lockfileWith({}),
+      "safeinstall.config.json": JSON.stringify({
+        minimumReleaseAgeHours: 0,
+        allowedSources: ["registry"]
+      })
+    });
+
+    const result = await runCheckFlow(cwd, ["check"]);
+
+    expect(result.decision).toBe("block");
+    expect(result.exitCode).toBe(2);
+    expect(result.reasons.map((reason) => reason.code)).toContain("untrusted-source");
+    expect(result.affectedPackages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "local-lib", sourceType: "file" })
+      ])
+    );
+  });
+
   it("blocks a transitive dependency with an install script when configured", async () => {
     const cwd = await createProject({
       "package.json": PACKAGE_JSON,
