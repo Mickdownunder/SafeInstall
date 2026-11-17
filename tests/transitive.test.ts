@@ -75,6 +75,11 @@ describe("collectNpmTransitivePackages", () => {
         version: "2.0.0",
         resolved: "git+ssh://git@github.com/evil/from-git.git#abc"
       },
+      "node_modules/integrity-pinned-tarball": {
+        version: "1.0.0",
+        resolved: "HTTPS://attacker.example/pkg-1.0.0.tgz",
+        integrity: "sha512-attacker-controlled"
+      },
       "node_modules/linked": { link: true, resolved: "" }
     }
   };
@@ -82,7 +87,7 @@ describe("collectNpmTransitivePackages", () => {
   it("collects transitive packages excluding root, direct deps, and links", () => {
     const packages = collectNpmTransitivePackages(lockfile, new Set(["axios"]));
     const names = packages.map((p) => p.name).sort();
-    expect(names).toEqual(["from-git", "sketchy"]);
+    expect(names).toEqual(["from-git", "integrity-pinned-tarball", "sketchy"]);
   });
 
   it("reads hasInstallScript from the lockfile entry", () => {
@@ -98,6 +103,12 @@ describe("collectNpmTransitivePackages", () => {
     const fromGit = packages.find((p) => p.name === "from-git");
     expect(fromGit?.sourceType).toBe("git");
   });
+
+  it("does not treat attacker-supplied integrity as registry provenance", () => {
+    const packages = collectNpmTransitivePackages(lockfile, new Set());
+    const pinnedTarball = packages.find((p) => p.name === "integrity-pinned-tarball");
+    expect(pinnedTarball?.sourceType).toBe("tarball");
+  });
 });
 
 describe("collectPnpmTransitivePackages", () => {
@@ -106,7 +117,10 @@ describe("collectPnpmTransitivePackages", () => {
       "axios@1.14.0": { resolution: { integrity: "sha512-x" } },
       "lodash@4.17.21": { resolution: { integrity: "sha512-y" } },
       "from-tarball@1.0.0": {
-        resolution: { tarball: "https://evil.example.com/pkg-1.0.0.tgz" }
+        resolution: {
+          tarball: "https://evil.example.com/pkg-1.0.0.tgz",
+          integrity: "sha512-attacker-controlled"
+        }
       }
     }
   };
