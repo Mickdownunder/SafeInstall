@@ -1,6 +1,7 @@
 import { mapConcurrent } from "./async";
 import { evaluateContinuity } from "./continuity";
 import { DiskCache } from "./disk-cache";
+import { LocalSourceClassifier } from "./local-source";
 import { loadProjectDependencyState } from "./project-state";
 import { evaluatePackage } from "./policy";
 import { verifyProvenance } from "./provenance";
@@ -50,6 +51,7 @@ export async function evaluateRequestedPackages(
   sourceBaseline: DependencySourceBaseline = configuredSourceBaseline(config)
 ): Promise<PackageEvaluation[]> {
   const now = new Date();
+  const localSources = new LocalSourceClassifier(projectDir);
   const provenanceCache = new DiskCache({ ttlMs: 60 * 60 * 1000 });
 
   return mapConcurrent(
@@ -104,6 +106,7 @@ export async function evaluateRequestedPackages(
         continuityResult = await evaluateContinuity({
           packageName: requested.name,
           targetVersion: resolvedRegistryPackage.resolvedVersion,
+          targetArtifactIntegrity: resolvedRegistryPackage.artifact?.integrity,
           registryUrl: config.registryUrl,
           config: config.continuity,
           diskCache: provenanceCache,
@@ -117,6 +120,7 @@ export async function evaluateRequestedPackages(
         now,
         priorState,
         priorSource: priorSourceEvidence(requested.name, sourceBaseline),
+        localSource: await localSources.classify(requested),
         resolvedRegistryPackage,
         priorLifecycleScripts,
         provenanceResult,

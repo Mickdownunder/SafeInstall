@@ -64,7 +64,7 @@ describe("createDefaultContinuityDependencies", () => {
   it("fetches version history instead of trusting planted disk history", async () => {
     const diskCache = await createDiskCache();
     await diskCache.setJson(
-      "registry-version-history-v1",
+      "registry-version-history-v2",
       "https://registry.npmjs.org|demo",
       [{ version: "9.9.9", publishedAt: "2020-01-01T00:00:00.000Z" }]
     );
@@ -184,6 +184,41 @@ describe("evaluateContinuity", () => {
     expect(result.status).toBe("consistent");
   });
 
+  it("binds baseline and target identities to their artifact integrity", async () => {
+    const boundIdentities: Array<{ version: string; artifactIntegrity: string | undefined }> = [];
+    const integrityHistory: VersionRecord[] = history.map((record) => ({
+      ...record,
+      artifactIntegrity: `sha512-${record.version}`
+    }));
+    const bindingDeps: ContinuityDependencies = {
+      async fetchVersionHistory() {
+        return integrityHistory;
+      },
+      async fetchIdentity(_packageName, identityVersion, _registryUrl, _signal, artifactIntegrity) {
+        boundIdentities.push({ version: identityVersion, artifactIntegrity });
+        return provFrom("demo/demo");
+      }
+    };
+
+    const result = await evaluateContinuity({
+      packageName: "demo",
+      targetVersion: "1.3.0",
+      targetArtifactIntegrity: "sha512-resolved-target",
+      registryUrl: "https://registry.npmjs.org",
+      config: config(),
+      diskCache: await createDiskCache(),
+      deps: bindingDeps
+    });
+
+    expect(result.status).toBe("consistent");
+    expect(boundIdentities).toEqual([
+      { version: "1.2.0", artifactIntegrity: "sha512-1.2.0" },
+      { version: "1.1.0", artifactIntegrity: "sha512-1.1.0" },
+      { version: "1.0.0", artifactIntegrity: "sha512-1.0.0" },
+      { version: "1.3.0", artifactIntegrity: "sha512-resolved-target" }
+    ]);
+  });
+
   it("returns no-baseline when the package was never reliably provenance-bearing", async () => {
     // Only one of three baseline versions had provenance -> rate < 0.5
     const result = await run("1.3.0", {
@@ -230,5 +265,163 @@ describe("evaluateContinuity", () => {
 
     expect(result.status).toBe("unevaluated");
     expect(result.error).toContain("registry unreachable");
+  });
+});
+
+describe("evaluateContinuity with unsigned attestation payloads", () => {
+  const DIGEST = Buffer.alloc(64, 9);
+  const INTEGRITY = `sha512-${DIGEST.toString("base64")}`;
+
+  // A bundle is "genuine" only when its signature field says so; the stub
+  // verifier stands in for Sigstore, which rejects every forged payload.
+  function bundleFor(packageName: string, v: string, repo: string, signature: string) {
+    const statement = {
+      _type: "https://in-toto.io/Statement/v1",
+      predicateType: "https://slsa.dev/provenance/v1",
+      subject: [{ name: `pkg:npm/${packageName}@${v}`, digest: { sha512: DIGEST.toString("hex") } }],
+      predicate: {
+        buildDefinition: {
+          externalParameters: {
+            workflow: {
+              repository: `https://github.com/${repo}`,
+              ref: "refs/tags/v1",
+              path: ".github/workflows/publish.yml"
+            }
+          }
+        }
+      }
+    };
+    return {
+      attestations: [
+        {
+          predicateType: "https://slsa.dev/provenance/v1",
+          bundle: {
+            mediaType: "application/vnd.dev.sigstore.bundle+json;version=0.2",
+            dsseEnvelope: {
+              payload: Buffer.from(JSON.stringify(statement)).toString("base64"),
+              payloadType: "application/vnd.in-toto+json",
+              signatures: [{ sig: signature }]
+            }
+          }
+        }
+      ]
+    };
+  }
+
+  type StubBundle = { dsseEnvelope?: { signatures: Array<{ sig: string }> } };
+
+  const history = ["1.0.0", "1.1.0", "1.2.0", "1.3.0"].map((v, index) => ({
+    version: v,
+    publishedAt: new Date(`2026-0${index + 1}-01T00:00:00.000Z`),
+    artifactIntegrity: INTEGRITY
+  }));
+
+  async function run(
+    attestationFor: (v: string) => ReturnType<typeof bundleFor> | null,
+    verifyBundle: (bundle: StubBundle) => Promise<void>
+  ) {
+    const { fetchAttestationIdentity } = await import("../src/provenance");
+    const dependencies: ContinuityDependencies = {
+      async fetchVersionHistory() {
+        return history;
+      },
+      async fetchIdentity(packageName, v, registryUrl, signal, artifactIntegrity) {
+        return fetchAttestationIdentity({
+          packageName,
+          version: v,
+          artifactIntegrity,
+          registryUrl,
+          signal,
+          deps: {
+            fetchAttestations: async () => attestationFor(v),
+            verifyBundle: verifyBundle as never
+          }
+        });
+      }
+    };
+    return evaluateContinuity({
+      packageName: "demo",
+      targetVersion: "1.3.0",
+      targetArtifactIntegrity: INTEGRITY,
+      registryUrl: "https://registry.npmjs.org",
+      config: config(),
+      diskCache: await createDiskCache(),
+      deps: dependencies
+    });
+  }
+
+  const sigstoreStub = async (bundle: StubBundle) => {
+    if (bundle.dsseEnvelope?.signatures[0]?.sig !== "genuine") {
+      throw new Error("signature verification failed");
+    }
+  };
+
+  it("does not let a forged unsigned attestation make a malicious version look continuous", async () => {
+    const result = await run(
+      (v) =>
+        v === "1.3.0"
+          ? bundleFor("demo", v, "demo/demo", "forged") // names the legitimate repository
+          : bundleFor("demo", v, "demo/demo", "genuine"),
+      sigstoreStub
+    );
+    expect(result.status).toBe("provenance-downgrade");
+  });
+
+  it("does not let forged baseline attestations make a legitimate version look like a publisher change", async () => {
+    const result = await run(
+      (v) =>
+        v === "1.3.0"
+          ? bundleFor("demo", v, "demo/demo", "genuine")
+          : v === "1.2.0"
+            ? bundleFor("demo", v, "evil/demo", "forged")
+            : bundleFor("demo", v, "demo/demo", "genuine"),
+      sigstoreStub
+    );
+    expect(result.status).toBe("consistent");
+    expect(result.baselineRepository).toBe("demo/demo");
+  });
+
+  it("does not let an entirely forged baseline create a publisher change for a legitimate version", async () => {
+    const result = await run(
+      (v) =>
+        v === "1.3.0"
+          ? bundleFor("demo", v, "demo/demo", "genuine")
+          : bundleFor("demo", v, "evil/demo", "forged"),
+      sigstoreStub
+    );
+    expect(result.status).toBe("no-baseline");
+  });
+
+  it("still detects a genuinely signed publisher change", async () => {
+    const result = await run(
+      (v) =>
+        v === "1.3.0"
+          ? bundleFor("demo", v, "other/demo", "genuine")
+          : bundleFor("demo", v, "demo/demo", "genuine"),
+      sigstoreStub
+    );
+    expect(result.status).toBe("identity-discontinuity");
+  });
+
+  it("is unevaluated, not a pass or a block, when verification tooling is unavailable", async () => {
+    const { SigstoreToolingUnavailableError } = await import("../src/provenance");
+    const result = await run(
+      (v) => bundleFor("demo", v, "demo/demo", "genuine"),
+      async () => {
+        throw new SigstoreToolingUnavailableError();
+      }
+    );
+    expect(result.status).toBe("unevaluated");
+    expect(result.error).toContain("sigstore");
+  });
+
+  it("is unevaluated when the Sigstore trust root cannot be fetched (offline)", async () => {
+    const result = await run(
+      (v) => bundleFor("demo", v, "demo/demo", "genuine"),
+      async () => {
+        throw Object.assign(new Error("error refreshing TUF metadata"), { name: "TUFError" });
+      }
+    );
+    expect(result.status).toBe("unevaluated");
   });
 });

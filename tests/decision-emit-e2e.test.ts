@@ -223,6 +223,8 @@ describe("decision record emission (e2e)", () => {
       ["npm", "install", `https://user:${marker}@example.test/x.tgz`],
       ["npm", "install", `foo@https://${marker}@example.test/x.tgz`],
       ["npm", "install", "left-pad", `--//example.test/:_authToken=${marker}`],
+      ["npm", "install", "left-pad", `--registry=https://user:${marker}@example.test/`],
+      ["npm", "install", "left-pad", "--registry", `https://user:${marker}@example.test/`],
       ["check", `https://example.test/x.tgz?access_token=${marker}`]
     ]) {
       for (const json of [false, true]) {
@@ -232,6 +234,72 @@ describe("decision record emission (e2e)", () => {
         expect(result.stdout + result.stderr).toContain(".npmrc");
       }
     }
+  });
+
+  it("fails closed on a credential-bearing registryUrl and writes no secret to output or records", async () => {
+    const marker = "s3cr3tMARK";
+    const stub = await createStubPackageManager("npm");
+    for (const registryUrl of [
+      registry.url.replace("http://", `http://deploy:${marker}@`),
+      `${registry.url}/?token=${marker}`,
+      `${registry.url}/?custom=${marker}`,
+      `${registry.url}/#${marker}`
+    ]) {
+      const project = await createGitProject();
+      await writeDefaultConfig(project, { registryUrl });
+      commitAll(project, "base");
+      const env = {
+        ...process.env,
+        PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+      };
+
+      for (const args of [
+        ["check", "left-pad@1.13.2", "--record", "--json"],
+        ["npm", "install", "left-pad@1.13.2"],
+        ["npm", "install", "left-pad@1.13.2", "--json"]
+      ]) {
+        const result = await runCli(args, { cwd: project, env });
+        expect(result.code).not.toBe(0);
+        expect(result.stdout + result.stderr).not.toContain(marker);
+        expect(result.stdout + result.stderr).toContain("registryUrl must not contain credentials");
+      }
+
+      const files = (await readdir(project, { recursive: true, withFileTypes: true })).filter(
+        (entry) => entry.isFile() && !entry.parentPath.includes(`${path.sep}.git`)
+      );
+      for (const file of files) {
+        if (file.name === "safeinstall.config.json") continue;
+        expect(await readFile(path.join(file.parentPath, file.name), "utf8")).not.toContain(marker);
+      }
+    }
+  });
+
+  it("ignores credentials in ambient registry environment variables and .npmrc", async () => {
+    const marker = "s3cr3tMARK";
+    const project = await createGitProject();
+    await writeFile(
+      path.join(project, ".npmrc"),
+      `registry=${registry.url.replace("http://", `http://u:${marker}@`)}\n`
+    );
+    const stub = await createStubPackageManager("npm");
+    commitAll(project, "base");
+    const credentialed = registry.url.replace("http://", `http://u:${marker}@`);
+    const env = {
+      ...process.env,
+      npm_config_registry: credentialed,
+      NPM_CONFIG_REGISTRY: credentialed,
+      PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+    };
+
+    const outputs: string[] = [];
+    for (const args of [["npm", "install", "left-pad@1.13.2", "--json"], ["check", "--record", "--json"]]) {
+      const result = await runCli(args, { cwd: project, env });
+      outputs.push(result.stdout, result.stderr);
+    }
+    expect(outputs.join("\n")).not.toContain(marker);
+    const chain = await readDecisionChain(project, "package-lock.json");
+    expect(chain.length).toBeGreaterThan(0);
+    expect(JSON.stringify(chain)).not.toContain(marker);
   });
 
   it("marks file: sources with explicit non-registry findings that never read clean (D4)", async () => {

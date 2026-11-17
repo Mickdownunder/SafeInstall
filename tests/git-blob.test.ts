@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -13,7 +13,7 @@ import {
   readBlob,
   resolveGitRepo
 } from "../src/git-blob";
-import { commitAll, createRepoFixture, git } from "./helpers/git-fixture";
+import { commitAll, commitRawPaths, createRepoFixture, git } from "./helpers/git-fixture";
 
 const tempDirs: string[] = [];
 
@@ -92,7 +92,6 @@ describe("tree helpers", () => {
     const base = commitAll(dir, "base");
 
     await writeFile(path.join(dir, "pnpm-lock.yaml"), "v: 2\n");
-    const { mkdir } = await import("node:fs/promises");
     await mkdir(path.join(dir, ".safeinstall", "decisions", "slug"), { recursive: true });
     await writeFile(path.join(dir, ".safeinstall", "decisions", "slug", "000001-abc.json"), "{}");
     const head = commitAll(dir, "change");
@@ -106,5 +105,65 @@ describe("tree helpers", () => {
       ".safeinstall/decisions/slug/000001-abc.json"
     ]);
     expect(await blobOidAtRef(repo, base, "missing.txt")).toBeUndefined();
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "preserves paths that Git quotes or splits in line-delimited output",
+    async () => {
+      const { dir } = await createRepoFixture(tempDirs);
+      const parentNames = ["unicode-雪", "tab-\t", "newline-\n", 'quote-"', "backslash-\\"];
+      const repoPaths = parentNames.map((parent) => `workspace/${parent}/package-lock.json`).sort();
+
+      for (const repoPath of repoPaths) {
+        await mkdir(path.dirname(path.join(dir, repoPath)), { recursive: true });
+        await writeFile(path.join(dir, repoPath), '{"lockfileVersion":3}\n');
+      }
+      const base = commitAll(dir, "base with unusually named workspaces");
+
+      for (const repoPath of repoPaths) {
+        await writeFile(path.join(dir, repoPath), '{"lockfileVersion":3,"packages":{"evil":{}}}\n');
+      }
+      const head = commitAll(dir, "change unusually named workspace lockfiles");
+      const repo = (await resolveGitRepo(dir))!;
+
+      expect(await changedPaths(repo, base, head)).toEqual(repoPaths);
+      expect(await pathsAtRef(repo, head, "workspace")).toEqual(repoPaths);
+    }
+  );
+
+  it("rejects repository paths that are not valid UTF-8", async () => {
+    const { dir } = await createRepoFixture(tempDirs);
+    const lockfilePath = Buffer.concat([
+      Buffer.from("workspace/invalid-"),
+      Buffer.from([0xff]),
+      Buffer.from("/package-lock.json")
+    ]);
+    const base = commitRawPaths(dir, [[lockfilePath, '{"lockfileVersion":3}\n']], "base with non-UTF-8 path");
+    const head = commitRawPaths(
+      dir,
+      [[lockfilePath, '{"lockfileVersion":3,"packages":{"evil":{}}}\n']],
+      "change non-UTF-8 path"
+    );
+    const repo = (await resolveGitRepo(dir))!;
+
+    await expect(changedPaths(repo, base, head)).rejects.toThrow("not valid UTF-8");
+    await expect(pathsAtRef(repo, head, "workspace")).rejects.toThrow("not valid UTF-8");
+    // A caller that names the final components it cares about still fails
+    // closed for a lockfile under a non-UTF-8 directory.
+    await expect(changedPaths(repo, base, head, new Set(["package-lock.json"]))).rejects.toThrow(
+      "not valid UTF-8"
+    );
+  });
+
+  it("skips unrelated non-UTF-8 paths when the caller names the relevant file names", async () => {
+    const { dir } = await createRepoFixture(tempDirs);
+    const oddFile = Buffer.concat([Buffer.from("legacy-"), Buffer.from([0xe9]), Buffer.from(".txt")]);
+    const lockfile = Buffer.from("pnpm-lock.yaml");
+    const base = commitRawPaths(dir, [[oddFile, "a\n"], [lockfile, "v: 1\n"]], "base");
+    const head = commitRawPaths(dir, [[oddFile, "b\n"], [lockfile, "v: 2\n"]], "change");
+    const repo = (await resolveGitRepo(dir))!;
+
+    expect(await changedPaths(repo, base, head, new Set(["pnpm-lock.yaml"]))).toEqual(["pnpm-lock.yaml"]);
+    await expect(changedPaths(repo, base, head)).rejects.toThrow("not valid UTF-8");
   });
 });
