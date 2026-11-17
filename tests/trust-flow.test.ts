@@ -137,6 +137,10 @@ describe("runTrustLockFlow", () => {
     await seedProjectAt(repo);
     await runTrustLockFlow(repo, ["trust", "lock"]);
     const sub = await seedProjectAt(path.join(repo, "frontend"));
+    // The nested AGENTS.md is itself on the repository's trust surface now and
+    // would be unapproved drift against the root lock; this test is about the
+    // second lock, so keep the subfolder free of instruction files.
+    await rm(path.join(sub, "AGENTS.md"));
 
     const result = await runTrustLockFlow(sub, ["trust", "lock"]);
 

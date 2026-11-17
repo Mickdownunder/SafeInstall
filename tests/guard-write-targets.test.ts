@@ -110,13 +110,40 @@ const DENIED: string[] = [
   "source x && echo {} > .mcp.json",
   "cd $D && rm trust-surface.lock",
   "cd $D && echo x > AGENTS.md",
-  "cd $(mktemp -d) && echo x > settings.json"
+  "cd $(mktemp -d) && echo x > settings.json",
+  // Nested instruction files, at any depth.
+  "echo x > packages/app/AGENTS.md",
+  "cd packages/app && echo x > CLAUDE.md",
+  "cd sub && echo x > AGENTS.md",
+  "cd sub && echo x > .cursorrules",
+  "rm sub/.cursorrules",
+  "echo x > a/b/.cursor/rules/r.mdc",
+  "cd a/b/.cursor/rules && echo x > r.mdc",
+  "rm -rf packages/app/.cursor",
+  "rm -rf packages/*/.cursor",
+  "echo x > $X/CLAUDE.md",
+  "echo x > packages/*/AGENTS.md",
+  "rm packages/app/AGENTS.m?",
+  "sed -i s/a/b/ packages/app/CLAUDE.md",
+  "echo x > .claude/CLAUDE.md",
+  "echo x > .claude/rules/style.md",
+  "rm -rf .claude/rules"
 ];
 
 const ALLOWED: string[] = [
   // Nested paths and other directories are not protected.
   "cd /tmp && echo x > settings.json",
   "cd sub && echo x > .mcp.json",
+  "cd sub && echo x > safeinstall.config.json",
+  "echo x > packages/app/README.md",
+  "echo x > node_modules/pkg/AGENTS.md",
+  "cd node_modules && echo x > AGENTS.md",
+  "echo x > /tmp/AGENTS.md",
+  "cat packages/app/AGENTS.md",
+  "echo x > docs/CLAUDE.md.bak",
+  "echo x > sub/.cursor/mcp.json",
+  "rm -rf packages/*",
+  "echo x > packages/*/README.md",
   "cd src && echo x > notes.txt",
   "cd sub && rm -rf node_modules",
   "cd docs && sed -i s/a/b/ README.md",

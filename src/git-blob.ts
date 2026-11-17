@@ -266,6 +266,40 @@ export async function pathsAtRef(repo: GitRepoContext, ref: string, prefix: stri
   return decodeGitPaths(output, args);
 }
 
+/**
+ * Every file in the working tree that git tracks or could track (tracked plus
+ * untracked-but-not-ignored), as repository-relative POSIX paths below `cwd`,
+ * from ONE git invocation. A tracked file that was deleted from disk is still
+ * listed; callers check existence. Rejects when `cwd` is not in a repository
+ * or git fails. Paths that are not valid UTF-8 are skipped unless their final
+ * component is in `relevantNames`, in which case the call rejects.
+ */
+/**
+ * Paths of the gitlinks (submodules) recorded in the index of the repository
+ * that contains `cwd`, relative to `cwd`.
+ */
+export async function listGitlinks(cwd: string): Promise<string[]> {
+  const args = ["ls-files", "-z", "--stage"];
+  const output = (await runGit(cwd, args)).toString("utf8");
+  const gitlinks: string[] = [];
+  for (const record of output.split("\0")) {
+    // "<mode> <object> <stage>\t<path>"
+    const tab = record.indexOf("\t");
+    if (tab !== -1 && record.startsWith("160000 ")) {
+      gitlinks.push(record.slice(tab + 1));
+    }
+  }
+  return gitlinks;
+}
+
+export async function listWorkingTreeFiles(
+  cwd: string,
+  relevantNames?: ReadonlySet<string>
+): Promise<string[]> {
+  const args = ["ls-files", "-z", "--cached", "--others", "--exclude-standard"];
+  return decodeGitPaths(await runGit(cwd, args), args, relevantNames);
+}
+
 /** Resolve a revision expression to a full commit id, or undefined. */
 export async function resolveCommit(repo: GitRepoContext, ref: string): Promise<string | undefined> {
   try {
