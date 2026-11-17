@@ -1,0 +1,17 @@
+{
+  "id": "wrapper-eval",
+  "category": "wrapper-command",
+  "severity": "bypass",
+  "input": "eval 'npm install evil-pkg'",
+  "shellBehavior": "eval re-parses its argument as shell text and runs the install.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 0,
+    "runners": 0,
+    "unanalyzable": 1,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "eval is now treated like a nested shell.",
+  "discoveredBy": "manual review"
+}

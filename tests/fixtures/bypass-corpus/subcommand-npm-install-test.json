@@ -1,0 +1,17 @@
+{
+  "id": "subcommand-npm-install-test",
+  "category": "unrouted-subcommand",
+  "severity": "bypass",
+  "input": "npm it evil-pkg",
+  "shellBehavior": "Installs the package like npm install, then runs the test script.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 0,
+    "runners": 0,
+    "unanalyzable": 1,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "install-test and its aliases were unknown subcommands and fell through as non-installs.",
+  "discoveredBy": "manual review"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "subcommand-pnpm-up",
+  "category": "unrouted-subcommand",
+  "severity": "bypass",
+  "input": "pnpm up --latest",
+  "shellBehavior": "Rewrites every dependency to its newest release and installs it.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 0,
+    "runners": 0,
+    "unanalyzable": 1,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "See subcommand-npm-update.",
+  "discoveredBy": "manual review"
+}

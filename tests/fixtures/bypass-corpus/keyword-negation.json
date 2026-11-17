@@ -1,0 +1,17 @@
+{
+  "id": "keyword-negation",
+  "category": "shell-keyword",
+  "severity": "bypass",
+  "input": "! npm install evil-pkg",
+  "shellBehavior": "The pipeline negation only inverts the exit status; the install runs.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "See keyword-if-then.",
+  "discoveredBy": "manual review"
+}
