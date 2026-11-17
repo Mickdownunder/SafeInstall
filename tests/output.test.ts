@@ -28,6 +28,44 @@ function createResult(overrides: Partial<CliResult> = {}): CliResult {
 }
 
 describe("writeCliResult", () => {
+  it("redacts every credential-bearing structured output copy", () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const secret = "top-secret";
+    const requested = `git+https://user:${secret}@example.test/repo.git?token=${secret}`;
+
+    writeCliResult(
+      createResult({
+        command: ["npm", "install", requested, "--password", secret],
+        commandString: `safeinstall npm install ${requested} --password ${secret}`,
+        reasons: [{ code: "blocked", message: `Blocked ${requested}` }],
+        warnings: [`Warning for ${requested}`],
+        infos: [`Info for ${requested}`],
+        affectedPackages: [
+          {
+            name: requested,
+            requested,
+            sourceType: "git",
+            reasons: [{ code: "untrusted-source", message: `Blocked ${requested}` }],
+            warnings: [`Warning for ${requested}`],
+            infos: []
+          }
+        ],
+        execution: {
+          ranPackageManager: true,
+          stdout: `Fetched ${requested}`,
+          stderr: `Rejected ${requested}`
+        }
+      }),
+      true
+    );
+
+    const serialized = String(present(writeSpy.mock.calls[0])[0]);
+    expect(serialized).not.toContain(secret);
+    expect(serialized).toContain("[REDACTED]");
+
+    writeSpy.mockRestore();
+  });
+
   it("writes stable JSON output in json mode", () => {
     const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
 
