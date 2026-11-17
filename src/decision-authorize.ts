@@ -4,6 +4,7 @@ import { loadConfig } from "./config";
 import { verifyDecisions, type DecisionVerifyFinding } from "./decision-verify";
 import { evaluateRequestedPackages } from "./evaluations";
 import { bindFileAsStaged, blobOidAtRef, resolveCommit, resolveGitRepo } from "./git-blob";
+import { lockfileArtifactBindingReasons } from "./install-binding";
 import {
   discoverProjectInstallScope,
   inferProjectInstallTargetsForCheck,
@@ -338,6 +339,7 @@ export async function authorizeDecisions(
     });
     appendReasons([
       ...evaluations.flatMap((evaluation) => evaluation.blockedReasons),
+      ...(projectTargets ? lockfileArtifactBindingReasons(projectTargets, evaluations) : []),
       ...transitive.blockedReasons
     ]);
     warnings.push(...evaluations.flatMap((evaluation) => evaluation.warnings), ...transitive.warnings);
@@ -363,7 +365,10 @@ export async function authorizeDecisions(
         registryClient,
         config
       );
-      appendReasons(evaluations.flatMap((evaluation) => evaluation.blockedReasons));
+      appendReasons([
+        ...evaluations.flatMap((evaluation) => evaluation.blockedReasons),
+        ...lockfileArtifactBindingReasons(importer.targets, evaluations)
+      ]);
       warnings.push(...evaluations.flatMap((evaluation) => evaluation.warnings));
     }
     const directPackages = loaded.targets.targets.map((target) => target.requested);
