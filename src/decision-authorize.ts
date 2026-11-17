@@ -299,17 +299,27 @@ export async function authorizeDecisions(
     reasons.push(...entries.map((reason) => ({ code: reason.code, message: reason.message })));
   };
 
-  if (verified.verifiedPaths.length === 0) {
-    // Preserve the existing no-lockfile-delta behavior: authorization still
-    // performs a fresh root-project check even though no coverage is emitted.
-    const projectTargets = await inferProjectInstallTargetsForCheck(repo.root, repo.root);
-    if (projectTargets?.issues.length) {
-      return {
-        ok: false,
-        findings: projectTargets.issues.map((message) => ({ code: "decisions-project-state", message })),
-        infos: []
-      };
-    }
+  // The repository-root project is always evaluated, whether or not its own
+  // lockfile changed in the range: a root without a lockfile can gain a
+  // disallowed dependency while only nested lockfiles carry decision records.
+  // The one exception is a root lockfile that is itself a verified scope; the
+  // scope evaluation below already covers it, so it is not evaluated twice.
+  const projectTargets = await inferProjectInstallTargetsForCheck(repo.root, repo.root);
+  if (projectTargets?.issues.length) {
+    return {
+      ok: false,
+      findings: projectTargets.issues.map((message) => ({ code: "decisions-project-state", message })),
+      infos: []
+    };
+  }
+  const rootLockfileCoveredByScope =
+    projectTargets?.lockfilePath !== undefined &&
+    preparedScopes.some(
+      (scope) =>
+        scope.loaded !== undefined &&
+        path.resolve(scope.loaded.lockfilePath) === path.resolve(projectTargets.lockfilePath as string)
+    );
+  if (!rootLockfileCoveredByScope) {
     const requestedPackages = projectTargets
       ? projectTargets.targets.map((target) => target.requested)
       : Object.entries(await loadManifestDependencies(repo.root)).map(([name, spec]) =>
@@ -331,39 +341,39 @@ export async function authorizeDecisions(
       ...transitive.blockedReasons
     ]);
     warnings.push(...evaluations.flatMap((evaluation) => evaluation.warnings), ...transitive.warnings);
-  } else {
-    for (const scope of preparedScopes) {
-      const loaded = scope.loaded;
-      if (!loaded) {
-        return {
-          ok: false,
-          findings: [{
-            code: "decisions-project-state",
-            message: `${scope.lockfilePath} has no loaded evaluation scope.`
-          }],
-          infos: []
-        };
-      }
-      for (const importer of loaded.importers) {
-        const requestedPackages = importer.targets.targets.map((target) => target.requested);
-        const evaluations = await evaluateRequestedPackages(
-          importer.packageDir,
-          requestedPackages,
-          registryClient,
-          config
-        );
-        appendReasons(evaluations.flatMap((evaluation) => evaluation.blockedReasons));
-        warnings.push(...evaluations.flatMap((evaluation) => evaluation.warnings));
-      }
-      const directPackages = loaded.targets.targets.map((target) => target.requested);
-      const transitive = await evaluateTransitiveDependencies({
-        lockfilePath: loaded.lockfilePath,
-        directNames: new Set(directPackages.map((requested) => requested.name)),
-        config
-      });
-      appendReasons(transitive.blockedReasons);
-      warnings.push(...transitive.warnings);
+  }
+
+  for (const scope of preparedScopes) {
+    const loaded = scope.loaded;
+    if (!loaded) {
+      return {
+        ok: false,
+        findings: [{
+          code: "decisions-project-state",
+          message: `${scope.lockfilePath} has no loaded evaluation scope.`
+        }],
+        infos: []
+      };
     }
+    for (const importer of loaded.importers) {
+      const requestedPackages = importer.targets.targets.map((target) => target.requested);
+      const evaluations = await evaluateRequestedPackages(
+        importer.packageDir,
+        requestedPackages,
+        registryClient,
+        config
+      );
+      appendReasons(evaluations.flatMap((evaluation) => evaluation.blockedReasons));
+      warnings.push(...evaluations.flatMap((evaluation) => evaluation.warnings));
+    }
+    const directPackages = loaded.targets.targets.map((target) => target.requested);
+    const transitive = await evaluateTransitiveDependencies({
+      lockfilePath: loaded.lockfilePath,
+      directNames: new Set(directPackages.map((requested) => requested.name)),
+      config
+    });
+    appendReasons(transitive.blockedReasons);
+    warnings.push(...transitive.warnings);
   }
 
   const lockfiles: DecisionAuthorization["lockfiles"] = verifiedLockfiles.map(

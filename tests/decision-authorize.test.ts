@@ -267,6 +267,121 @@ describe("authorizeDecisions", () => {
     });
   });
 
+  it("still evaluates a lockfile-less root project when only a nested lockfile changes", async () => {
+    const { dir } = await createRepoFixture(tempDirs);
+    const config = {
+      minimumReleaseAgeHours: 0,
+      registryUrl,
+      allowedScripts: {},
+      allowedSources: ["registry"],
+      allowedPackages: [],
+      packageManagerDefaults: {
+        npm: { ignoreScripts: true },
+        pnpm: { ignoreScripts: true },
+        bun: { ignoreScripts: true }
+      },
+      typoSquat: { mode: "off", minNameLength: 4, ignore: [] },
+      provenance: { mode: "off", requireFor: [], trustedPublishers: {}, offlineBehavior: "fail-closed" },
+      transitive: { mode: "off", checks: ["install-script", "untrusted-source"] },
+      continuity: { mode: "off", baselineSize: 5 }
+    };
+    await writeFile(path.join(dir, "safeinstall.config.json"), JSON.stringify(config, null, 2) + "\n");
+    await writeFile(
+      path.join(dir, "package.json"),
+      JSON.stringify({ name: "root", version: "1.0.0", dependencies: { "left-pad": "1.13.2" } }) + "\n"
+    );
+    const base = commitAll(dir, "base without root lockfile");
+    const repo = (await resolveGitRepo(dir))!;
+
+    await writeFile(
+      path.join(dir, "package.json"),
+      JSON.stringify({
+        name: "root",
+        version: "1.0.0",
+        dependencies: { "left-pad": "1.13.2", evil: "git+https://example.test/evil.git" }
+      }) + "\n"
+    );
+    const nestedDir = path.join(dir, "tools", "nested");
+    await mkdir(nestedDir, { recursive: true });
+    await writeFile(
+      path.join(nestedDir, "package.json"),
+      JSON.stringify({ name: "nested", version: "1.0.0", dependencies: { "left-pad": "1.13.2" } }) + "\n"
+    );
+    await writeFile(
+      path.join(nestedDir, "package-lock.json"),
+      JSON.stringify({
+        name: "nested",
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "nested", dependencies: { "left-pad": "1.13.2" } },
+          "node_modules/left-pad": { version: "1.13.2", resolved: "", integrity: "" }
+        }
+      }) + "\n"
+    );
+    const after = (await bindFileAsStaged(repo, "tools/nested/package-lock.json")) ?? null;
+    await appendDecisionRecord(
+      dir,
+      createDecisionDraft({
+        lockfilePath: "tools/nested/package-lock.json",
+        before: null,
+        after,
+        registryUrl
+      })
+    );
+    const head = commitAll(dir, "root gains a git dependency; nested lockfile changes");
+
+    const result = await authorizeDecisions(dir, {
+      baseRef: base,
+      headRef: head,
+      allowedRegistryUrls: [registryUrl]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.findings.map((finding) => finding.code)).toContain("untrusted-source");
+    expect(result.authorization?.verdict).toBe("block");
+  });
+
+  it("evaluates a root project whose lockfile is a verified scope exactly once", async () => {
+    const fixture = await createAuthorizedFixture();
+    // Make the root lockfile resolve from a disallowed source so it yields a reason.
+    const lockfilePath = path.join(fixture.dir, "package-lock.json");
+    const lockfile = JSON.parse(await readFile(lockfilePath, "utf8")) as {
+      packages: Record<string, { dependencies?: Record<string, string>; version?: string; resolved?: string }>;
+    };
+    const evilSpec = "git+https://example.test/evil.git";
+    lockfile.packages[""]!.dependencies!["evil"] = evilSpec;
+    lockfile.packages["node_modules/evil"] = { version: evilSpec, resolved: evilSpec };
+    await writeFile(lockfilePath, JSON.stringify(lockfile) + "\n");
+    await writeFile(
+      path.join(fixture.dir, "package.json"),
+      JSON.stringify({
+        name: "authorize-fixture",
+        version: "1.0.0",
+        dependencies: { "left-pad": "1.13.2", evil: evilSpec }
+      }) + "\n"
+    );
+    const after = (await bindFileAsStaged(fixture.repo, "package-lock.json")) ?? null;
+    // Replace the draft record created by the fixture with one matching the final lockfile.
+    await rm(path.join(fixture.dir, ".safeinstall"), { recursive: true, force: true });
+    await appendDecisionRecord(
+      fixture.dir,
+      createDecisionDraft({ lockfilePath: "package-lock.json", before: null, after, registryUrl })
+    );
+    const head = commitAll(fixture.dir, "root lockfile with unsafe dependency");
+
+    const result = await authorizeDecisions(fixture.dir, {
+      baseRef: fixture.base,
+      headRef: head,
+      allowedRegistryUrls: [registryUrl]
+    });
+
+    expect(result.ok).toBe(false);
+    const untrusted = result.findings.filter((finding) => finding.code === "untrusted-source");
+    expect(untrusted.length).toBeGreaterThan(0);
+    const messages = result.findings.map((finding) => `${finding.code}:${finding.message}`);
+    expect(new Set(messages).size).toBe(messages.length);
+  });
+
   it("refuses a nested importer manifest that differs from the authorized head", async () => {
     const fixture = await createAuthorizedFixture();
     const manifestPath = await addUnsafeNestedProject(fixture);
