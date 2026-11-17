@@ -1,3 +1,5 @@
+import nodePath from "node:path";
+
 import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
 import { captureDecisionState, emitDecisionRecord } from "./decision-emit";
@@ -8,6 +10,7 @@ import { loadManifestDependencies } from "./project-state";
 import { hasAmbiguousWorkspaceFlags, resolveInvocationContext } from "./project-discovery";
 import { loadProjectInstallTargetsForManager } from "./project-installs";
 import { RegistryClient } from "./registry";
+import { loadHeadSourceBaseline } from "./source-baseline";
 import { redactCliResult, redactSensitiveText } from "./redaction";
 import { throwIfAborted } from "./signals";
 import { buildInstallPlan, parseManifestDependency } from "./specs";
@@ -278,12 +281,14 @@ async function runInstallFlowInternal(
     registryUrl: config.registryUrl,
     signal: options.signal
   });
+  const evaluationDir = invocation.packageDir ?? invocation.effectiveCwd;
   const evaluations = await evaluateRequestedPackages(
-    invocation.packageDir ?? invocation.effectiveCwd,
+    evaluationDir,
     plan.packages,
     registryClient,
     config,
-    options.signal
+    options.signal,
+    await loadHeadSourceBaseline([nodePath.join(evaluationDir, "package.json")], config)
   );
   // Explicit additions do not have their candidate lockfile yet. Their
   // transitive policy is enforced by runBoundInstall after lockfile-only
