@@ -1,5 +1,6 @@
 import { FLAGS_WITH_VALUES, normalizeInstallCommand } from "./specs";
 import {
+  collectWriteTargetTokens,
   collectWriteTargets,
   findCommandTokenIndex,
   hasDynamicCommandName,
@@ -13,7 +14,8 @@ import type {
   GuardCommandAnalysis,
   GuardInstallMatch,
   GuardRunnerMatch,
-  GuardUnanalyzableSegment
+  GuardUnanalyzableSegment,
+  GuardWriteOperation
 } from "./guard-types";
 import type { PackageManagerName } from "./types";
 
@@ -22,7 +24,8 @@ export type {
   GuardCommandAnalysis,
   GuardInstallMatch,
   GuardRunnerMatch,
-  GuardUnanalyzableSegment
+  GuardUnanalyzableSegment,
+  GuardWriteOperation
 } from "./guard-types";
 
 /**
@@ -357,6 +360,274 @@ function analyzeSegment(segment: ShellSegment, command: string): SegmentFinding 
   return writeTargets.length > 0 ? { ...finding, writeTargets } : finding;
 }
 
+interface ShellState {
+  cwdChanges: string[];
+  cwdUncertain: boolean;
+  succeeded: boolean;
+}
+
+interface CwdEffect {
+  changes: string[];
+  uncertain: boolean;
+}
+
+const ENV_VALUE_OPTIONS = new Set([
+  "-u", "--unset", "-C", "--chdir", "--block-signal", "--default-signal", "--ignore-signal"
+]);
+const NON_PERSISTENT_WRAPPERS = new Set(["sudo", "nohup", "env", "exec", "corepack"]);
+const UNMODELED_CWD_COMMANDS = new Set(["pushd", "popd", "eval", "source", "."]);
+const MAX_CWD_VARIANTS = 32;
+const MAX_CWD_CHANGES = 64;
+
+function commandCwdEffect(tokens: ShellToken[], commandIndex: number): CwdEffect {
+  const changes: string[] = [];
+  let uncertain = false;
+  const addChange = (directory: string): void => {
+    if (changes.length >= MAX_CWD_CHANGES) uncertain = true;
+    else changes.push(directory);
+  };
+
+  for (let wrapperIndex = 0; wrapperIndex < commandIndex; wrapperIndex += 1) {
+    const wrapper = tokens[wrapperIndex];
+    if (wrapper === undefined) continue;
+    const executable = basename(wrapper.value);
+
+    if (executable === "sudo") {
+      for (let index = wrapperIndex + 1; index < commandIndex; index += 1) {
+        const value = tokens[index]?.value ?? "";
+        if (
+          value === "-D" ||
+          value === "--chdir" ||
+          value.startsWith("-D") ||
+          value.startsWith("--chdir=") ||
+          value === "-R" ||
+          value === "--chroot" ||
+          value.startsWith("-R") ||
+          value.startsWith("--chroot=")
+        ) {
+          uncertain = true;
+        }
+      }
+      continue;
+    }
+
+    if (executable !== "env") continue;
+    for (let index = wrapperIndex + 1; index < commandIndex;) {
+      const token = tokens[index];
+      if (token === undefined) break;
+      const value = token.value;
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(value)) {
+        index += 1;
+        continue;
+      }
+      if (value === "--") break;
+      if (value === "-C" || value === "--chdir") {
+        const directory = tokens[index + 1];
+        if (directory === undefined || directory.hasExpansion) {
+          uncertain = true;
+        } else {
+          addChange(directory.value);
+        }
+        index += 2;
+        continue;
+      }
+      if (value.startsWith("--chdir=")) {
+        const directory = value.slice("--chdir=".length);
+        if (token.hasExpansion || directory.length === 0) uncertain = true;
+        else addChange(directory);
+        index += 1;
+        continue;
+      }
+      if (value.startsWith("-C") && value.length > 2) {
+        const directory = value.slice(2);
+        if (token.hasExpansion) uncertain = true;
+        else addChange(directory);
+        index += 1;
+        continue;
+      }
+      if (value.startsWith("-")) {
+        index += ENV_VALUE_OPTIONS.has(value) ? 2 : 1;
+        continue;
+      }
+      break;
+    }
+  }
+
+  return { changes, uncertain };
+}
+
+function commandCanMutateParentCwd(tokens: ShellToken[], commandIndex: number): boolean {
+  return !tokens
+    .slice(0, commandIndex)
+    .some((token) => NON_PERSISTENT_WRAPPERS.has(basename(token.value)));
+}
+
+function persistentCwdEffect(segment: ShellSegment): CwdEffect | undefined {
+  const { index: commandIndex } = findCommandTokenIndex(segment.tokens);
+  if (commandIndex < 0) {
+    return segment.tokens.some((token) => token.value.startsWith("CDPATH="))
+      ? { changes: [], uncertain: true }
+      : undefined;
+  }
+
+  const commandToken = segment.tokens[commandIndex];
+  if (commandToken === undefined || !commandCanMutateParentCwd(segment.tokens, commandIndex)) {
+    return undefined;
+  }
+  const executable = basename(commandToken.value);
+  const args = stripRedirections(segment.tokens.slice(commandIndex + 1));
+
+  if (executable === "cd") {
+    if (segment.hasSubstitution) {
+      return { changes: [], uncertain: true };
+    }
+    if (segment.tokens.slice(0, commandIndex).some((token) => basename(token.value) === "time")) {
+      return { changes: [], uncertain: true };
+    }
+    if (segment.tokens.slice(0, commandIndex).some((token) => token.value.startsWith("CDPATH="))) {
+      return { changes: [], uncertain: true };
+    }
+    let optionsEnded = false;
+    const directories: ShellToken[] = [];
+    for (const token of args) {
+      if (!optionsEnded && token.value === "--") {
+        optionsEnded = true;
+      } else if (!optionsEnded && /^-[LPe@]+$/.test(token.value)) {
+        continue;
+      } else {
+        directories.push(token);
+      }
+    }
+    const directory = directories[0];
+    if (
+      directories.length !== 1 ||
+      directory === undefined ||
+      directory.value === "-" ||
+      directory.hasExpansion
+    ) {
+      return { changes: [], uncertain: true };
+    }
+    return { changes: [directory.value], uncertain: false };
+  }
+
+  if (
+    UNMODELED_CWD_COMMANDS.has(executable) ||
+    (executable === "builtin" && args.some((token) => token.value === "cd" || UNMODELED_CWD_COMMANDS.has(token.value))) ||
+    (executable === "export" && args.some((token) => token.value.startsWith("CDPATH=")))
+  ) {
+    return { changes: [], uncertain: true };
+  }
+  return undefined;
+}
+
+function stateKey(state: ShellState): string {
+  return JSON.stringify([state.cwdChanges, state.cwdUncertain, state.succeeded]);
+}
+
+function uniqueStates(states: ShellState[]): ShellState[] {
+  const byKey = new Map<string, ShellState>();
+  for (const state of states) {
+    byKey.set(stateKey(state), state);
+    if (byKey.size > MAX_CWD_VARIANTS) {
+      return [
+        { cwdChanges: [], cwdUncertain: true, succeeded: true },
+        { cwdChanges: [], cwdUncertain: true, succeeded: false }
+      ];
+    }
+  }
+  return [...byKey.values()];
+}
+
+function completedStates(states: ShellState[], effect: CwdEffect | undefined): ShellState[] {
+  return states.flatMap((state) => {
+    if (effect === undefined) {
+      return [
+        { ...state, succeeded: true },
+        { ...state, succeeded: false }
+      ];
+    }
+    const cwdChanges = [...state.cwdChanges, ...effect.changes];
+    const exceededLimit = cwdChanges.length > MAX_CWD_CHANGES;
+    return [
+      {
+        cwdChanges: exceededLimit ? [] : cwdChanges,
+        cwdUncertain: state.cwdUncertain || effect.uncertain || exceededLimit,
+        succeeded: true
+      },
+      { ...state, succeeded: false }
+    ];
+  });
+}
+
+function operationForTarget(
+  target: ReturnType<typeof collectWriteTargetTokens>[number],
+  states: ShellState[],
+  commandEffect: CwdEffect
+): GuardWriteOperation {
+  const usesCommandCwd = target.kind === "argument";
+  const variants = states
+    .filter((state) => !state.cwdUncertain)
+    .map((state) => [
+      ...state.cwdChanges,
+      ...(usesCommandCwd && !commandEffect.uncertain ? commandEffect.changes : [])
+    ]);
+  const uniqueVariants = [...new Map(variants.map((variant) => [JSON.stringify(variant), variant])).values()];
+  return {
+    target: target.token.value,
+    hasExpansion: target.token.hasExpansion,
+    cwdVariants: uniqueVariants,
+    cwdUncertain:
+      states.some((state) => state.cwdUncertain) || (usesCommandCwd && commandEffect.uncertain)
+  };
+}
+
+function collectWriteOperations(segments: ShellSegment[]): GuardWriteOperation[] {
+  const operations: GuardWriteOperation[] = [];
+  let states: ShellState[] = [{ cwdChanges: [], cwdUncertain: false, succeeded: true }];
+
+  for (let groupStart = 0; groupStart < segments.length;) {
+    let groupEnd = groupStart;
+    while (segments[groupEnd + 1]?.connector === "pipe") groupEnd += 1;
+
+    const connector = segments[groupStart]?.connector;
+    const executed =
+      connector === "and"
+        ? states.filter((state) => state.succeeded)
+        : connector === "or"
+          ? states.filter((state) => !state.succeeded)
+          : states;
+    const skipped =
+      connector === "and"
+        ? states.filter((state) => !state.succeeded)
+        : connector === "or"
+          ? states.filter((state) => state.succeeded)
+          : [];
+
+    for (let index = groupStart; index <= groupEnd; index += 1) {
+      const segment = segments[index];
+      if (segment === undefined || executed.length === 0) continue;
+      const { index: commandIndex } = findCommandTokenIndex(segment.tokens);
+      const commandEffect = commandCwdEffect(segment.tokens, commandIndex);
+      for (const target of collectWriteTargetTokens(segment.tokens, commandIndex)) {
+        operations.push(operationForTarget(target, executed, commandEffect));
+      }
+    }
+
+    const nextConnector = segments[groupEnd + 1]?.connector;
+    const isolated = groupEnd > groupStart || nextConnector === "background";
+    const completed = isolated
+      ? executed.flatMap((state) => [
+          { ...state, succeeded: true },
+          { ...state, succeeded: false }
+        ])
+      : completedStates(executed, persistentCwdEffect(segments[groupStart] as ShellSegment));
+    states = uniqueStates([...skipped, ...completed]);
+    groupStart = groupEnd + 1;
+  }
+
+  return operations;
+}
+
 function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFinding {
   const segmentText = command.slice(segment.start, segment.end).trim();
   const { index: commandIndex, corepackToken, wrapperError } = findCommandTokenIndex(segment.tokens);
@@ -585,6 +856,7 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
 
 export function analyzeShellCommand(command: string): GuardCommandAnalysis {
   const segments = splitShellSegments(command);
+  const writeOperations = collectWriteOperations(segments);
 
   const installs: NonNullable<SegmentFinding["install"]>[] = [];
   const runners: GuardRunnerMatch[] = [];
@@ -652,6 +924,7 @@ export function analyzeShellCommand(command: string): GuardCommandAnalysis {
     unanalyzable,
     usesSafeInstall,
     writeTargets,
+    writeOperations,
     rewrittenCommand
   };
 }

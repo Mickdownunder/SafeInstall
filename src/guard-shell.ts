@@ -13,6 +13,13 @@ export interface ShellSegment {
   start: number;
   end: number;
   hasSubstitution: boolean;
+  /** Shell operator joining the previous non-empty segment to this one. */
+  connector?: "sequence" | "and" | "or" | "pipe" | "background";
+}
+
+export interface ShellWriteTarget {
+  token: ShellToken;
+  kind: "redirection" | "argument";
 }
 
 const REDIRECTION_OPERATORS = ["&>>", "<<<", "<<-", ">>", "<<", "<>", ">|", ">&", "<&", "&>", ">", "<"] as const;
@@ -92,6 +99,7 @@ export function splitShellSegments(command: string): ShellSegment[] {
   const segments: ShellSegment[] = [];
   let tokens: ShellToken[] = [];
   let segmentStart = 0;
+  let connector: ShellSegment["connector"];
   let hasSubstitution = false;
   let tokenValue = "";
   let tokenStart = -1;
@@ -113,7 +121,13 @@ export function splitShellSegments(command: string): ShellSegment[] {
   const flushSegment = (end: number): void => {
     flushToken(end);
     if (tokens.length > 0 || hasSubstitution) {
-      segments.push({ tokens, start: segmentStart, end, hasSubstitution });
+      segments.push({
+        tokens,
+        start: segmentStart,
+        end,
+        hasSubstitution,
+        ...(connector === undefined ? {} : { connector })
+      });
     }
     tokens = [];
     hasSubstitution = false;
@@ -149,7 +163,10 @@ export function splitShellSegments(command: string): ShellSegment[] {
           tokenHasExpansion = true;
           if (command[index + 1] === "(") hasSubstitution = true;
         }
-        if (command[index] === "`") hasSubstitution = true;
+        if (command[index] === "`") {
+          hasSubstitution = true;
+          tokenHasExpansion = true;
+        }
         tokenValue += command[index++];
       }
       index += 1;
@@ -171,6 +188,7 @@ export function splitShellSegments(command: string): ShellSegment[] {
     if (character === "`") {
       hasSubstitution = true;
       if (tokenStart === -1) tokenStart = index;
+      tokenHasExpansion = true;
       tokenValue += character;
       index += 1;
       continue;
@@ -216,7 +234,17 @@ export function splitShellSegments(command: string): ShellSegment[] {
     }
     if (character === "\n" || character === ";") {
       flushSegment(index);
+      connector = "sequence";
       segmentStart = ++index;
+      continue;
+    }
+
+    if ((character === ">" || character === "<") && command[index + 1] === "(") {
+      if (tokenStart === -1) tokenStart = index;
+      hasSubstitution = true;
+      tokenHasExpansion = true;
+      tokenValue += character;
+      index += 1;
       continue;
     }
 
@@ -251,6 +279,7 @@ export function splitShellSegments(command: string): ShellSegment[] {
       const pair = command.slice(index, index + 2);
       flushSegment(index);
       index += pair === "&&" || pair === "||" ? 2 : 1;
+      connector = pair === "&&" ? "and" : pair === "||" ? "or" : character === "|" ? "pipe" : "background";
       segmentStart = index;
       continue;
     }
@@ -261,6 +290,8 @@ export function splitShellSegments(command: string): ShellSegment[] {
     }
     if (tokenStart === -1) tokenStart = index;
     if (character === "{") tokenHasUnquotedBrace = true;
+    if (character === "*" || character === "?" || character === "[") tokenHasExpansion = true;
+    if (character === "~" && tokenValue.length === 0) tokenHasExpansion = true;
     tokenValue += character;
     index += 1;
   }
@@ -416,18 +447,28 @@ export function findCommandTokenIndex(tokens: ShellToken[]): CommandTokenResolut
   return { index: -1, corepackToken };
 }
 
-export function collectWriteTargets(tokens: ShellToken[], commandIndex: number): string[] {
-  const targets: string[] = [];
+export function collectWriteTargetTokens(tokens: ShellToken[], commandIndex: number): ShellWriteTarget[] {
+  const targets: ShellWriteTarget[] = [];
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
     if (token === undefined) {
       continue;
     }
     const operator = redirectionBase(token.value);
+    if (operator && token.hasExpansion) {
+      if (WRITE_REDIRECTIONS.has(operator)) targets.push({ token, kind: "redirection" });
+      continue;
+    }
     if (operator && WRITE_REDIRECTIONS.has(operator)) {
-      const target = tokens[index + 1]?.value;
-      const duplicatesFd = (operator === ">&" || operator === "<&") && /^-?\d+$/.test(target ?? "");
-      if (target && target !== "/dev/null" && !duplicatesFd) targets.push(target);
+      const target = tokens[index + 1];
+      const duplicatesFd =
+        (operator === ">&" || operator === "<&") &&
+        target !== undefined &&
+        !target.hasExpansion &&
+        /^-?\d+$/.test(target.value);
+      if (target && (target.value !== "/dev/null" || target.hasExpansion) && !duplicatesFd) {
+        targets.push({ token: target, kind: "redirection" });
+      }
       index += 1;
     }
   }
@@ -438,7 +479,14 @@ export function collectWriteTargets(tokens: ShellToken[], commandIndex: number):
   const args = stripRedirections(tokens.slice(commandIndex + 1));
   const isInPlaceSed = executable === "sed" && args.some((token) => token.value === "-i" || token.value.startsWith("-i"));
   if (FILE_WRITER_EXECUTABLES.has(executable) || isInPlaceSed) {
-    for (const token of args) if (!token.value.startsWith("-")) targets.push(token.value);
+    for (const token of args) {
+      if (!token.value.startsWith("-")) targets.push({ token, kind: "argument" });
+    }
   }
   return targets;
+}
+
+/** Backward-compatible best-effort target values used by parser consumers. */
+export function collectWriteTargets(tokens: ShellToken[], commandIndex: number): string[] {
+  return collectWriteTargetTokens(tokens, commandIndex).map(({ token }) => token.value);
 }
