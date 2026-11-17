@@ -462,6 +462,10 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 
 Keep private-registry authentication in an environment-backed `.npmrc` entry, such as an
 `_authToken=${NPM_TOKEN}` setting, rather than embedding authority material in `registryUrl`.
+SafeInstall's own metadata requests do not send credentials (Node's `fetch` refuses URLs that
+carry them), and it does not read registry URLs from `.npmrc` or `npm_config_registry`, so those
+never reach its output or decision records. A `registryUrl` with userinfo, query parameters, or a
+fragment is a config error, and `decisions verify` reports a committed one as `registry-not-default`.
 If a credential-bearing URL was previously used, treat the credential as exposed: audit
 `.safeinstall/decisions/`, CI logs and artifacts, and Git history; revoke and rotate the
 credential; then remove it from retained artifacts and repository history using your host's

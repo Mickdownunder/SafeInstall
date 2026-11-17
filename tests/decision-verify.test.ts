@@ -201,6 +201,51 @@ describe("verifyDecisions", () => {
     expect(serializedFindings).not.toContain("fragment-secret");
   });
 
+  it.each([
+    "https://registry.npmjs.org@registry.attacker.example/",
+    "https://evil@registry.npmjs.org.attacker.example/",
+    "https://registry.npmjs.org:secret@registry.attacker.example/",
+    "https://registry.npmjs.org.attacker.example/",
+    "https://registry.npmjs.org/evil/",
+    "http://registry.npmjs.org/",
+    "https://registry.npmjs.org:444/",
+    "https://registry.npmjs.org/?x=1",
+    "https://registry.npmjs.org/#frag"
+  ])("never treats %s as the default or an allowlisted registry", async (registryUrl) => {
+    const fixture = await createBaseFixture();
+    await writeFile(
+      path.join(fixture.dir, "safeinstall.config.json"),
+      JSON.stringify({ registryUrl }, null, 2)
+    );
+    const head = commitAll(fixture.dir, "lookalike registry");
+
+    const result = await verifyDecisions(fixture.dir, {
+      baseRef: fixture.base,
+      headRef: head,
+      allowedRegistryUrls: ["https://registry.npmjs.org"]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.findings.map((finding) => finding.code)).toContain("registry-not-default");
+  });
+
+  it("accepts the allowlisted registry with or without a trailing slash", async () => {
+    const fixture = await createBaseFixture();
+    await writeFile(
+      path.join(fixture.dir, "safeinstall.config.json"),
+      JSON.stringify({ registryUrl: "https://registry.example.internal/npm/" }, null, 2)
+    );
+    const head = commitAll(fixture.dir, "private registry");
+
+    const result = await verifyDecisions(fixture.dir, {
+      baseRef: fixture.base,
+      headRef: head,
+      allowedRegistryUrls: ["https://registry.example.internal/npm"]
+    });
+
+    expect(result.findings.map((finding) => finding.code)).not.toContain("registry-not-default");
+  });
+
   it("passes and reports when no lockfile changed", async () => {
     const fixture = await createBaseFixture();
     await writeFile(path.join(fixture.dir, "README.md"), "docs only\n");

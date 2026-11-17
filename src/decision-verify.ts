@@ -20,7 +20,8 @@ import {
   resolveGitRepo,
   type GitRepoContext
 } from "./git-blob";
-import { redactRegistryUrl, requireCredentialFreeRegistryUrl } from "./registry-url";
+import { redactSensitiveText } from "./redaction";
+import { requireCredentialFreeRegistryUrl } from "./registry-url";
 
 /**
  * Committed-state verification of decision-record chains (RFC-001 §7, D5) —
@@ -304,7 +305,7 @@ async function checkRegistryTrustRoot(
     findings.push({
       code: "registry-not-default",
       message:
-        `The candidate's registryUrl (${redactRegistryUrl(normalized)}) is not the verifier's registry trust root. ` +
+        `The candidate's registryUrl (${redactSensitiveText(normalized)}) is not the verifier's registry trust root. ` +
         "A registry the pull request can choose is not a trust root (RFC-001 D3); allowlist it " +
         "on the verifier side deliberately, or remove the override."
     });
