@@ -1,0 +1,72 @@
+name: Bug report
+description: SafeInstall blocked, allowed, or reported something it should not have.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security vulnerabilities do not belong here. Report them privately as described in [SECURITY.md](https://github.com/Mickdownunder/SafeInstall/blob/main/SECURITY.md).
+
+        [SUPPORT.md](https://github.com/Mickdownunder/SafeInstall/blob/main/SUPPORT.md) lists the supported workflows and the known limits. Please check it first.
+  - type: input
+    id: version
+    attributes:
+      label: SafeInstall version
+      description: Output of `safeinstall --version`.
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      description: Output of `node --version`.
+    validations:
+      required: true
+  - type: input
+    id: package-manager
+    attributes:
+      label: Package manager and version
+      description: For example `pnpm 10.17.0`. Include the `packageManager` field from `package.json` if it is set.
+    validations:
+      required: true
+  - type: dropdown
+    id: lockfile
+    attributes:
+      label: Lockfile
+      options:
+        - package-lock.json
+        - npm-shrinkwrap.json
+        - pnpm-lock.yaml
+        - bun lockfile
+        - none
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command
+      description: The SafeInstall command you ran, with `--json` if possible.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Exact output
+      description: The complete output. Remove tokens, private registry hosts, and internal package names before pasting.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected SafeInstall to do instead, and why.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: safeinstall.config.json
+      description: Redacted contents, if the project has one.
+      render: json
