@@ -1,0 +1,17 @@
+{
+  "id": "lexer-brace-expansion",
+  "category": "lexer",
+  "severity": "bypass",
+  "input": "{npm,install,evil-pkg}",
+  "shellBehavior": "Brace expansion yields the three words npm install evil-pkg and runs them.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 0,
+    "runners": 0,
+    "unanalyzable": 1,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "A word with unquoted brace expansion is now marked as expanded; a command name built that way fails closed when the segment looks like an install.",
+  "discoveredBy": "manual review"
+}

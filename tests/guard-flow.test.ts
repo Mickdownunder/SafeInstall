@@ -154,6 +154,22 @@ describe("decideGuard", () => {
     expect(await decideGuard("npx vitest run", nested)).toEqual({ action: "allow" });
   });
 
+  it("asks before compound commands can invalidate a local runner lookup", async () => {
+    const cwd = await createTempDir("safeinstall-guard-npx-compound-");
+    const binDir = path.join(cwd, "node_modules", ".bin");
+    await mkdir(binDir, { recursive: true });
+    await writeFile(path.join(binDir, "tsc"), "#!/bin/sh\n", { mode: 0o755 });
+
+    for (const command of [
+      "cd .. && npx tsc --noEmit",
+      "rm node_modules/.bin/tsc && npx tsc --noEmit",
+      "npx tsc $(rm node_modules/.bin/tsc)",
+      "env -C .. npx tsc --noEmit"
+    ]) {
+      expect((await decideGuard(command, cwd)).action, command).toBe("ask");
+    }
+  });
+
   it("asks for dlx-style runners even when a local binary exists", async () => {
     const cwd = await createTempDir("safeinstall-guard-dlx-");
     const binDir = path.join(cwd, "node_modules", ".bin");

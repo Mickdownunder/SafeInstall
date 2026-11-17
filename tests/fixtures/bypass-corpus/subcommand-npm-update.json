@@ -1,0 +1,17 @@
+{
+  "id": "subcommand-npm-update",
+  "category": "unrouted-subcommand",
+  "severity": "bypass",
+  "input": "npm update",
+  "shellBehavior": "Resolves and installs newer versions, with lifecycle scripts, without any policy check.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 0,
+    "runners": 0,
+    "unanalyzable": 1,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "update and upgrade were listed as non-install subcommands. They now fail closed because the CLI cannot route them.",
+  "discoveredBy": "manual review"
+}
