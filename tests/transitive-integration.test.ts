@@ -54,6 +54,27 @@ function lockfileWith(transitive: Record<string, unknown>): string {
 }
 
 describe("transitive evaluation through runCheckFlow", () => {
+  it("blocks a transitive lockfile entry from another host with the default transitive mode", async () => {
+    const cwd = await createProject({
+      "package.json": PACKAGE_JSON,
+      "package-lock.json": lockfileWith({
+        "node_modules/is-number": {
+          version: "4.0.0",
+          resolved: "https://evil.example/is-number-4.0.0.tgz",
+          integrity: "sha512-x"
+        }
+      }),
+      // No `transitive` key: the lockfile source check does not depend on it.
+      "safeinstall.config.json": JSON.stringify({ minimumReleaseAgeHours: 0 })
+    });
+
+    const result = await runCheckFlow(cwd, ["check"]);
+
+    expect(result.decision).toBe("block");
+    expect(result.reasons.map((reason) => reason.code)).toContain("transitive-untrusted-source");
+    expect(result.reasons.some((reason) => reason.message.includes("is-number@4.0.0"))).toBe(true);
+  });
+
   it("blocks a nested package that shares a direct dependency name", async () => {
     const cwd = await createProject({
       "package.json": PACKAGE_JSON,

@@ -207,12 +207,14 @@ export function evaluateTransitivePackages(
   };
 
   const transitiveConfig = config.transitive;
-  if (transitiveConfig.mode === "off") {
-    return evaluation;
-  }
-
-  const checkInstallScript = transitiveConfig.checks.includes("install-script");
-  const checkUntrustedSource = transitiveConfig.checks.includes("untrusted-source");
+  // The source of a lockfile entry decides what the package manager downloads,
+  // so allowedSources applies to every entry and always blocks: a lockfile
+  // line that points a transitive dependency at another host or a git
+  // repository must not depend on an opt-in mode to be noticed.
+  // transitive.mode governs only the install-script check and how an
+  // unreadable lockfile is treated.
+  const checkInstallScript =
+    transitiveConfig.mode !== "off" && transitiveConfig.checks.includes("install-script");
 
   for (const pkg of packages) {
     if (checkInstallScript && pkg.hasInstallScript === true) {
@@ -223,7 +225,6 @@ export function evaluateTransitivePackages(
     // and are never flagged. Local tarballs ("file") are unverifiable artifacts
     // and are checked against allowedSources like any other source.
     if (
-      checkUntrustedSource &&
       pkg.sourceType !== "workspace" &&
       pkg.sourceType !== "directory" &&
       !config.allowedSources.includes(pkg.sourceType)
@@ -251,11 +252,11 @@ export function evaluateTransitivePackages(
 
   if (evaluation.untrustedSourcePackages.length > 0) {
     const count = evaluation.untrustedSourcePackages.length;
-    emit(
-      "transitive-untrusted-source",
-      `${count} transitive ${count === 1 ? "dependency resolves" : "dependencies resolve"} from an untrusted source: ${summarizeList(evaluation.untrustedSourcePackages)}.`,
-      "Review these packages or add the source type to allowedSources if intentional."
-    );
+    evaluation.blockedReasons.push({
+      code: "transitive-untrusted-source",
+      message: `Blocked: ${count} transitive ${count === 1 ? "dependency resolves" : "dependencies resolve"} from an untrusted source: ${summarizeList(evaluation.untrustedSourcePackages)}.`,
+      suggestion: "Review these lockfile entries or add the source type to allowedSources if intentional."
+    });
   }
 
   return evaluation;
@@ -342,11 +343,11 @@ function unavailableEvaluation(
  * Read the project lockfile, walk the full dependency tree, and evaluate
  * transitive dependencies against the configured transitive checks.
  *
- * Returns an empty evaluation only when transitive mode is off or a supported
- * lockfile was evaluated without findings. Missing, unreadable, unsupported,
- * and invalid lockfiles block in block mode and produce an explicit warning
- * in warn mode. This evaluation is purely additive over the direct-dependency
- * evaluation.
+ * The source of every lockfile entry is checked against allowedSources in
+ * every mode. Missing, unreadable, unsupported, and invalid lockfiles block in
+ * block mode, produce an explicit warning in warn mode, and are not an error
+ * with mode off, where there is simply nothing to check. This evaluation is
+ * purely additive over the direct-dependency evaluation.
  */
 export async function evaluateTransitiveDependencies(options: {
   lockfilePath: string | undefined;
@@ -360,14 +361,16 @@ export async function evaluateTransitiveDependencies(options: {
     untrustedSourcePackages: []
   };
 
-  if (options.config.transitive.mode === "off") {
-    return empty;
-  }
+  // With mode "off" a lockfile that is absent or cannot be read is not an
+  // error: there is nothing to check the sources of. A readable lockfile is
+  // still checked against allowedSources below.
+  const sourcesOnly = options.config.transitive.mode === "off";
 
   const unavailableSuggestion =
     "Create or repair package-lock.json, npm-shrinkwrap.json, or pnpm-lock.yaml before retrying.";
 
   if (!options.lockfilePath) {
+    if (sourcesOnly) return empty;
     return unavailableEvaluation(
       options.config,
       "Transitive dependencies could not be evaluated because no npm or pnpm lockfile was found (yarn and bun lockfiles are not supported).",
@@ -377,6 +380,7 @@ export async function evaluateTransitiveDependencies(options: {
 
   const lockfileName = path.basename(options.lockfilePath);
   if (!SUPPORTED_TRANSITIVE_LOCKFILES.has(lockfileName)) {
+    if (sourcesOnly) return empty;
     return unavailableEvaluation(
       options.config,
       `Transitive dependencies could not be evaluated because ${lockfileName} is not a supported lockfile.`,
@@ -388,6 +392,7 @@ export async function evaluateTransitiveDependencies(options: {
   try {
     rawLockfile = await readFile(options.lockfilePath, "utf8");
   } catch {
+    if (sourcesOnly) return empty;
     return unavailableEvaluation(
       options.config,
       `Transitive dependencies could not be evaluated because ${lockfileName} could not be read.`,
@@ -404,6 +409,7 @@ export async function evaluateTransitiveDependencies(options: {
       options.config.registryUrl
     );
   } catch {
+    if (sourcesOnly) return empty;
     return unavailableEvaluation(
       options.config,
       `Transitive dependencies could not be evaluated because ${lockfileName} is invalid or unsupported.`,
