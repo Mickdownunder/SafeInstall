@@ -5,6 +5,7 @@
 ### Fixed
 
 - A config selected with `--config` can no longer replace the policy protected by a trust lock. `install` and `check` block with `trust-unbound-config` unless the effective config is the locked `safeinstall.config.json` at the trust root. The GitHub Action builds its command as an argument list and rejects `--config` in `args`.
+- `trust approve` and `trust unlock` also refuse to run when a parent process carries an agent or CI marker (`CI`, `CLAUDECODE`, `CODEX_SHELL`, `CURSOR_AGENT`). Removing the marker from the command's own environment (`env -u`, a script that opens a pseudo-terminal) no longer passes the human gate on Linux and macOS. The gate remains a barrier, not proof of human presence: Windows is not inspected, and a process that detaches from its parents is not recognised.
 
 ### Breaking changes
 
