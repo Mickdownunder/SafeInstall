@@ -1,0 +1,17 @@
+{
+  "id": "wrapper-node-npm-cli",
+  "category": "wrapper-command",
+  "severity": "bypass",
+  "input": "node /usr/lib/node_modules/npm/bin/npm-cli.js install evil-pkg",
+  "shellBehavior": "Running the npm entry script through node is npm install.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 0,
+    "runners": 0,
+    "unanalyzable": 1,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "Manager entry scripts are now recognised as the manager behind another command.",
+  "discoveredBy": "manual review"
+}
