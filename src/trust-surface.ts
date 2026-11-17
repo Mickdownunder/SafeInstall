@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { listWorkingTreeFiles } from "./git-blob";
+import { listGitlinks, listWorkingTreeFiles } from "./git-blob";
 import { detectHiddenUnicode } from "./hidden-unicode";
 import { parseMcpServers } from "./mcp-server-parse";
 import { fileExists } from "./project-discovery";
@@ -298,11 +298,45 @@ async function discoverNestedInstructionPaths(root: string): Promise<string[]> {
   // keeps the directory walk, which runs on every guard call, for trees that
   // are not in a repository at all.
   try {
-    const listed = await listWorkingTreeFiles(root, new Set(NESTED_INSTRUCTION_NAMES));
-    return listed.filter(isNestedInstructionPath);
+    return await listNestedInstructionsWithGit(root, "", 0);
   } catch {
     return walkForNestedInstructions(root);
   }
+}
+
+/** Repositories nested inside the trust root are listed to this depth. */
+const NESTED_REPOSITORY_DEPTH = 8;
+
+/**
+ * `git ls-files` stops at the boundary of another repository: a submodule is
+ * one gitlink entry, and an untracked embedded checkout is one `dir/` entry.
+ * Files inside them are still inside the trust root and are read by agents,
+ * so each checked-out nested repository is listed in turn.
+ */
+async function listNestedInstructionsWithGit(dir: string, prefix: string, depth: number): Promise<string[]> {
+  const listed = await listWorkingTreeFiles(dir, new Set(NESTED_INSTRUCTION_NAMES));
+  const found = listed.filter((entry) => !entry.endsWith("/")).map((entry) => `${prefix}${entry}`);
+
+  const nestedRepositories = listed.filter((entry) => entry.endsWith("/")).map((entry) => entry.slice(0, -1));
+  if (await fileExists(path.join(dir, ".gitmodules"))) {
+    nestedRepositories.push(...(await listGitlinks(dir)));
+  }
+
+  for (const relative of new Set(nestedRepositories)) {
+    if (relative.split("/").some((segment) => EXCLUDED_SEGMENTS.has(segment))) {
+      continue;
+    }
+    const nestedDir = path.join(dir, ...relative.split("/"));
+    // A submodule that is not checked out has no files to read.
+    if (!(await fileExists(path.join(nestedDir, ".git")))) {
+      continue;
+    }
+    if (depth >= NESTED_REPOSITORY_DEPTH) {
+      throw new Error(`Nested repositories below ${dir} are deeper than ${NESTED_REPOSITORY_DEPTH} levels.`);
+    }
+    found.push(...(await listNestedInstructionsWithGit(nestedDir, `${prefix}${relative}/`, depth + 1)));
+  }
+  return found.filter(isNestedInstructionPath);
 }
 
 /** Hash every existing trust-surface file and parse MCP declarations. */

@@ -274,6 +274,24 @@ export async function pathsAtRef(repo: GitRepoContext, ref: string, prefix: stri
  * or git fails. Paths that are not valid UTF-8 are skipped unless their final
  * component is in `relevantNames`, in which case the call rejects.
  */
+/**
+ * Paths of the gitlinks (submodules) recorded in the index of the repository
+ * that contains `cwd`, relative to `cwd`.
+ */
+export async function listGitlinks(cwd: string): Promise<string[]> {
+  const args = ["ls-files", "-z", "--stage"];
+  const output = (await runGit(cwd, args)).toString("utf8");
+  const gitlinks: string[] = [];
+  for (const record of output.split("\0")) {
+    // "<mode> <object> <stage>\t<path>"
+    const tab = record.indexOf("\t");
+    if (tab !== -1 && record.startsWith("160000 ")) {
+      gitlinks.push(record.slice(tab + 1));
+    }
+  }
+  return gitlinks;
+}
+
 export async function listWorkingTreeFiles(
   cwd: string,
   relevantNames?: ReadonlySet<string>

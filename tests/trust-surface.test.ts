@@ -273,6 +273,36 @@ describe("nested instruction files", () => {
     expect(await instructionPaths(root)).toEqual([...INCLUDED].sort());
   });
 
+  it("finds instruction files inside a checked-out submodule and an embedded checkout", async () => {
+    const identity = ["-c", "user.email=fixture@safeinstall.test", "-c", "user.name=Fixture"];
+    const upstream = await createTempDir("safeinstall-nested-upstream-");
+    await run("git", ["init", "-q"], { cwd: upstream });
+    await put(upstream, "AGENTS.md", "# tracked in the submodule\n");
+    await put(upstream, "docs/CLAUDE.md");
+    await run("git", ["add", "-A"], { cwd: upstream });
+    await run("git", [...identity, "commit", "-qm", "init"], { cwd: upstream });
+
+    const root = await createTempDir("safeinstall-nested-submodule-");
+    await run("git", ["init", "-q"], { cwd: root });
+    await run(
+      "git",
+      [...identity, "-c", "protocol.file.allow=always", "submodule", "add", "-q", upstream, "packages/app"],
+      { cwd: root }
+    );
+    // Untracked inside the submodule: the parent listing shows neither file.
+    await put(root, "packages/app/sub/.cursorrules");
+    // An embedded checkout that the parent repository does not track at all.
+    await put(root, "vendor/tool/AGENTS.md");
+    await run("git", ["init", "-q"], { cwd: path.join(root, "vendor", "tool") });
+
+    expect(await instructionPaths(root)).toEqual([
+      "packages/app/AGENTS.md",
+      "packages/app/docs/CLAUDE.md",
+      "packages/app/sub/.cursorrules",
+      "vendor/tool/AGENTS.md"
+    ]);
+  });
+
   it("flags hidden Unicode in a nested instruction file as a hard finding", async () => {
     const root = await createTempDir("safeinstall-nested-unicode-");
     await put(root, "packages/app/AGENTS.md", "# ok\n");
