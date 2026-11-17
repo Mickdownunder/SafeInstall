@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it, vi, afterEach } from "vitest";
 
+import { DiskCache } from "../src/disk-cache";
 import { RegistryClient } from "../src/registry";
 import type { RequestedPackage } from "../src/types";
 import { present } from "./helpers/present";
@@ -168,14 +169,28 @@ describe("RegistryClient", () => {
     expect(present(fetchMock.mock.calls[2])[0]).toBe("https://mirror.example.internal/npm/axios");
   });
 
-  it("reuses exact-version metadata from the disk cache across client instances", async () => {
+  it("ignores planted disk metadata and fetches exact-version policy facts", async () => {
     const cacheDir = await createTempDir("safeinstall-registry-cache-");
     const requested = createRequestedPackage({
       requested: "1.14.0",
       registrySpecKind: "version"
     });
+    const diskCache = new DiskCache({ cacheDir, ttlMs: 60_000 });
+    const persistentKey = "https://registry.npmjs.org|axios@1.14.0";
+    await diskCache.setJson("registry-version-manifests-v1", persistentKey, {
+      version: "1.14.0",
+      scripts: {},
+      dist: {
+        tarball: "https://attacker.invalid/axios.tgz",
+        integrity: "sha512-attacker-selected"
+      }
+    });
+    await diskCache.setJson("registry-publish-times-v2", persistentKey, {
+      publishedAt: "2020-01-01T00:00:00.000Z",
+      source: "registry-time"
+    });
 
-    const firstFetchMock = vi
+    const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
         jsonResponse({
@@ -184,7 +199,8 @@ describe("RegistryClient", () => {
             postinstall: "node install.js"
           },
           dist: {
-            tarball: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz"
+            tarball: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+            integrity: "sha512-registry-observed"
           }
         })
       )
@@ -196,30 +212,21 @@ describe("RegistryClient", () => {
         })
       );
 
-    vi.stubGlobal("fetch", firstFetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
-    const firstResult = await new RegistryClient({
+    const result = await new RegistryClient({
       cacheDir,
       cacheTtlMs: 60_000
     }).resolvePackage(requested);
 
-    expect(firstResult.lifecycleScripts).toEqual(["postinstall"]);
-    expect(firstFetchMock).toHaveBeenCalledTimes(2);
-
-    const secondFetchMock = vi.fn().mockRejectedValue(new Error("network should not be used"));
-    vi.stubGlobal("fetch", secondFetchMock);
-
-    const secondResult = await new RegistryClient({
-      cacheDir,
-      cacheTtlMs: 60_000
-    }).resolvePackage(requested);
-
-    expect(secondResult.resolvedVersion).toBe("1.14.0");
-    expect(secondResult.lifecycleScripts).toEqual(["postinstall"]);
-    expect(secondResult.publishedAt.toISOString()).toBe("2026-03-27T19:01:42.000Z");
-    // The cache preserves the publish-time provenance, not just the date.
-    expect(secondResult.publishTimeSource).toBe("registry-time");
-    expect(secondFetchMock).not.toHaveBeenCalled();
+    expect(result.lifecycleScripts).toEqual(["postinstall"]);
+    expect(result.artifact).toEqual({
+      tarballUrl: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+      integrity: "sha512-registry-observed"
+    });
+    expect(result.publishedAt.toISOString()).toBe("2026-03-27T19:01:42.000Z");
+    expect(result.publishTimeSource).toBe("registry-time");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("falls back to the tarball last-modified header when the time map lacks the version", async () => {

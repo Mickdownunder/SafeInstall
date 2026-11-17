@@ -288,22 +288,31 @@ export async function runInstallFlow(
     config,
     options.signal
   );
-  const transitive = await evaluateTransitiveDependencies({
-    lockfilePath,
-    directLockfileKeys: directKeys,
-    config
-  });
+  // Explicit additions do not have their candidate lockfile yet. Their
+  // transitive policy is enforced by runBoundInstall after lockfile-only
+  // preparation and before the frozen install.
+  const transitive = plan.projectInstall
+    ? await evaluateTransitiveDependencies({
+        lockfilePath,
+        directLockfileKeys: directKeys,
+        config
+      })
+    : undefined;
 
   const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
   const warnings = [
     ...cliVersionWarnings,
     ...trustWarnings,
     ...evaluations.flatMap((evaluation) => evaluation.warnings),
-    ...transitive.warnings
+    ...(transitive?.warnings ?? [])
   ];
   const infos = evaluations.flatMap((evaluation) => evaluation.infos);
   const directBlockReasons = blocked.flatMap((evaluation) => evaluation.blockedReasons);
-  const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons, ...installOptionReasons(plan, config)];
+  const allBlockReasons = [
+    ...directBlockReasons,
+    ...(transitive?.blockedReasons ?? []),
+    ...installOptionReasons(plan, config)
+  ];
 
   // Bind the repository state BEFORE the package manager can change it: the
   // decision record's before/after lockfile bindings are what CI later

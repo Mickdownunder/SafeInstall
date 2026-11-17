@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  directLockfileKeys,
   discoverProjectInstallScope,
   inferProjectInstallTargetsForCheck,
   loadProjectInstallScope,
@@ -317,6 +318,37 @@ describe("loadNpmProjectInstallTargets", () => {
     });
   });
 
+  it("exempts only the selected direct npm node from the transitive scan", async () => {
+    const cwd = await createTempProject({
+      "package.json": JSON.stringify({ name: "demo", version: "1.0.0", dependencies: { axios: "1.14.0" } }),
+      "package-lock.json": JSON.stringify({
+        name: "demo",
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "demo", dependencies: { axios: "1.14.0" } },
+          "node_modules/axios": {
+            version: "1.14.0",
+            resolved: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+            integrity: "sha512-test"
+          },
+          "node_modules/parent": { version: "1.0.0", resolved: "https://registry.npmjs.org/parent/-/parent-1.0.0.tgz" },
+          "node_modules/parent/node_modules/axios": {
+            version: "0.1.0",
+            resolved: "https://example.com/axios-0.1.0.tgz",
+            hasInstallScript: true
+          }
+        }
+      })
+    });
+    const result = await loadNpmProjectInstallTargets(cwd, cwd);
+    const { collectNpmTransitivePackages } = await import("../src/transitive");
+    const lockfile = JSON.parse(await readFile(path.join(cwd, "package-lock.json"), "utf8"));
+    const keys = directLockfileKeys(result);
+    expect([...keys]).toEqual(["node_modules/axios"]);
+    const found = collectNpmTransitivePackages(lockfile, keys).map((p) => `${p.name}@${p.version}`);
+    expect(found).toEqual(["parent@1.0.0", "axios@0.1.0"]);
+  });
+
   it("blocks stale npm lockfiles when a direct dependency is missing", async () => {
     const cwd = await createTempProject({
       "package.json": JSON.stringify(
@@ -599,5 +631,38 @@ packages:
 
     const result = await inferProjectInstallTargetsForCheck(cwd, cwd);
     expect(result?.issues[0]).toContain("both pnpm-lock.yaml and an npm lockfile exist");
+  });
+
+  it("does not substitute an npm lockfile for a declared Bun project", async () => {
+    const cwd = await createTempProject({
+      "package.json": JSON.stringify({
+        name: "demo",
+        version: "1.0.0",
+        packageManager: "bun@1.3.0",
+        dependencies: { axios: "^1.14.0" }
+      }),
+      "bun.lock": "lockfileVersion = 1",
+      "package-lock.json": JSON.stringify({ lockfileVersion: 3, packages: {} })
+    });
+
+    const result = await inferProjectInstallTargetsForCheck(cwd, cwd);
+
+    expect(result).toBeUndefined();
+  });
+
+  it("does not choose a supported lockfile when an undeclared Bun lock is present", async () => {
+    const cwd = await createTempProject({
+      "package.json": JSON.stringify({
+        name: "demo",
+        version: "1.0.0",
+        dependencies: { axios: "^1.14.0" }
+      }),
+      "bun.lockb": "binary-lock-placeholder",
+      "pnpm-lock.yaml": "lockfileVersion: '9.0'\nimporters:\n  .: {}\n"
+    });
+
+    const result = await inferProjectInstallTargetsForCheck(cwd, cwd);
+
+    expect(result).toBeUndefined();
   });
 });
