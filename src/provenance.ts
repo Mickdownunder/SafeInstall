@@ -300,6 +300,27 @@ export async function defaultVerifyBundle(
   });
 }
 
+/**
+ * True when a verification error says nothing about the bundle itself: the
+ * Sigstore trust root (TUF) could not be fetched, e.g. while offline. The
+ * continuity check treats this as "unevaluated" instead of "no provenance",
+ * otherwise an offline run would report a false provenance downgrade.
+ */
+function isSigstoreInfrastructureError(error: unknown): boolean {
+  for (let current: unknown = error, depth = 0; current && depth < 4; depth += 1) {
+    const candidate = current as { name?: unknown; code?: unknown; cause?: unknown };
+    if (
+      candidate.name === "TUFError" ||
+      (typeof candidate.code === "string" &&
+        /^(TUF_|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ENETUNREACH|UND_ERR)/.test(candidate.code))
+    ) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
+}
+
 export function createDefaultProvenanceDependencies(): ProvenanceDependencies {
   return {
     fetchAttestations: defaultFetchAttestations,
@@ -348,25 +369,11 @@ export async function fetchAttestationIdentity(
   const url = attestationUrl(input.registryUrl, input.packageName, input.version);
   const cacheKey = `${input.registryUrl}|${input.packageName}@${input.version}`;
 
-  let rawResponse: NpmAttestationResponse | null = null;
-  const cached = input.diskCache
-    ? await input.diskCache.getJson<NpmAttestationResponse>(ATTESTATION_CACHE_NAMESPACE, cacheKey)
-    : undefined;
-  if (cached) {
-    rawResponse = cached;
-  } else {
-    try {
-      rawResponse = await fetchAttestations(url, input.signal);
-      if (rawResponse && input.diskCache) {
-        await input.diskCache.setJson(ATTESTATION_CACHE_NAMESPACE, cacheKey, rawResponse);
-      }
-    } catch {
-      const shutdownError = getShutdownSignalError(input.signal);
-      if (shutdownError) {
-        throw shutdownError;
-      }
-      return { hasProvenance: false };
-    }
+  // Continuity identity is security-sensitive, so it is always observed from
+  // the registry (never read back from the cache) and verified below.
+  const rawResponse = await fetchAttestations(url, input.signal);
+  if (rawResponse && input.diskCache) {
+    await input.diskCache.setJson(ATTESTATION_CACHE_NAMESPACE, cacheKey, rawResponse);
   }
 
   if (!rawResponse) {
@@ -398,7 +405,7 @@ export async function fetchAttestationIdentity(
   try {
     await verifyBundle(slsa.bundle, validatedStatement.signingIdentity);
   } catch (error) {
-    if (error instanceof SigstoreToolingUnavailableError) {
+    if (error instanceof SigstoreToolingUnavailableError || isSigstoreInfrastructureError(error)) {
       throw error;
     }
     return { hasProvenance: false };
@@ -499,7 +506,11 @@ function parseNpmPurl(
 function validateProvenanceStatement(
   bundle: Bundle,
   statement: Slsa1Statement,
-  input: Pick<VerifyProvenanceInput, "packageName" | "version" | "artifactIntegrity">
+  input: {
+    packageName: string;
+    version: string;
+    artifactIntegrity?: string | undefined;
+  }
 ): ValidatedProvenanceStatement | string {
   if (bundle.dsseEnvelope?.payloadType !== IN_TOTO_PAYLOAD_TYPE) {
     return "SLSA bundle has an unexpected DSSE payload type";

@@ -5,7 +5,8 @@
 ### Fixed
 
 - A config selected with `--config` can no longer replace the policy protected by a trust lock. `install` and `check` block with `trust-unbound-config` unless the effective config is the locked `safeinstall.config.json` at the trust root. The GitHub Action builds its command as an argument list and rejects `--config` in `args`.
-- Provenance continuity now verifies every network or cached Sigstore bundle before trusting its repository identity, and binds the signed subject to the package version and artifact SHA-512. Missing verification tooling leaves continuity unevaluated instead of treating unsigned registry fields as provenance.
+- Provenance continuity (`continuity.mode` `"warn"` or `"block"`, off by default) now verifies the Sigstore bundle of the target version and of every baseline version before trusting its source repository, and binds the signed subject to the package, version and artifact SHA-512. A forged, unsigned attestation can no longer make a malicious version look continuous or a legitimate one look like a publisher change; an attestation that fails verification counts as no provenance. When the optional `sigstore` package is missing or the Sigstore trust root cannot be fetched (offline), continuity is reported as unevaluated with a warning instead of passing or blocking on unverified data. Continuity now needs `sigstore` installed and costs one local bundle verification per sampled version.
+- `trust approve` and `trust unlock` also refuse to run when a parent process carries an agent or CI marker (`CI`, `CLAUDECODE`, `CODEX_SHELL`, `CURSOR_AGENT`). Removing the marker from the command's own environment (`env -u`, a script that opens a pseudo-terminal) no longer passes the human gate on Linux and macOS. The gate remains a barrier, not proof of human presence: Windows is not inspected, and a process that detaches from its parents is not recognised.
 
 ### Breaking changes
 

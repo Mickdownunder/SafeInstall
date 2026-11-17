@@ -13,6 +13,10 @@ import type {
   ResolvedRegistryPackage
 } from "../src/types";
 
+// The continuity check verifies each Sigstore bundle locally; the stubbed
+// bundles in this file are not real signatures, so the verifier is mocked.
+vi.mock("sigstore", () => ({ verify: vi.fn(async () => ({})) }));
+
 const tempDirs: string[] = [];
 
 async function createTempDir(prefix: string): Promise<string> {
@@ -294,7 +298,6 @@ describe("check_package continuity verdict (E2E through the MCP layer)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
-    vi.doUnmock("sigstore");
     vi.resetModules();
   });
 
@@ -302,7 +305,6 @@ describe("check_package continuity verdict (E2E through the MCP layer)", () => {
     const cwd = await createTempDir("safeinstall-mcp-continuity-");
     const cacheDir = await createTempDir("safeinstall-mcp-cache-");
     vi.stubEnv("SAFEINSTALL_CACHE_DIR", cacheDir);
-    vi.doMock("sigstore", () => ({ verify: vi.fn(async () => ({})) }));
 
     // Stub only the network the continuity check uses: version history and
     // per-version attestations. The baseline (1.0.0–1.2.0) is attested from

@@ -4,9 +4,6 @@ import type { AttestationIdentity } from "./provenance";
 import { getShutdownSignalError, throwIfAborted } from "./signals";
 import type { ContinuityConfig, ContinuityResult } from "./types";
 
-// v2 records the artifact integrity needed to bind each verified attestation
-// to the exact package bytes. v1 entries cannot safely supply that binding.
-const VERSION_HISTORY_CACHE_NAMESPACE = "registry-version-history-v2";
 const VERSION_HISTORY_FETCH_TIMEOUT_MS = 15_000;
 
 // A package whose recent history is at least this provenance-bearing is
@@ -61,25 +58,8 @@ function createFetchSignal(signal?: AbortSignal): AbortSignal {
 export function createDefaultContinuityDependencies(diskCache?: DiskCache): ContinuityDependencies {
   return {
     async fetchVersionHistory(packageName, registryUrl, signal) {
-      const cacheKey = `${registryUrl}|${packageName}`;
-      const cached = diskCache
-        ? await diskCache.getJson<
-            Array<{ version: string; publishedAt: string; artifactIntegrity?: string }>
-          >(
-            VERSION_HISTORY_CACHE_NAMESPACE,
-            cacheKey
-          )
-        : undefined;
-      if (cached) {
-        return cached.map((entry) => ({
-          version: entry.version,
-          publishedAt: new Date(entry.publishedAt),
-          ...(typeof entry.artifactIntegrity === "string"
-            ? { artifactIntegrity: entry.artifactIntegrity }
-            : {})
-        }));
-      }
-
+      // Baseline membership directly controls continuity decisions, so it
+      // must come from the selected registry rather than an unsigned cache.
       const base = registryUrl.replace(/\/+$/, "");
       const response = await fetch(`${base}/${encodePackageNameForUrl(packageName)}`, {
         signal: createFetchSignal(signal)
@@ -109,20 +89,6 @@ export function createDefaultContinuityDependencies(diskCache?: DiskCache): Cont
           publishedAt,
           ...(typeof artifactIntegrity === "string" ? { artifactIntegrity } : {})
         });
-      }
-
-      if (diskCache) {
-        await diskCache.setJson(
-          VERSION_HISTORY_CACHE_NAMESPACE,
-          cacheKey,
-          records.map((record) => ({
-            version: record.version,
-            publishedAt: record.publishedAt.toISOString(),
-            ...(record.artifactIntegrity
-              ? { artifactIntegrity: record.artifactIntegrity }
-              : {})
-          }))
-        );
       }
 
       return records;
