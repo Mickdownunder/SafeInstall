@@ -24,7 +24,12 @@ import type {
 const ATTESTATION_CACHE_NAMESPACE = "registry-attestations-v1";
 const ATTESTATION_FETCH_TIMEOUT_MS = 15_000;
 const SLSA_PREDICATE_TYPE_PREFIX = "https://slsa.dev/provenance";
+const SLSA_V1_PREDICATE_TYPE = "https://slsa.dev/provenance/v1";
+const IN_TOTO_STATEMENT_V1_TYPE = "https://in-toto.io/Statement/v1";
+const IN_TOTO_PAYLOAD_TYPE = "application/vnd.in-toto+json";
 const GITHUB_URL_PREFIX = "https://github.com/";
+const GITHUB_ACTIONS_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
+const GITHUB_WORKFLOW_PATH_PREFIX = ".github/workflows/";
 
 interface NpmAttestationResponse {
   attestations?: Array<{
@@ -187,8 +192,13 @@ export function isProvenanceRequired(config: ProvenanceConfig, packageName: stri
 export interface ProvenanceDependencies {
   /** Fetch attestation JSON from the registry. Return null on 404. */
   fetchAttestations(url: string, signal?: AbortSignal): Promise<NpmAttestationResponse | null>;
-  /** Cryptographically verify a Sigstore bundle. Throws on failure. */
-  verifyBundle(bundle: Bundle): Promise<void>;
+  /** Cryptographically verify a Sigstore bundle and its expected signer. Throws on failure. */
+  verifyBundle(bundle: Bundle, signingIdentity: ProvenanceSigningIdentity): Promise<void>;
+}
+
+export interface ProvenanceSigningIdentity {
+  certificateIssuer: string;
+  certificateIdentityURI: string;
 }
 
 async function defaultFetchAttestations(
@@ -225,16 +235,23 @@ export class SigstoreToolingUnavailableError extends Error {
   }
 }
 
-async function defaultVerifyBundle(bundle: Bundle): Promise<void> {
-  let verify: (b: unknown) => Promise<unknown>;
+async function defaultVerifyBundle(
+  bundle: Bundle,
+  signingIdentity: ProvenanceSigningIdentity
+): Promise<void> {
+  let verify: (
+    b: unknown,
+    payload: Buffer | undefined,
+    options: ProvenanceSigningIdentity
+  ) => Promise<unknown>;
   try {
     const sigstore = await import("sigstore");
-    verify = sigstore.verify as (b: unknown) => Promise<unknown>;
+    verify = sigstore.verify as typeof verify;
   } catch {
     // The tool is not installed — distinct from a bundle that fails to verify.
     throw new SigstoreToolingUnavailableError();
   }
-  await verify(bundle);
+  await verify(bundle, undefined, signingIdentity);
 }
 
 export function createDefaultProvenanceDependencies(): ProvenanceDependencies {
@@ -334,6 +351,7 @@ export async function fetchAttestationIdentity(
 export interface VerifyProvenanceInput {
   packageName: string;
   version: string;
+  artifactIntegrity: string | undefined;
   registryUrl: string;
   diskCache: DiskCache;
   config: ProvenanceConfig;
@@ -341,10 +359,163 @@ export interface VerifyProvenanceInput {
   signal?: AbortSignal | undefined;
 }
 
+interface ValidatedProvenanceStatement {
+  sourceRepository: string;
+  sourceRef: string;
+  workflowPath: string;
+  builderId?: string | undefined;
+  signingIdentity: ProvenanceSigningIdentity;
+}
+
+function sha512DigestFromIntegrity(integrity: string | undefined): string | undefined {
+  const entry = (integrity ?? "").trim();
+  if (!/^sha512-[A-Za-z0-9+/]{86}==$/.test(entry)) {
+    return undefined;
+  }
+
+  const encoded = entry.slice("sha512-".length);
+  const digest = Buffer.from(encoded, "base64");
+  if (digest.length !== 64 || digest.toString("base64") !== encoded) {
+    return undefined;
+  }
+  return digest.toString("hex");
+}
+
+function decodePurlSegment(value: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    const decoded = decodeURIComponent(value);
+    return decoded.includes("/") ? undefined : decoded;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseNpmPurl(
+  value: string | undefined
+): { packageName: string; version: string } | undefined {
+  const prefix = "pkg:npm/";
+  if (!value?.startsWith(prefix) || value.includes("?") || value.includes("#")) {
+    return undefined;
+  }
+
+  const identity = value.slice(prefix.length);
+  const versionSeparator = identity.lastIndexOf("@");
+  if (versionSeparator <= 0 || versionSeparator === identity.length - 1) {
+    return undefined;
+  }
+
+  const packageSegments = identity.slice(0, versionSeparator).split("/");
+  const version = decodePurlSegment(identity.slice(versionSeparator + 1));
+  if (!version) {
+    return undefined;
+  }
+
+  if (packageSegments.length === 1) {
+    const packageName = decodePurlSegment(packageSegments[0]!);
+    if (!packageName || packageName.startsWith("@")) {
+      return undefined;
+    }
+    return { packageName, version };
+  }
+
+  if (packageSegments.length === 2) {
+    const scope = decodePurlSegment(packageSegments[0]!);
+    const name = decodePurlSegment(packageSegments[1]!);
+    if (!scope?.startsWith("@") || scope.length === 1 || !name) {
+      return undefined;
+    }
+    return { packageName: `${scope}/${name}`, version };
+  }
+
+  return undefined;
+}
+
+function validateProvenanceStatement(
+  bundle: Bundle,
+  statement: Slsa1Statement,
+  input: Pick<VerifyProvenanceInput, "packageName" | "version" | "artifactIntegrity">
+): ValidatedProvenanceStatement | string {
+  if (bundle.dsseEnvelope?.payloadType !== IN_TOTO_PAYLOAD_TYPE) {
+    return "SLSA bundle has an unexpected DSSE payload type";
+  }
+  if (statement._type !== IN_TOTO_STATEMENT_V1_TYPE) {
+    return "SLSA statement has an unexpected in-toto statement type";
+  }
+  if (statement.predicateType !== SLSA_V1_PREDICATE_TYPE) {
+    return "SLSA statement has an unexpected signed predicate type";
+  }
+
+  if (!Array.isArray(statement.subject) || statement.subject.length !== 1) {
+    return "SLSA statement must contain exactly one package subject";
+  }
+  const subject = statement.subject[0]!;
+  const subjectIdentity = parseNpmPurl(subject.name);
+  if (
+    !subjectIdentity ||
+    subjectIdentity.packageName !== input.packageName ||
+    subjectIdentity.version !== input.version
+  ) {
+    return `SLSA statement subject does not match ${input.packageName}@${input.version}`;
+  }
+
+  const expectedDigest = sha512DigestFromIntegrity(input.artifactIntegrity);
+  if (!expectedDigest) {
+    return "registry manifest is missing a canonical SHA-512 artifact integrity";
+  }
+  const subjectDigest = subject.digest?.sha512;
+  if (!subjectDigest || !/^[a-fA-F0-9]{128}$/.test(subjectDigest)) {
+    return "SLSA statement subject is missing a valid SHA-512 digest";
+  }
+  if (subjectDigest.toLowerCase() !== expectedDigest) {
+    return "SLSA statement subject SHA-512 does not match the registry artifact";
+  }
+
+  const workflow = statement.predicate?.buildDefinition?.externalParameters?.workflow;
+  const sourceRepository = extractRepositorySlug(workflow?.repository);
+  if (!sourceRepository) {
+    return "SLSA statement is missing a GitHub repository URL";
+  }
+  const canonicalRepositoryUrl = `${GITHUB_URL_PREFIX}${sourceRepository}`;
+  if (
+    workflow?.repository !== canonicalRepositoryUrl &&
+    workflow?.repository !== `${canonicalRepositoryUrl}.git`
+  ) {
+    return "SLSA statement has a non-canonical GitHub repository URL";
+  }
+
+  const workflowPath = workflow?.path;
+  if (
+    !workflowPath?.startsWith(GITHUB_WORKFLOW_PATH_PREFIX) ||
+    workflowPath === GITHUB_WORKFLOW_PATH_PREFIX ||
+    workflowPath.split("/").some((segment) => !segment || segment === "." || segment === "..")
+  ) {
+    return "SLSA statement is missing a valid GitHub Actions workflow path";
+  }
+  const sourceRef = workflow?.ref;
+  if (!sourceRef?.startsWith("refs/")) {
+    return "SLSA statement is missing a valid GitHub ref";
+  }
+
+  return {
+    sourceRepository,
+    sourceRef,
+    workflowPath,
+    builderId: statement.predicate?.runDetails?.builder?.id,
+    signingIdentity: {
+      certificateIssuer: GITHUB_ACTIONS_OIDC_ISSUER,
+      certificateIdentityURI: `${canonicalRepositoryUrl}/${workflowPath}@${sourceRef}`
+    }
+  };
+}
+
 /**
  * Fetch the attestation bundle for a package version from the npm registry,
- * cryptographically verify the SLSA provenance attestation via Sigstore, and
- * return a structured verification result.
+ * bind its signed subject to the resolved registry artifact and GitHub Actions
+ * signer, cryptographically verify it via Sigstore, and return a structured
+ * verification result.
  *
  * Never throws on ordinary failure modes (missing attestations, network
  * errors, verification failures). Callers translate the result status into a
@@ -405,8 +576,21 @@ export async function verifyProvenance(
     return { status: "missing" };
   }
 
+  const statement = parseStatement(slsa.bundle);
+  if (!statement) {
+    return {
+      status: "invalid",
+      error: "could not decode SLSA statement payload from bundle"
+    };
+  }
+
+  const validatedStatement = validateProvenanceStatement(slsa.bundle, statement, input);
+  if (typeof validatedStatement === "string") {
+    return { status: "invalid", error: validatedStatement };
+  }
+
   try {
-    await deps.verifyBundle(slsa.bundle);
+    await deps.verifyBundle(slsa.bundle, validatedStatement.signingIdentity);
   } catch (error) {
     // Missing verification tooling is an environment state, not a verdict on
     // this package: report it distinctly so the policy layer degrades it to a
@@ -423,28 +607,11 @@ export async function verifyProvenance(
     };
   }
 
-  const statement = parseStatement(slsa.bundle);
-  if (!statement) {
-    return {
-      status: "invalid",
-      error: "could not decode SLSA statement payload from bundle"
-    };
-  }
-
-  const workflow = statement.predicate?.buildDefinition?.externalParameters?.workflow;
-  const sourceRepository = extractRepositorySlug(workflow?.repository);
-  if (!sourceRepository) {
-    return {
-      status: "invalid",
-      error: "SLSA statement is missing a GitHub repository URL"
-    };
-  }
-
   return {
     status: "verified",
-    sourceRepository,
-    sourceRef: workflow?.ref,
-    workflowPath: workflow?.path,
-    builderId: statement.predicate?.runDetails?.builder?.id
+    sourceRepository: validatedStatement.sourceRepository,
+    sourceRef: validatedStatement.sourceRef,
+    workflowPath: validatedStatement.workflowPath,
+    builderId: validatedStatement.builderId
   };
 }
