@@ -101,6 +101,17 @@ export function parsePnpmPackageKey(
   return name && version ? { name, version } : undefined;
 }
 
+/** Drop the peer-dependency context from a pnpm package key (`(peer)` in v6+, `_peer` in v5). */
+function stripPnpmPeerSuffix(packageKey: string): string {
+  const base = packageKey.replace(/\(.*\)$/, "");
+  if (base.startsWith("/")) {
+    const slash = base.lastIndexOf("/");
+    const underscore = base.indexOf("_", slash);
+    return underscore === -1 ? base : base.slice(0, underscore);
+  }
+  return base;
+}
+
 function dedupe(packages: TransitivePackage[]): TransitivePackage[] {
   const seen = new Set<string>();
   const result: TransitivePackage[] = [];
@@ -117,7 +128,7 @@ function dedupe(packages: TransitivePackage[]): TransitivePackage[] {
 
 export function collectNpmTransitivePackages(
   lockfile: NpmLockfileTree,
-  directNames: ReadonlySet<string>,
+  directLockfileKeys: ReadonlySet<string>,
   registryUrl?: string
 ): TransitivePackage[] {
   const packages = lockfile.packages ?? {};
@@ -128,7 +139,9 @@ export function collectNpmTransitivePackages(
       continue;
     }
     const name = extractNpmName(key);
-    if (!name || directNames.has(name)) {
+    // A package name is not a node identity: only the selected direct key is
+    // exempt, while nested same-name instances remain subject to policy.
+    if (!name || directLockfileKeys.has(key)) {
       continue;
     }
     collected.push({
@@ -147,15 +160,19 @@ export function collectNpmTransitivePackages(
 
 export function collectPnpmTransitivePackages(
   lockfile: PnpmLockfileTree,
-  directNames: ReadonlySet<string>,
+  directLockfileKeys: ReadonlySet<string>,
   registryUrl?: string
 ): TransitivePackage[] {
   const packages = lockfile.packages ?? {};
   const collected: TransitivePackage[] = [];
+  const directKeys = new Set([...directLockfileKeys].map(stripPnpmPeerSuffix));
 
   for (const [key, entry] of Object.entries(packages)) {
     const parsed = parsePnpmPackageKey(key);
-    if (!parsed || directNames.has(parsed.name)) {
+    // A direct package exempts its resolved package record (including every
+    // peer-context variant of it), not every record that parses to the same
+    // name.
+    if (!parsed || directKeys.has(stripPnpmPeerSuffix(key))) {
       continue;
     }
     const tarball = entry.resolution?.tarball;
@@ -252,7 +269,7 @@ export function evaluateTransitivePackages(
 function collectFromLockfile(
   lockfilePath: string,
   rawLockfile: string,
-  directNames: ReadonlySet<string>,
+  directLockfileKeys: ReadonlySet<string>,
   registryUrl?: string
 ): TransitivePackage[] {
   const basename = path.basename(lockfilePath);
@@ -266,7 +283,7 @@ function collectFromLockfile(
     ) {
       throw new Error("Unsupported pnpm lockfile structure.");
     }
-    return collectPnpmTransitivePackages(lockfile as PnpmLockfileTree, directNames, registryUrl);
+    return collectPnpmTransitivePackages(lockfile as PnpmLockfileTree, directLockfileKeys, registryUrl);
   }
 
   if (basename === "package-lock.json" || basename === "npm-shrinkwrap.json") {
@@ -278,7 +295,7 @@ function collectFromLockfile(
     ) {
       throw new Error("Unsupported npm lockfile structure.");
     }
-    return collectNpmTransitivePackages(lockfile as NpmLockfileTree, directNames, registryUrl);
+    return collectNpmTransitivePackages(lockfile as NpmLockfileTree, directLockfileKeys, registryUrl);
   }
 
   throw new Error(`Unsupported lockfile: ${basename}`);
@@ -338,7 +355,7 @@ function unavailableEvaluation(
  */
 export async function evaluateTransitiveDependencies(options: {
   lockfilePath: string | undefined;
-  directNames: ReadonlySet<string>;
+  directLockfileKeys: ReadonlySet<string>;
   config: SafeInstallConfig;
 }): Promise<TransitiveEvaluation> {
   const empty: TransitiveEvaluation = {
@@ -388,7 +405,7 @@ export async function evaluateTransitiveDependencies(options: {
     packages = collectFromLockfile(
       options.lockfilePath,
       rawLockfile,
-      options.directNames,
+      options.directLockfileKeys,
       options.config.registryUrl
     );
   } catch {

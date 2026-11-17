@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  directLockfileKeys,
   discoverProjectInstallScope,
   inferProjectInstallTargetsForCheck,
   loadProjectInstallScope,
@@ -109,6 +110,7 @@ snapshots:
     expect(result.issues).toEqual([]);
     expect(present(result.targets[0])).toMatchObject({
       integrity: "sha512-approved",
+      lockfileKey: "vitest@4.1.11",
       requested: { name: "vitest", requested: "4.1.11", sourceType: "registry" }
     });
   });
@@ -307,12 +309,44 @@ describe("loadNpmProjectInstallTargets", () => {
     const result = await loadNpmProjectInstallTargets(cwd, cwd);
 
     expect(result.issues).toEqual([]);
+    expect(present(result.targets[0]).lockfileKey).toBe("node_modules/axios");
     expect(present(result.targets[0]).requested).toMatchObject({
       name: "axios",
       sourceType: "registry",
       requested: "1.14.0",
       registrySpecKind: "version"
     });
+  });
+
+  it("exempts only the selected direct npm node from the transitive scan", async () => {
+    const cwd = await createTempProject({
+      "package.json": JSON.stringify({ name: "demo", version: "1.0.0", dependencies: { axios: "1.14.0" } }),
+      "package-lock.json": JSON.stringify({
+        name: "demo",
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "demo", dependencies: { axios: "1.14.0" } },
+          "node_modules/axios": {
+            version: "1.14.0",
+            resolved: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+            integrity: "sha512-test"
+          },
+          "node_modules/parent": { version: "1.0.0", resolved: "https://registry.npmjs.org/parent/-/parent-1.0.0.tgz" },
+          "node_modules/parent/node_modules/axios": {
+            version: "0.1.0",
+            resolved: "https://example.com/axios-0.1.0.tgz",
+            hasInstallScript: true
+          }
+        }
+      })
+    });
+    const result = await loadNpmProjectInstallTargets(cwd, cwd);
+    const { collectNpmTransitivePackages } = await import("../src/transitive");
+    const lockfile = JSON.parse(await readFile(path.join(cwd, "package-lock.json"), "utf8"));
+    const keys = directLockfileKeys(result);
+    expect([...keys]).toEqual(["node_modules/axios"]);
+    const found = collectNpmTransitivePackages(lockfile, keys).map((p) => `${p.name}@${p.version}`);
+    expect(found).toEqual(["parent@1.0.0", "axios@0.1.0"]);
   });
 
   it("blocks stale npm lockfiles when a direct dependency is missing", async () => {

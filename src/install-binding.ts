@@ -5,6 +5,7 @@ import path from "node:path";
 import { evaluateRequestedPackages } from "./evaluations";
 import { runPackageManager, type PackageManagerExecutionResult } from "./package-managers";
 import {
+  directLockfileKeys,
   discoverProjectInstallScope,
   loadProjectInstallScope,
   loadProjectInstallTargetsForManager,
@@ -328,7 +329,7 @@ export async function runBoundInstall(options: {
     registryClient, config, options.signal, await loadHeadSourceBaseline(scope.manifests, config));
   const evaluations = [...options.evaluations, ...additional];
   const transitive = await evaluateTransitiveDependencies({ lockfilePath: targets.lockfilePath,
-    directNames: new Set(evaluations.map((evaluation) => evaluation.requested.name)), config });
+    directLockfileKeys: directLockfileKeys(targets), config });
   const reasons = [...additional.flatMap((evaluation) => evaluation.blockedReasons), ...transitive.blockedReasons];
   if (reasons.length) throw new InstallBindingError(reasons, Boolean(preparation));
   verifyTargets(targets, approve(evaluations, config.registryUrl, Boolean(preparation)), Boolean(preparation));

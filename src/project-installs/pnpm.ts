@@ -103,40 +103,40 @@ function getImporter(lockfile: PnpmLockfile, importerKey: string): PnpmImporter 
   return undefined;
 }
 
-function findPackageEntry(
+function findPackageKey(
   packages: Record<string, PnpmPackageEntry> | undefined,
   name: string,
   versionRef: string
-): PnpmPackageEntry | undefined {
+): string | undefined {
   if (!packages) {
     return undefined;
   }
 
   const exactKey = `${name}@${versionRef}`;
   if (packages[exactKey]) {
-    return packages[exactKey];
+    return exactKey;
   }
 
   const legacyKey = `/${name}/${versionRef}`;
   if (packages[legacyKey]) {
-    return packages[legacyKey];
+    return legacyKey;
   }
 
   // pnpm v9 stores peer context in importer/snapshot keys, but the archive's
   // integrity remains under the peer-independent name@version package key.
   const version = extractSemverPrefix(versionRef);
   if (version && versionRef.startsWith(`${version}(`)) {
-    const artifactEntry = packages[`${name}@${version}`];
-    if (artifactEntry) return artifactEntry;
+    const artifactKey = `${name}@${version}`;
+    if (packages[artifactKey]) return artifactKey;
   }
 
   const matchingKey = Object.keys(packages).find((entryKey) => entryKey === exactKey || entryKey.startsWith(`${exactKey}(`));
   if (matchingKey) {
-    return packages[matchingKey];
+    return matchingKey;
   }
 
   const legacyMatchingKey = Object.keys(packages).find((entryKey) => entryKey === legacyKey || entryKey.startsWith(`${legacyKey}_`));
-  return legacyMatchingKey ? packages[legacyMatchingKey] : undefined;
+  return legacyMatchingKey;
 }
 
 export async function loadPnpmProjectInstallTargets(
@@ -218,7 +218,8 @@ export async function loadPnpmProjectInstallTargets(
       continue;
     }
 
-    const packageEntry = findPackageEntry(lockfile.packages, name, importerDependency.version);
+    const packageKey = findPackageKey(lockfile.packages, name, importerDependency.version);
+    const packageEntry = packageKey ? lockfile.packages?.[packageKey] : undefined;
     const declaredSourceType = classifyDeclaredSource(manifestSpec);
 
     if (importerDependency.version.startsWith("link:")) {
@@ -254,6 +255,7 @@ export async function loadPnpmProjectInstallTargets(
 
     targets.push({
       manifestSpec,
+      lockfileKey: packageKey,
       integrity: packageEntry?.resolution?.integrity,
       tarballUrl: packageEntry?.resolution?.tarball,
       requested:

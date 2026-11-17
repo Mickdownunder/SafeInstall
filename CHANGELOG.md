@@ -13,6 +13,8 @@
 
 - A dependency that moves from the registry to a git, URL, or tarball source is now caught even when `allowedSources` permits that source and the attacker edited `package.json`. The prior source is read from a committed manifest: the base commit in `decisions authorize` (root project and every lockfile importer; a moved importer is matched to the base package with the same `name`) and git `HEAD` in project-level `check` and installs. The new `sourceBaselines` config key is only a fallback when no `HEAD` manifest exists, and `decisions authorize` ignores it.
 
+- The transitive check no longer skips every lockfile entry that shares a name with a direct dependency. Only the resolved direct entry is exempt, so a nested or alternate-version copy (for example `node_modules/parent/node_modules/axios` from a git URL or with an install script) is now evaluated.
+
 ### Breaking changes
 
 - Outside a git repository (or with an unborn `HEAD` or an untracked manifest), projects that allow `git`, `url`, or `tarball` in `allowedSources` are blocked with `trust-level-dropped` for each such dependency until it is listed in `sourceBaselines`. Projects in git repositories with a committed manifest are unaffected.
