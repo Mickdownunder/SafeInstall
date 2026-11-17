@@ -39,7 +39,7 @@ Use the command that matches the package manager and workflow you expected to us
 
 ## Known Limits
 
-- Artifact-bound installation supports npm and pnpm. Bun installs fail closed until an artifact-binding adapter exists. yarn is not supported, and the agent guard denies yarn installs.
+- Artifact-bound installation supports npm and pnpm. Bun installs fail closed until an artifact-binding adapter exists. yarn is not supported, and the shell guard denies yarn installs.
 - Install binding requires canonical SHA-512 metadata and matching lockfile entries. Global installs, explicit non-registry additions, conflicting registries, script-enabling flags, and unknown options block.
 - Explicit additions prepare a lockfile before frozen installation. Failed checks can leave manifest/lockfile changes for inspection. npm's frozen phase uses `ci`, replacing `node_modules`; shared-lockfile workspaces review all recorded importers.
 - Transitive dependency policy (opt-in via `transitive.mode`) runs only the `install-script` and `untrusted-source` checks. Transitive install-script detection works for npm lockfiles only (pnpm lockfiles do not record script presence). Release-age, typo-squat, provenance, and continuity checks apply to direct dependencies only.
