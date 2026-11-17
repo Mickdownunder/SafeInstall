@@ -410,34 +410,59 @@ export interface TrustSurfaceStatus {
   instructionWarnings: string[];
 }
 
+/** The nearest repository root, recognizing normal checkouts and worktrees. */
+export async function findTrustRepositoryRoot(startDir: string): Promise<string | undefined> {
+  let currentDir = path.resolve(startDir);
+
+  while (true) {
+    if (await fileExists(path.join(currentDir, ".git"))) {
+      return currentDir;
+    }
+
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      return undefined;
+    }
+    currentDir = parentDir;
+  }
+}
+
+async function readTrustContextAt(root: string): Promise<{ root: string; hasLock: boolean } | undefined> {
+  if (await fileExists(trustLockPath(root))) {
+    return { root, hasLock: true };
+  }
+  if ((await readLedgerHeadMirror(root)) !== undefined) {
+    return { root, hasLock: false };
+  }
+  return undefined;
+}
+
 /**
- * Walk upward from a directory looking for a trust lock. A directory whose
+ * Locate the authoritative trust lock for a directory. A directory whose
  * ledger-head mirror exists in the user's state dir but whose lock file is
  * gone was tampered with: deleting the lock must not silently disable the
  * trust surface.
  *
- * The walk never leaves the repository that contains `startDir`: a `.git`
- * entry (directory in a normal checkout, file in a worktree or submodule)
- * marks the boundary. Without this stop, a nested checkout — a git worktree
- * under the main checkout's tree, a submodule, a vendored repo — would
- * silently inherit the trust context of the enclosing checkout, and its
- * lock, approvals, and guard decisions would be governed by a baseline it
- * does not own.
+ * Repository membership is resolved before any lock is accepted. Only the
+ * lock at that repository's root is authoritative, so an untrusted child
+ * cannot shadow the policy and hooks that callers load from the root. A
+ * nested checkout remains independent because its own `.git` entry is the
+ * nearest repository boundary. Outside a repository, the nearest enclosing
+ * lock retains the standalone-directory behavior.
  */
 export async function findTrustContext(
   startDir: string
 ): Promise<{ root: string; hasLock: boolean } | undefined> {
-  let currentDir = path.resolve(startDir);
+  const repositoryRoot = await findTrustRepositoryRoot(startDir);
+  if (repositoryRoot !== undefined) {
+    return readTrustContextAt(repositoryRoot);
+  }
 
+  let currentDir = path.resolve(startDir);
   while (true) {
-    if (await fileExists(trustLockPath(currentDir))) {
-      return { root: currentDir, hasLock: true };
-    }
-    if ((await readLedgerHeadMirror(currentDir)) !== undefined) {
-      return { root: currentDir, hasLock: false };
-    }
-    if (await fileExists(path.join(currentDir, ".git"))) {
-      return undefined;
+    const context = await readTrustContextAt(currentDir);
+    if (context !== undefined) {
+      return context;
     }
 
     const parentDir = path.dirname(currentDir);

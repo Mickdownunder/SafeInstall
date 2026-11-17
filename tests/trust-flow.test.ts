@@ -105,6 +105,21 @@ describe("runTrustLockFlow", () => {
     expect(result.infos.some((info) => info.includes("safeinstall.config.json"))).toBe(true);
   });
 
+  it("creates the baseline at the repository root when invoked from a subdirectory", async () => {
+    const root = await seedProject();
+    await mkdir(path.join(root, ".git"), { recursive: true });
+    const sub = path.join(root, "packages", "app");
+    await mkdir(sub, { recursive: true });
+
+    const result = await runTrustLockFlow(sub, ["trust", "lock"]);
+
+    expect(result.decision).toBe("allow");
+    await expect(readFile(path.join(root, ".safeinstall", "trust-surface.lock"), "utf8")).resolves.toContain(
+      '"schemaVersion": 1'
+    );
+    await expect(readFile(path.join(sub, ".safeinstall", "trust-surface.lock"), "utf8")).rejects.toThrow();
+  });
+
   it("refuses to lock twice, reporting drift instead", async () => {
     const root = await seedProject();
     await runTrustLockFlow(root, ["trust", "lock"]);

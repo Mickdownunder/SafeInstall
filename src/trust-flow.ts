@@ -18,6 +18,7 @@ import {
 import {
   computeBaselineHash,
   findTrustContext,
+  findTrustRepositoryRoot,
   readTrustLock,
   snapshotTrustSurface,
   trustLedgerPath,
@@ -291,7 +292,7 @@ export async function runTrustLockFlow(cwd: string, argv: string[]): Promise<Cli
     });
   }
 
-  const root = cwd;
+  const root = (await findTrustRepositoryRoot(cwd)) ?? path.resolve(cwd);
   const preScaffold = await snapshotTrustSurface(root);
   if (preScaffold.files.length === 0 && preScaffold.mcpServers.length === 0) {
     return baseResult(argv, {
