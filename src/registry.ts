@@ -1,7 +1,6 @@
 import semver from "semver";
 
 import { DEFAULT_REGISTRY_URL } from "./config";
-import { DiskCache } from "./disk-cache";
 import { getShutdownSignalError, throwIfAborted } from "./signals";
 import type {
   InstallLifecycleScriptName,
@@ -35,12 +34,6 @@ interface RegistryVersionManifest {
 
 const ABBREVIATED_METADATA_HEADER = "application/vnd.npm.install-v1+json";
 const REGISTRY_FETCH_TIMEOUT_MS = 15_000;
-const REGISTRY_DISK_CACHE_TTL_MS = 60 * 60 * 1000;
-const VERSION_MANIFEST_CACHE_NAMESPACE = "registry-version-manifests-v1";
-// v2: entries carry { publishedAt, source } and the priority flipped to the
-// registry time map (RFC-001 §14 D7) — v1 entries were header-derived dates
-// with no provenance, so they are deliberately not readable here.
-const PUBLISH_TIME_CACHE_NAMESPACE = "registry-publish-times-v2";
 
 function encodePackageName(name: string): string {
   // Preserve the leading "@" for scoped packages so the registry URL reads
@@ -63,10 +56,6 @@ function cacheKey(packageName: string, version: string): string {
   return `${packageName}@${version}`;
 }
 
-function scopedCacheKey(registryUrl: string, packageName: string, version: string): string {
-  return `${registryUrl}|${cacheKey(packageName, version)}`;
-}
-
 function parsePublishedAt(packageName: string, version: string, rawValue: string): Date {
   const publishedAt = new Date(rawValue);
   if (Number.isNaN(publishedAt.getTime())) {
@@ -83,7 +72,6 @@ interface PublishTimeRecord {
 
 export class RegistryClient {
   private readonly registryUrl: string;
-  private readonly diskCache: DiskCache;
   private readonly signal?: AbortSignal | undefined;
   private readonly packageCache = new Map<string, RegistryPackageDocument>();
   private readonly versionCache = new Map<string, RegistryVersionManifest>();
@@ -92,15 +80,13 @@ export class RegistryClient {
 
   constructor(options?: {
     registryUrl?: string;
+    /** @deprecated Registry policy metadata is always revalidated online. */
     cacheDir?: string;
+    /** @deprecated Registry policy metadata is always revalidated online. */
     cacheTtlMs?: number;
     signal?: AbortSignal | undefined;
   }) {
     this.registryUrl = (options?.registryUrl ?? DEFAULT_REGISTRY_URL).replace(/\/+$/, "");
-    this.diskCache = new DiskCache({
-      cacheDir: options?.cacheDir,
-      ttlMs: options?.cacheTtlMs ?? REGISTRY_DISK_CACHE_TTL_MS
-    });
     this.signal = options?.signal;
   }
 
@@ -176,23 +162,14 @@ export class RegistryClient {
       return cached;
     }
 
-    const persistentKey = scopedCacheKey(this.registryUrl, packageName, version);
-    const cachedFromDisk = await this.diskCache.getJson<RegistryVersionManifest>(
-      VERSION_MANIFEST_CACHE_NAMESPACE,
-      persistentKey
-    );
-    if (cachedFromDisk) {
-      this.versionCache.set(versionKey, cachedFromDisk);
-      return cachedFromDisk;
-    }
-
+    // Registry manifests supply lifecycle scripts and artifact identity, so
+    // only a fresh registry observation may populate the in-process cache.
     const manifest = await this.fetchJson<RegistryVersionManifest>(
       `${this.registryUrl}/${encodePackageName(packageName)}/${encodeURIComponent(version)}`,
       `${packageName}@${version}`
     );
 
     this.versionCache.set(versionKey, manifest);
-    await this.diskCache.setJson(VERSION_MANIFEST_CACHE_NAMESPACE, persistentKey, manifest);
     return manifest;
   }
 
@@ -208,49 +185,91 @@ export class RegistryClient {
       return cached;
     }
 
-    const persistentKey = scopedCacheKey(this.registryUrl, packageName, version);
-    const cachedFromDisk = await this.diskCache.getJson<{ publishedAt: string; source: PublishTimeSource }>(
-      PUBLISH_TIME_CACHE_NAMESPACE,
-      persistentKey
-    );
-    if (cachedFromDisk) {
-      const record: PublishTimeRecord = {
-        publishedAt: parsePublishedAt(packageName, version, cachedFromDisk.publishedAt),
-        source: cachedFromDisk.source
-      };
-      this.publishTimeCache.set(versionKey, record);
-      return record;
-    }
-
+    // Publish time is a policy fact. Process-external cache contents are not
+    // authenticated, so revalidate it against the selected registry.
     // The registry time map is the authoritative publish record (RFC-001 §14
-    // D7). Do not fall back to dist.tarball: that URL is registry-controlled
-    // metadata and may point outside the configured registry's trust boundary.
+    // D7). The tarball last-modified header is a mutable CDN artifact; it is a
+    // same-origin-only fallback and the answering source is recorded.
     const fromTimeMap = await this.fetchPublishedAtFromTimeMap(packageName, version);
     if (fromTimeMap) {
-      return this.rememberPublishedAt(versionKey, persistentKey, fromTimeMap, "registry-time");
+      return this.rememberPublishedAt(versionKey, fromTimeMap, "registry-time");
+    }
+
+    // Fallback only for a tarball served by the configured registry itself.
+    // dist.tarball is registry-controlled metadata; requesting an arbitrary
+    // origin from it would let a hostile packument aim a request at internal
+    // hosts. Otherwise publish time stays unknown and resolution fails closed.
+    const tarballUrl = (await this.fetchVersionManifest(packageName, version)).dist?.tarball;
+    if (tarballUrl && this.isSameOriginAsRegistry(tarballUrl)) {
+      const lastModified = await this.fetchTarballLastModified(packageName, version, tarballUrl);
+      if (lastModified) {
+        return this.rememberPublishedAt(
+          versionKey,
+          parsePublishedAt(packageName, version, lastModified),
+          "tarball-last-modified"
+        );
+      }
     }
 
     throw new Error(`Registry error: missing publish time for ${packageName}@${version}.`);
   }
 
-  private async rememberPublishedAt(
+  private rememberPublishedAt(
     versionKey: string,
-    persistentKey: string,
     publishedAt: Date,
     source: PublishTimeSource
-  ): Promise<PublishTimeRecord> {
+  ): PublishTimeRecord {
     const record: PublishTimeRecord = { publishedAt, source };
     this.publishTimeCache.set(versionKey, record);
-    await this.diskCache.setJson(PUBLISH_TIME_CACHE_NAMESPACE, persistentKey, {
-      publishedAt: publishedAt.toISOString(),
-      source
-    });
     return record;
+  }
+
+  private isSameOriginAsRegistry(tarballUrl: string): boolean {
+    try {
+      const tarball = new URL(tarballUrl);
+      return !tarball.username && !tarball.password && tarball.origin === new URL(this.registryUrl).origin;
+    } catch {
+      return false;
+    }
+  }
+
+  private async fetchTarballLastModified(
+    packageName: string,
+    version: string,
+    tarballUrl: string
+  ): Promise<string | undefined> {
+    try {
+      // "manual": a redirect would leave the registry origin; treat it as no answer.
+      const response = await fetch(tarballUrl, {
+        method: "HEAD",
+        redirect: "manual",
+        signal: this.fetchSignal()
+      });
+
+      if (!response.ok) {
+        return undefined;
+      }
+
+      return response.headers.get("last-modified") ?? undefined;
+    } catch (error) {
+      const shutdownError = getShutdownSignalError(this.signal);
+      if (shutdownError) {
+        throw shutdownError;
+      }
+
+      if (isTimeoutError(error)) {
+        throw new Error(
+          `Registry error: timed out while fetching tarball metadata for ${packageName}@${version}.`
+        );
+      }
+
+      return undefined;
+    }
   }
 
   /**
    * Publish time from the full packument's `time` map, or undefined so the
-   * caller can fail closed. Timeouts and shutdowns stay fatal (they are
+   * caller can try the same-origin tarball fallback or fail closed. Timeouts and shutdowns stay fatal (they are
    * environment failures, not evidence the map is absent); other fetch
    * errors are reported as missing authoritative publish-time evidence.
    */

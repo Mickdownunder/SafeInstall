@@ -1,13 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   collectNpmTransitivePackages,
   collectPnpmTransitivePackages,
+  evaluateTransitiveDependencies,
   evaluateTransitivePackages,
   parsePnpmPackageKey
 } from "../src/transitive";
 import type { TransitivePackage } from "../src/transitive";
 import type { SafeInstallConfig } from "../src/types";
+
+const tempDirs: string[] = [];
+
+async function createLockfile(name: string, content: string): Promise<string> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "safeinstall-transitive-unit-"));
+  tempDirs.push(dir);
+  const lockfilePath = path.join(dir, name);
+  await writeFile(lockfilePath, content, "utf8");
+  return lockfilePath;
+}
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 function createConfig(overrides: Partial<SafeInstallConfig> = {}): SafeInstallConfig {
   return {
@@ -236,5 +255,131 @@ describe("evaluateTransitivePackages", () => {
       })
     );
     expect(result.blockedReasons).toHaveLength(0);
+  });
+});
+
+describe("evaluateTransitiveDependencies evidence failures", () => {
+  const blockConfig = createConfig({
+    transitive: { mode: "block", checks: ["install-script", "untrusted-source"] }
+  });
+
+  async function evaluate(lockfilePath: string | undefined, config = blockConfig) {
+    return evaluateTransitiveDependencies({ lockfilePath, directNames: new Set(), config });
+  }
+
+  it("blocks when no supported lockfile was discovered", async () => {
+    const result = await evaluate(undefined);
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toContain(
+      "transitive-evaluation-unavailable"
+    );
+    expect(result.blockedReasons[0]?.message).toContain("no npm or pnpm lockfile was found");
+  });
+
+  it("blocks when the selected lockfile cannot be read", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "safeinstall-transitive-unit-"));
+    tempDirs.push(dir);
+
+    const result = await evaluate(path.join(dir, "package-lock.json"));
+
+    expect(result.blockedReasons[0]?.code).toBe("transitive-evaluation-unavailable");
+    expect(result.blockedReasons[0]?.message).toContain("could not be read");
+  });
+
+  it("blocks unsupported lockfile formats before parsing", async () => {
+    const lockfilePath = await createLockfile("bun.lock", "{\"lockfileVersion\": 1}");
+
+    const result = await evaluate(lockfilePath);
+
+    expect(result.blockedReasons[0]?.code).toBe("transitive-evaluation-unavailable");
+    expect(result.blockedReasons[0]?.message).toContain("not a supported lockfile");
+  });
+
+  it("blocks syntactically invalid supported lockfiles", async () => {
+    const lockfilePath = await createLockfile("package-lock.json", "{not-json");
+
+    const result = await evaluate(lockfilePath);
+
+    expect(result.blockedReasons[0]?.code).toBe("transitive-evaluation-unavailable");
+    expect(result.blockedReasons[0]?.message).toContain("invalid or unsupported");
+  });
+
+  it("blocks syntactically invalid pnpm lockfiles", async () => {
+    const lockfilePath = await createLockfile("pnpm-lock.yaml", "lockfileVersion: [");
+
+    const result = await evaluate(lockfilePath);
+
+    expect(result.blockedReasons[0]?.code).toBe("transitive-evaluation-unavailable");
+    expect(result.blockedReasons[0]?.message).toContain("invalid or unsupported");
+  });
+
+  it("blocks a pnpm lockfile major it does not know how to read", async () => {
+    const lockfilePath = await createLockfile("pnpm-lock.yaml", "lockfileVersion: '99.0'\npackages: {}\n");
+
+    const result = await evaluate(lockfilePath);
+
+    expect(result.blockedReasons[0]?.code).toBe("transitive-evaluation-unavailable");
+    expect(result.blockedReasons[0]?.message).toContain("invalid or unsupported");
+  });
+
+  it.each(["5.4", "'6.0'", "'9.0'", "9"])("accepts pnpm lockfileVersion %s", async (version) => {
+    const lockfilePath = await createLockfile("pnpm-lock.yaml", `lockfileVersion: ${version}\npackages: {}\n`);
+
+    const result = await evaluate(lockfilePath);
+
+    expect(result.blockedReasons).toEqual([]);
+  });
+
+  it("blocks structurally unsupported npm lockfiles", async () => {
+    const lockfilePath = await createLockfile(
+      "package-lock.json",
+      JSON.stringify({ lockfileVersion: 1, dependencies: {} })
+    );
+
+    const result = await evaluate(lockfilePath);
+
+    expect(result.blockedReasons[0]?.code).toBe("transitive-evaluation-unavailable");
+    expect(result.blockedReasons[0]?.message).toContain("invalid or unsupported");
+  });
+
+  it("warns explicitly when lockfile evidence is unavailable in warn mode", async () => {
+    const result = await evaluate(
+      undefined,
+      createConfig({ transitive: { mode: "warn", checks: ["untrusted-source"] } })
+    );
+
+    expect(result.blockedReasons).toHaveLength(0);
+    expect(result.warnings[0]).toContain("no npm or pnpm lockfile was found");
+  });
+
+  it("keeps transitive mode off silent without a lockfile", async () => {
+    const result = await evaluate(undefined, createConfig());
+
+    expect(result.blockedReasons).toHaveLength(0);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("preserves clean evaluation for a supported valid lockfile", async () => {
+    const lockfilePath = await createLockfile(
+      "package-lock.json",
+      JSON.stringify({ lockfileVersion: 3, packages: { "": { name: "demo", version: "1.0.0" } } })
+    );
+
+    const result = await evaluate(lockfilePath);
+
+    expect(result.blockedReasons).toHaveLength(0);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("preserves clean evaluation for a supported pnpm lockfile", async () => {
+    const lockfilePath = await createLockfile(
+      "pnpm-lock.yaml",
+      "lockfileVersion: '9.0'\npackages: {}\n"
+    );
+
+    const result = await evaluate(lockfilePath);
+
+    expect(result.blockedReasons).toHaveLength(0);
+    expect(result.warnings).toHaveLength(0);
   });
 });
