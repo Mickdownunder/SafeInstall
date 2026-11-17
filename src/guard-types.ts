@@ -25,6 +25,8 @@ export interface GuardRunnerMatch {
 export interface GuardCommandAnalysis {
   installs: GuardInstallMatch[];
   runners: GuardRunnerMatch[];
+  /** True only when a local runner lookup is guaranteed to use the event cwd. */
+  localRunnerResolutionSafe: boolean;
   unanalyzable: GuardUnanalyzableSegment[];
   usesSafeInstall: boolean;
   /** Best-effort paths written or removed by the intercepted shell command. */

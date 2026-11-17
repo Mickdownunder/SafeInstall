@@ -297,6 +297,59 @@ function createRunnerFinding(
   };
 }
 
+/**
+ * The local-runner fast path is safe only for one direct invocation whose
+ * package target is positional. Earlier shell segments, substitutions,
+ * wrappers, and pre-target options can change state or package resolution
+ * before execution.
+ */
+function hasStableLocalRunnerResolution(
+  segments: ShellSegment[],
+  runners: GuardRunnerMatch[]
+): boolean {
+  if (segments.length !== 1 || runners.length !== 1 || segments[0]?.hasSubstitution) {
+    return false;
+  }
+
+  const segment = segments[0];
+  const runner = runners[0];
+  if (segment === undefined || runner === undefined) {
+    return false;
+  }
+
+  const { index: commandIndex } = findCommandTokenIndex(segment.tokens);
+  if (commandIndex !== 0) {
+    return false;
+  }
+
+  const commandToken = segment.tokens[commandIndex];
+  if (commandToken === undefined) {
+    return false;
+  }
+  const executable = basename(commandToken.value);
+  const rest = stripRedirections(segment.tokens.slice(commandIndex + 1));
+
+  let targetTokens: ShellToken[];
+  if (RUNNER_EXECUTABLES[executable]) {
+    targetTokens = rest;
+  } else {
+    const subcommand = findSubcommand(rest);
+    if (subcommand === undefined || rest.indexOf(subcommand) !== 0) {
+      return false;
+    }
+    const config = RUNNER_SUBCOMMANDS[executable]?.[subcommand.value.toLowerCase()];
+    if (config?.alwaysRemote !== false) {
+      return false;
+    }
+    targetTokens = rest.slice(1);
+  }
+
+  if (targetTokens[0]?.value === "--") {
+    targetTokens = targetTokens.slice(1);
+  }
+  return runner.packageHint !== undefined && targetTokens[0]?.value === runner.packageHint;
+}
+
 function analyzeSegment(segment: ShellSegment, command: string): SegmentFinding {
   const finding = analyzeSegmentCore(segment, command);
   const { index } = findCommandTokenIndex(segment.tokens);
@@ -595,6 +648,7 @@ export function analyzeShellCommand(command: string): GuardCommandAnalysis {
       segmentText
     })),
     runners,
+    localRunnerResolutionSafe: hasStableLocalRunnerResolution(segments, runners),
     unanalyzable,
     usesSafeInstall,
     writeTargets,
