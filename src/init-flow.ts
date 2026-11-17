@@ -158,7 +158,7 @@ export async function runInitFlow(cwd: string, argv: string[], options: InitOpti
     await writeFile(configPath, serializeConfig(createDefaultConfig()), "utf8");
     state.infos.push(configExisted ? `Config: overwrote ${configPath}.` : `Config: created ${configPath}.`);
     state.warnings.push(
-      "Edit allowedScripts, allowedSources, or allowedPackages only when you intend to trust that exception."
+      "Edit allowedScripts, allowedSources, sourceBaselines, or allowedPackages only when you intend to trust that exception."
     );
   } else {
     state.infos.push(`Config: kept existing ${configPath} (use --force to overwrite).`);

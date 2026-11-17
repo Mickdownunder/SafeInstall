@@ -122,7 +122,7 @@ No registry proxy. No tarball rewriting. No cloud dependency.
 | **Release age** | 72 hours minimum | `Blocked: release too new` |
 | **Lifecycle scripts** | preinstall, install, postinstall blocked | `Blocked: install script present` |
 | **Source types** | registry, workspace, file, directory allowed | `Blocked: untrusted source` |
-| **Trust downgrade** | Detects registry→git/url or new scripts on update | `Blocked: trust level dropped` |
+| **Trust downgrade** | Compares registry→git/url against a base manifest or reviewed source baseline; missing history fails closed | `Blocked: trust level dropped` |
 | **Typo-squat detection** | Off by default; opt in via `typoSquat.mode` | `Blocked: suspected typo-squat` |
 | **Provenance verification** | Off by default; opt in via `provenance.mode` | `Blocked: attestation missing/invalid/publisher mismatch` |
 | **Transitive dependencies** | Off by default; opt in via `transitive.mode` | `Blocked: transitive install script / untrusted source` |
@@ -245,7 +245,7 @@ Installation requires one canonical SHA-512 digest in the checked registry manif
 
 Explicit additions resolve into a lockfile with the evaluated exact version before installation. Preparation can update `package.json` and the lockfile, and can populate the manager's cache, even if the later binding/policy check blocks. Those files are left for inspection, not automatically rolled back. npm's frozen phase uses `ci`, which replaces `node_modules`. Shared workspace lockfiles cause all recorded importers' direct dependencies to be reviewed under the selected policy, not just the selected package.
 
-Lifecycle scripts are always disabled, including when legacy `packageManagerDefaults.*.ignoreScripts` is `false`. `allowedScripts` permits a policy exception, not script execution. pnpm's executable `.pnpmfile.cjs` hooks are disabled too. Explicit non-registry additions currently block; existing local/workspace dependencies remain governed by `allowedSources` and are not claimed to have registry-artifact binding.
+Lifecycle scripts are always disabled, including when legacy `packageManagerDefaults.*.ignoreScripts` is `false`. `allowedScripts` permits a policy exception, not script execution. pnpm's executable `.pnpmfile.cjs` hooks are disabled too. Explicit non-registry additions currently block; existing local/workspace dependencies remain governed by `allowedSources` and are not claimed to have registry-artifact binding. Git, URL, and tarball project dependencies also need an independently reviewed `sourceBaselines` entry when no complete base manifest is available; category-wide `allowedSources` alone cannot prove that a registry dependency was not replaced.
 
 ---
 
@@ -405,6 +405,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
     "esbuild": ["postinstall"]
   },
   "allowedSources": ["registry", "workspace", "file", "directory"],
+  "sourceBaselines": {},
   "allowedPackages": [],
   "packageManagerDefaults": {
     "npm": { "ignoreScripts": true },
@@ -443,6 +444,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `registryUrl` | npm-compatible registry URL for metadata and installation (mirrors, Artifactory, Verdaccio) |
 | `allowedScripts` | Per-package lifecycle script exceptions |
 | `allowedSources` | Permitted source types |
+| `sourceBaselines` | Reviewed package-to-source identities (`registry`, `git`, `url`, or `tarball`) used when a complete trusted base manifest is unavailable |
 | `allowedPackages` | Names that skip release-age, install-script, and typo-squat checks (with warning). Source, trust-downgrade, and provenance checks still apply. |
 | `packageManagerDefaults` | Legacy configuration; lifecycle scripts remain disabled even when `ignoreScripts` is `false` |
 | `typoSquat.mode` | `"off"` / `"warn"` / `"block"` — how to handle suspected typo-squats |

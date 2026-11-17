@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -111,5 +111,83 @@ describe("evaluateRequestedPackages", () => {
 
     expect(evaluations).toHaveLength(16);
     expect(maxActive).toBeLessThanOrEqual(8);
+  });
+
+  it("does not accept the current manifest as source-transition evidence", async () => {
+    const projectDir = await createTempDir("safeinstall-evaluations-source-baseline-");
+    const gitSpec = "git+https://github.com/attacker/axios.git";
+    await writeFile(
+      path.join(projectDir, "package.json"),
+      JSON.stringify({ dependencies: { axios: gitSpec } }),
+      "utf8"
+    );
+    const requested: RequestedPackage = {
+      name: "axios",
+      raw: `axios@${gitSpec}`,
+      requested: gitSpec,
+      sourceType: "git"
+    };
+
+    const [evaluation] = await evaluateRequestedPackages(
+      projectDir,
+      [requested],
+      {} as Parameters<typeof evaluateRequestedPackages>[2],
+      createConfig({ allowedSources: ["registry", "git"] })
+    );
+
+    expect(evaluation?.priorState?.declaredSourceType).toBe("git");
+    expect(evaluation?.blockedReasons).toContainEqual(
+      expect.objectContaining({
+        code: "trust-level-dropped",
+        message: expect.stringContaining("no independent source baseline")
+      })
+    );
+  });
+
+  it("compares complete base evidence while preserving reviewed git sources", async () => {
+    const projectDir = await createTempDir("safeinstall-evaluations-complete-baseline-");
+    const gitSpec = "git+https://github.com/axios/axios.git";
+    const requested: RequestedPackage = {
+      name: "axios",
+      raw: `axios@${gitSpec}`,
+      requested: gitSpec,
+      sourceType: "git"
+    };
+    const config = createConfig({
+      allowedSources: ["registry", "git"],
+      sourceBaselines: { axios: "git" }
+    });
+    const registryClient = {} as Parameters<typeof evaluateRequestedPackages>[2];
+
+    const [downgrade] = await evaluateRequestedPackages(
+      projectDir,
+      [requested],
+      registryClient,
+      config,
+      undefined,
+      { complete: true, sourceTypes: { axios: "registry" } }
+    );
+    const [established] = await evaluateRequestedPackages(
+      projectDir,
+      [requested],
+      registryClient,
+      config
+    );
+    const [newDependency] = await evaluateRequestedPackages(
+      projectDir,
+      [requested],
+      registryClient,
+      config,
+      undefined,
+      { complete: true, sourceTypes: {} }
+    );
+
+    expect(downgrade?.blockedReasons.map((reason) => reason.code)).toContain("trust-level-dropped");
+    expect(established?.blockedReasons.map((reason) => reason.code)).not.toContain(
+      "trust-level-dropped"
+    );
+    expect(newDependency?.blockedReasons.map((reason) => reason.code)).not.toContain(
+      "trust-level-dropped"
+    );
   });
 });

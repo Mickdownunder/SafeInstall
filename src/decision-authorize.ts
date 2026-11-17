@@ -3,9 +3,19 @@ import path from "node:path";
 import { loadConfig } from "./config";
 import { verifyDecisions, type DecisionVerifyFinding } from "./decision-verify";
 import { evaluateRequestedPackages } from "./evaluations";
-import { bindFileAsStaged, blobOidAtRef, resolveCommit, resolveGitRepo } from "./git-blob";
+import {
+  bindFileAsStaged,
+  blobOidAtRef,
+  readBlob,
+  resolveCommit,
+  resolveGitRepo
+} from "./git-blob";
 import { inferProjectInstallTargetsForCheck } from "./project-installs";
-import { loadManifestDependencies } from "./project-state";
+import {
+  classifyDeclaredSource,
+  loadManifestDependencies,
+  parseManifestDependencies
+} from "./project-state";
 import { RegistryClient } from "./registry";
 import { parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
@@ -130,8 +140,42 @@ export async function authorizeDecisions(
         parseManifestDependency(name, spec)
       );
 
+  let baseManifestDependencies: Record<string, string> = {};
+  const baseManifestOid = await blobOidAtRef(repo, baseCommit, "package.json");
+  if (baseManifestOid) {
+    try {
+      baseManifestDependencies = parseManifestDependencies(
+        (await readBlob(repo, baseManifestOid)).toString("utf8")
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        findings: [
+          {
+            code: "decisions-project-state",
+            message: `Could not parse package.json at the trusted base commit (${error instanceof Error ? error.message : String(error)}).`
+          }
+        ],
+        infos: []
+      };
+    }
+  }
+  const baseSourceTypes = Object.fromEntries(
+    Object.entries(baseManifestDependencies).map(([name, spec]) => [
+      name.toLowerCase(),
+      classifyDeclaredSource(spec)
+    ])
+  );
+
   const registryClient = new RegistryClient({ registryUrl: config.registryUrl });
-  const evaluations = await evaluateRequestedPackages(repo.root, requestedPackages, registryClient, config);
+  const evaluations = await evaluateRequestedPackages(
+    repo.root,
+    requestedPackages,
+    registryClient,
+    config,
+    undefined,
+    { complete: true, sourceTypes: baseSourceTypes }
+  );
   const transitive = await evaluateTransitiveDependencies({
     lockfilePath: projectTargets?.lockfilePath,
     directNames: new Set(requestedPackages.map((requested) => requested.name)),
