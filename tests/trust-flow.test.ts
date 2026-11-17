@@ -17,6 +17,7 @@ import {
   removeLedgerHeadMirror,
   writeLedgerHeadMirror
 } from "../src/trust-ledger";
+import { checkTrustSurface, partitionTrustFindings } from "../src/trust-surface-check";
 import { cleanupTempDirs, createTempDir } from "./cli-e2e-helpers";
 import { present } from "./helpers/present";
 
@@ -63,7 +64,11 @@ function stubVerifierRegistry(): void {
 }
 
 async function seedProject(): Promise<string> {
-  const root = await createTempDir("safeinstall-trustflow-");
+  return seedProjectAt(await createTempDir("safeinstall-trustflow-"));
+}
+
+async function seedProjectAt(root: string): Promise<string> {
+  await mkdir(root, { recursive: true });
   await writeFile(path.join(root, "safeinstall.config.json"), "{}\n");
   await mkdir(path.join(root, ".cursor"), { recursive: true });
   await writeFile(path.join(root, ".cursor", "hooks.json"), JSON.stringify({ version: 1 }));
@@ -105,19 +110,56 @@ describe("runTrustLockFlow", () => {
     expect(result.infos.some((info) => info.includes("safeinstall.config.json"))).toBe(true);
   });
 
-  it("creates the baseline at the repository root when invoked from a subdirectory", async () => {
-    const root = await seedProject();
-    await mkdir(path.join(root, ".git"), { recursive: true });
-    const sub = path.join(root, "packages", "app");
-    await mkdir(sub, { recursive: true });
+  it("creates the baseline in the invoking subfolder of a git repository, not at the git root", async () => {
+    const repo = await createTempDir("safeinstall-trustflow-repo-");
+    await mkdir(path.join(repo, ".git"), { recursive: true });
+    await writeFile(path.join(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+    const project = await seedProjectAt(path.join(repo, "frontend"));
+
+    const result = await runTrustLockFlow(project, ["trust", "lock"]);
+
+    expect(result.decision).toBe("allow");
+    await expect(readFile(path.join(project, ".safeinstall", "trust-surface.lock"), "utf8")).resolves.toContain(
+      '"schemaVersion": 1'
+    );
+    await expect(readFile(path.join(repo, ".safeinstall", "trust-surface.lock"), "utf8")).rejects.toThrow();
+
+    // And the subfolder lock is authoritative: tampering is detected.
+    await writeFile(path.join(project, ".cursor", "hooks.json"), JSON.stringify({ version: 1, evil: true }));
+    const status = await runTrustStatusFlow(project, ["trust", "status"]);
+    expect(status.reasons.some((reason) => reason.code === "trust-enforcement-drift")).toBe(true);
+  });
+
+  it("does not write a second lock in a subfolder when the repository root lock already applies", async () => {
+    const repo = await createTempDir("safeinstall-trustflow-repo-");
+    await mkdir(path.join(repo, ".git"), { recursive: true });
+    await writeFile(path.join(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+    await seedProjectAt(repo);
+    await runTrustLockFlow(repo, ["trust", "lock"]);
+    const sub = await seedProjectAt(path.join(repo, "frontend"));
 
     const result = await runTrustLockFlow(sub, ["trust", "lock"]);
 
     expect(result.decision).toBe("allow");
-    await expect(readFile(path.join(root, ".safeinstall", "trust-surface.lock"), "utf8")).resolves.toContain(
-      '"schemaVersion": 1'
-    );
     await expect(readFile(path.join(sub, ".safeinstall", "trust-surface.lock"), "utf8")).rejects.toThrow();
+  });
+
+  it("reports multiple trust locks as a lockdown-class finding", async () => {
+    const repo = await createTempDir("safeinstall-trustflow-repo-");
+    await mkdir(path.join(repo, ".git"), { recursive: true });
+    await writeFile(path.join(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+    await seedProjectAt(repo);
+    await runTrustLockFlow(repo, ["trust", "lock"]);
+    const sub = path.join(repo, "packages", "app");
+    await mkdir(path.join(sub, ".safeinstall"), { recursive: true });
+    await writeFile(path.join(sub, ".safeinstall", "trust-surface.lock"), "{}\n");
+
+    const status = await checkTrustSurface(sub);
+    const { lockdown } = partitionTrustFindings(status.findings);
+    expect(lockdown.some((finding) => finding.kind === "lock-ambiguous")).toBe(true);
+    expect(lockdown[0]?.message).toContain("Multiple trust locks apply to this directory");
+    expect(lockdown[0]?.message).toContain(path.join(sub, ".safeinstall", "trust-surface.lock"));
+    expect(lockdown[0]?.message).toContain(path.join(repo, ".safeinstall", "trust-surface.lock"));
   });
 
   it("refuses to lock twice, reporting drift instead", async () => {

@@ -64,6 +64,24 @@ export async function checkTrustSurface(startDir: string): Promise<TrustSurfaceS
     return { active: false, findings: [], instructionWarnings: [] };
   }
 
+  if (context.conflictingRoots !== undefined) {
+    return {
+      active: true,
+      root: context.root,
+      findings: [
+        {
+          kind: "lock-ambiguous",
+          message:
+            "Multiple trust locks apply to this directory: " +
+            `${context.conflictingRoots.map(trustLockPath).join(", ")}. ` +
+            "SafeInstall will not pick one, because a planted lock could shadow the real one. " +
+            "Remove the lock that does not belong, then re-run `safeinstall trust status`."
+        }
+      ],
+      instructionWarnings: []
+    };
+  }
+
   if (!context.hasLock) {
     return {
       active: true,

@@ -226,9 +226,14 @@ describe("findTrustContext", () => {
     await writeFile(path.join(root, ".safeinstall", "trust-surface.lock"), "{}\n");
   }
 
+  async function initGit(dir: string): Promise<void> {
+    await mkdir(path.join(dir, ".git"), { recursive: true });
+    await writeFile(path.join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
+  }
+
   it("finds a lock at the repository root from a subdirectory", async () => {
     const repo = await createTempDir("safeinstall-ctx-");
-    await mkdir(path.join(repo, ".git"), { recursive: true });
+    await initGit(repo);
     await lockAt(repo);
     const sub = path.join(repo, "packages", "app");
     await mkdir(sub, { recursive: true });
@@ -237,31 +242,73 @@ describe("findTrustContext", () => {
     expect(context).toEqual({ root: repo, hasLock: true });
   });
 
-  it("does not let a nested lock shadow the repository-root lock", async () => {
+  it("reports a nested lock next to the repository-root lock as ambiguous, never picking one", async () => {
     const repo = await createTempDir("safeinstall-ctx-");
-    await mkdir(path.join(repo, ".git"), { recursive: true });
+    await initGit(repo);
     await lockAt(repo);
     const sub = path.join(repo, "packages", "app");
     await lockAt(sub);
 
     const context = await findTrustContext(sub);
-    expect(context).toEqual({ root: repo, hasLock: true });
+    expect(context?.conflictingRoots).toEqual([sub, repo]);
+    // From the root only the root lock is on the path.
+    expect(await findTrustContext(repo)).toEqual({ root: repo, hasLock: true });
   });
 
-  it("ignores a nested lock when the repository root has no baseline", async () => {
+  it("treats a lone subfolder lock as authoritative (project living in a repo subfolder)", async () => {
     const repo = await createTempDir("safeinstall-ctx-");
-    await mkdir(path.join(repo, ".git"), { recursive: true });
+    await initGit(repo);
+    const sub = path.join(repo, "frontend");
+    await lockAt(sub);
+    const deeper = path.join(sub, "src");
+    await mkdir(deeper, { recursive: true });
+
+    expect(await findTrustContext(sub)).toEqual({ root: sub, hasLock: true });
+    expect(await findTrustContext(deeper)).toEqual({ root: sub, hasLock: true });
+  });
+
+  it("does not let an empty .git directory next to a fake nested lock hide the root lock", async () => {
+    const repo = await createTempDir("safeinstall-ctx-");
+    await initGit(repo);
+    await lockAt(repo);
     const sub = path.join(repo, "packages", "app");
     await lockAt(sub);
+    await mkdir(path.join(sub, ".git"), { recursive: true });
 
-    expect(await findTrustContext(sub)).toBeUndefined();
+    const context = await findTrustContext(sub);
+    expect(context?.conflictingRoots).toEqual([sub, repo]);
+  });
+
+  it("ignores .git entries that are not a real checkout (empty dir, bogus file)", async () => {
+    const repo = await createTempDir("safeinstall-ctx-");
+    await initGit(repo);
+    await lockAt(repo);
+    const a = path.join(repo, "a");
+    await mkdir(path.join(a, ".git"), { recursive: true });
+    const b = path.join(repo, "b");
+    await mkdir(b, { recursive: true });
+    await writeFile(path.join(b, ".git"), "not a gitdir pointer\n");
+
+    expect(await findTrustContext(a)).toEqual({ root: repo, hasLock: true });
+    expect(await findTrustContext(b)).toEqual({ root: repo, hasLock: true });
+  });
+
+  it("documented limit: a real git init inside a locked repository is an independent checkout", async () => {
+    const repo = await createTempDir("safeinstall-ctx-");
+    await initGit(repo);
+    await lockAt(repo);
+    const inner = path.join(repo, "vendor", "inner");
+    await initGit(inner);
+    await lockAt(inner);
+
+    expect(await findTrustContext(inner)).toEqual({ root: inner, hasLock: true });
   });
 
   it("does not inherit the trust context of an enclosing checkout (.git directory)", async () => {
     const outer = await createTempDir("safeinstall-ctx-");
     await lockAt(outer);
     const nested = path.join(outer, "vendor", "nested-repo");
-    await mkdir(path.join(nested, ".git"), { recursive: true });
+    await initGit(nested);
 
     expect(await findTrustContext(nested)).toBeUndefined();
   });
@@ -280,7 +327,7 @@ describe("findTrustContext", () => {
     const outer = await createTempDir("safeinstall-ctx-");
     await lockAt(outer);
     const nested = path.join(outer, "vendor", "nested-repo");
-    await mkdir(path.join(nested, ".git"), { recursive: true });
+    await initGit(nested);
     await lockAt(nested);
     const sub = path.join(nested, "packages", "app");
     await mkdir(sub, { recursive: true });
