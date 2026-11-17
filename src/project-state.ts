@@ -38,6 +38,11 @@ export function classifyDeclaredSource(spec: string): SourceType {
     return "git";
   }
 
+  // npm-package-arg rejects link:/portal:, which are local directory references.
+  if (spec.startsWith("link:") || spec.startsWith("portal:")) {
+    return "directory";
+  }
+
   try {
     const result = npa(spec);
 
@@ -113,6 +118,16 @@ export async function loadProjectDependencyState(
 export async function loadManifestDependencies(cwd: string): Promise<Record<string, string>> {
   const packageJson = await loadPackageJson(cwd);
 
+  return collectManifestDependencies(packageJson);
+}
+
+export function parseManifestDependencies(raw: string): Record<string, string> {
+  return collectManifestDependencies(JSON.parse(raw) as PackageJsonShape);
+}
+
+function collectManifestDependencies(
+  packageJson: PackageJsonShape | undefined
+): Record<string, string> {
   return {
     ...(packageJson?.dependencies ?? {}),
     ...(packageJson?.devDependencies ?? {}),

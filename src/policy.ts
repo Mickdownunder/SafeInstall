@@ -3,16 +3,19 @@ import {
   lookupGlobPattern,
   repositoryMatchesPublisher
 } from "./provenance";
+import { isLocalSourceType, type LocalSourceClassification } from "./local-source";
 import { detectTypoSquat } from "./typo-squat";
 import type {
   ContinuityResult,
   InstallLifecycleScriptName,
   PackageEvaluation,
+  PriorSourceEvidence,
   ProjectDependencyState,
   ProvenanceVerificationResult,
   RequestedPackage,
   ResolvedRegistryPackage,
-  SafeInstallConfig
+  SafeInstallConfig,
+  SourceType
 } from "./types";
 
 function isPackageAllowlisted(config: SafeInstallConfig, packageName: string): boolean {
@@ -48,6 +51,9 @@ export interface EvaluatePackageInput {
   requested: RequestedPackage;
   now: Date;
   priorState?: ProjectDependencyState | undefined;
+  priorSource?: PriorSourceEvidence | undefined;
+  /** How a local (workspace/file/directory) source relates to the repository. */
+  localSource?: LocalSourceClassification | undefined;
   resolvedRegistryPackage?: ResolvedRegistryPackage | undefined;
   priorLifecycleScripts?: InstallLifecycleScriptName[];
   provenanceResult?: ProvenanceVerificationResult | undefined;
@@ -102,24 +108,50 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
     }
   }
 
-  if (!input.config.allowedSources.includes(input.requested.sourceType)) {
+  // Local sources: a first-party workspace member is never a supply-chain
+  // source and is exempt from allowedSources. Any other local directory (name
+  // "directory") or local tarball/file (name "file") is checked against
+  // allowedSources under the name of what it actually is, whichever label the
+  // package manager's lockfile used.
+  const local = input.localSource;
+  const isLocal = isLocalSourceType(input.requested.sourceType);
+  const policySourceName: SourceType =
+    local === undefined || local.kind === "member" ? input.requested.sourceType : local.kind;
+  const exemptFirstParty =
+    isLocal && (local?.kind === "member" || (local === undefined && input.requested.sourceType === "workspace"));
+  if (!exemptFirstParty && !input.config.allowedSources.includes(policySourceName)) {
     evaluation.blockedReasons.push({
       code: "untrusted-source",
-      message: `Blocked: untrusted source (${input.requested.sourceType}).`,
+      message: `Blocked: untrusted source (${policySourceName}${local?.outsideRepository ? ", outside the repository" : ""}).`,
       suggestion: "Use a registry release or allow this source intentionally."
     });
   }
 
-  const priorSourceType = input.priorState?.declaredSourceType;
+  const priorSource: PriorSourceEvidence = input.priorSource ?? { status: "unavailable" };
+  const dropsRegistryTrust =
+    input.requested.sourceType === "git" ||
+    input.requested.sourceType === "url" ||
+    input.requested.sourceType === "tarball";
   if (
-    priorSourceType === "registry" &&
-    (input.requested.sourceType === "git" ||
-      input.requested.sourceType === "url" ||
-      input.requested.sourceType === "tarball" ||
-      input.requested.sourceType === "workspace" ||
-      input.requested.sourceType === "file" ||
-      input.requested.sourceType === "directory")
+    dropsRegistryTrust &&
+    priorSource.status === "unavailable" &&
+    input.config.allowedSources.includes(input.requested.sourceType)
   ) {
+    evaluation.blockedReasons.push({
+      code: "trust-level-dropped",
+      message: `Blocked: trust level could not be evaluated (no independent source baseline exists for ${input.requested.name} before ${input.requested.sourceType}).`,
+      suggestion:
+        "Record the established package source in sourceBaselines or evaluate the change against a trusted base commit."
+    });
+  } else if (
+    (dropsRegistryTrust || isLocal) &&
+    priorSource.status === "known" &&
+    priorSource.sourceType === "registry"
+  ) {
+    // A registry -> local swap is reported for every local kind, including a
+    // workspace member. An unavailable baseline does not block a local source
+    // by itself (fresh projects and monorepos without history are common);
+    // only committed evidence of a registry dependency does.
     evaluation.blockedReasons.push({
       code: "trust-level-dropped",
       message: `Blocked: trust level dropped (${input.requested.name} changed from registry to ${input.requested.sourceType}).`,

@@ -71,7 +71,7 @@ describe("transitive evaluation through runCheckFlow", () => {
     expect(result.reasons.map((reason) => reason.code)).toContain("untrusted-source");
     expect(result.affectedPackages).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: "local-lib", sourceType: "file" })
+        expect.objectContaining({ name: "local-lib", sourceType: "directory" })
       ])
     );
   });

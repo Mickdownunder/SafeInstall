@@ -210,7 +210,7 @@ packages:
     );
     expect(payload.affectedPackages).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: "local-lib", sourceType: "file" })
+        expect.objectContaining({ name: "local-lib", sourceType: "directory" })
       ])
     );
     await expect(readFile(stub.logPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });

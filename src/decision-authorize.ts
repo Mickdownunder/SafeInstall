@@ -14,6 +14,8 @@ import {
 } from "./project-installs";
 import { loadManifestDependencies } from "./project-state";
 import { RegistryClient } from "./registry";
+import type { DependencySourceBaseline } from "./types";
+import { createBaseSourceBaselineResolver } from "./source-baseline";
 import { parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
 
@@ -108,7 +110,27 @@ function repoPathFor(root: string, absolutePath: string): string | undefined {
   return relative.split(path.sep).join("/");
 }
 
+class BaselineError extends Error {}
+
 export async function authorizeDecisions(
+  cwd: string,
+  options: DecisionAuthorizeOptions
+): Promise<DecisionAuthorizeResult> {
+  try {
+    return await authorizeDecisionsUnguarded(cwd, options);
+  } catch (error) {
+    if (error instanceof BaselineError) {
+      return {
+        ok: false,
+        findings: [{ code: "decisions-project-state", message: error.message }],
+        infos: []
+      };
+    }
+    throw error;
+  }
+}
+
+async function authorizeDecisionsUnguarded(
   cwd: string,
   options: DecisionAuthorizeOptions
 ): Promise<DecisionAuthorizeResult> {
@@ -294,6 +316,20 @@ export async function authorizeDecisions(
   //    only reaches this point when explicitly allowlisted verifier-side.
   const { config, path: configPath } = await loadConfig(repo.root);
   const registryClient = new RegistryClient({ registryUrl: config.registryUrl });
+  // The prior source of every dependency comes from the manifest at the
+  // trusted base commit (never from the head manifest, and never from the
+  // committed config's sourceBaselines, which an attacker-authored change can
+  // edit). An unparsable base manifest fails the authorization.
+  const resolveBaseBaseline = createBaseSourceBaselineResolver(repo, baseCommit, headCommit);
+  const baselineFor = async (manifestRepoPath: string): Promise<DependencySourceBaseline> => {
+    try {
+      return await resolveBaseBaseline(manifestRepoPath);
+    } catch (error) {
+      throw new BaselineError(
+        `Could not read ${manifestRepoPath} at the trusted base commit (${error instanceof Error ? error.message : String(error)}).`
+      );
+    }
+  };
   const reasons: Array<{ code: string; message: string }> = [];
   const warnings: string[] = [];
   const appendReasons = (entries: ReadonlyArray<{ code: string; message: string }>): void => {
@@ -330,7 +366,9 @@ export async function authorizeDecisions(
       repo.root,
       requestedPackages,
       registryClient,
-      config
+      config,
+      undefined,
+      await baselineFor("package.json")
     );
     // A root without dependencies and without a lockfile has no transitive
     // tree; asking for one would block every repository whose lockfiles all
@@ -369,7 +407,9 @@ export async function authorizeDecisions(
         importer.packageDir,
         requestedPackages,
         registryClient,
-        config
+        config,
+        undefined,
+        await baselineFor(repoPathFor(repo.root, importer.manifestPath) as string)
       );
       appendReasons([
         ...evaluations.flatMap((evaluation) => evaluation.blockedReasons),

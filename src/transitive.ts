@@ -201,8 +201,14 @@ export function evaluateTransitivePackages(
     if (checkInstallScript && pkg.hasInstallScript === true) {
       evaluation.installScriptPackages.push(label(pkg));
     }
+    // Lockfile entries that are `link:` references (every workspace member in
+    // a pnpm lockfile) are first-party directories, not supply-chain sources,
+    // and are never flagged. Local tarballs ("file") are unverifiable artifacts
+    // and are checked against allowedSources like any other source.
     if (
       checkUntrustedSource &&
+      pkg.sourceType !== "workspace" &&
+      pkg.sourceType !== "directory" &&
       !config.allowedSources.includes(pkg.sourceType)
     ) {
       evaluation.untrustedSourcePackages.push(`${label(pkg)} (${pkg.sourceType})`);

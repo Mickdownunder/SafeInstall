@@ -240,8 +240,30 @@ describe("evaluateTransitivePackages", () => {
     expect(result.warnings).toHaveLength(0);
   });
 
-  it.each(["workspace", "file", "directory"] as const)(
-    "blocks a transitive %s source omitted from allowedSources",
+  it.each(["workspace", "directory"] as const)(
+    "does not flag a transitive %s link (first-party workspace member) even when omitted from allowedSources",
+    (sourceType) => {
+      const localDep: TransitivePackage = {
+        name: "local",
+        version: "1.0.0",
+        sourceType,
+        hasInstallScript: false
+      };
+      const result = evaluateTransitivePackages(
+        [localDep],
+        createConfig({
+          transitive: { mode: "block", checks: ["untrusted-source"] },
+          allowedSources: ["registry"]
+        })
+      );
+
+      expect(result.blockedReasons).toEqual([]);
+      expect(result.untrustedSourcePackages).toEqual([]);
+    }
+  );
+
+  it.each(["file"] as const)(
+    "blocks a transitive local %s tarball omitted from allowedSources",
     (sourceType) => {
       const localDep: TransitivePackage = {
         name: "local",

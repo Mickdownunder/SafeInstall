@@ -122,18 +122,39 @@ describe("evaluatePackage", () => {
     expect(result.blockedReasons.map((reason) => reason.code)).toContain("untrusted-source");
   });
 
-  it.each([
-    ["workspace", "workspace:*"],
-    ["file", "file:./shared.tgz"],
-    ["directory", "file:./shared"]
-  ] as const)("allows configured %s sources by default", (sourceType, requested) => {
+  it.each(["git", "url", "tarball"] as const)(
+    "fails closed for allowed %s sources without independent prior evidence",
+    (sourceType) => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            allowedSources: ["registry", sourceType]
+          }),
+          requested: {
+            name: "axios",
+            raw: `axios@${sourceType}:attacker-controlled`,
+            requested: `${sourceType}:attacker-controlled`,
+            sourceType
+          },
+          priorSource: { status: "unavailable" },
+          resolvedRegistryPackage: undefined
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toEqual([
+        "trust-level-dropped"
+      ]);
+    }
+  );
+
+  it("does not block local workspace sources by default", () => {
     const result = evaluatePackage(
       createInput({
         requested: {
           name: "@repo/shared",
-          raw: `@repo/shared@${requested}`,
-          requested,
-          sourceType
+          raw: "@repo/shared@workspace:*",
+          requested: "workspace:*",
+          sourceType: "workspace"
         },
         resolvedRegistryPackage: undefined
       })
@@ -143,49 +164,78 @@ describe("evaluatePackage", () => {
   });
 
   it.each([
-    ["workspace", "workspace:*"],
-    ["file", "file:./shared.tgz"],
-    ["directory", "file:./shared"]
-  ] as const)("blocks %s sources omitted from allowedSources", (sourceType, requested) => {
+    ["workspace", "workspace:*", { kind: "member", outsideRepository: false }],
+    ["directory", "file:./vendor/evil", { kind: "directory", outsideRepository: false }],
+    ["file", "file:./vendor/evil.tgz", { kind: "file", outsideRepository: false }],
+    ["directory", "link:../../elsewhere", { kind: "directory", outsideRepository: true }]
+  ] as const)("blocks a committed registry to local %s swap (%s)", (sourceType, spec, localSource) => {
     const result = evaluatePackage(
       createInput({
-        config: createConfig({ allowedSources: ["registry"] }),
-        requested: {
-          name: "@repo/shared",
-          raw: `@repo/shared@${requested}`,
-          requested,
-          sourceType
-        },
-        resolvedRegistryPackage: undefined
-      })
-    );
-
-    expect(result.blockedReasons.map((reason) => reason.code)).toContain("untrusted-source");
-  });
-
-  it.each([
-    ["workspace", "workspace:*"],
-    ["file", "file:./shared.tgz"],
-    ["directory", "file:./shared"]
-  ] as const)("treats registry to %s changes as trust downgrades", (sourceType, requested) => {
-    const result = evaluatePackage(
-      createInput({
-        requested: {
-          name: "@repo/shared",
-          raw: `@repo/shared@${requested}`,
-          requested,
-          sourceType
-        },
-        priorState: {
-          installedVersion: "1.0.0",
-          declaredSpec: "^1.0.0",
-          declaredSourceType: "registry"
-        },
+        requested: { name: "@repo/shared", raw: `@repo/shared@${spec}`, requested: spec, sourceType },
+        localSource,
+        priorSource: { status: "known", sourceType: "registry" },
         resolvedRegistryPackage: undefined
       })
     );
 
     expect(result.blockedReasons.map((reason) => reason.code)).toContain("trust-level-dropped");
+  });
+
+  it("does not block a local source that was already local, new, or has no baseline", () => {
+    for (const priorSource of [
+      { status: "known", sourceType: "workspace" },
+      { status: "known", sourceType: "directory" },
+      { status: "known" },
+      { status: "unavailable" }
+    ] as const) {
+      const result = evaluatePackage(
+        createInput({
+          requested: {
+            name: "@repo/shared",
+            raw: "@repo/shared@workspace:*",
+            requested: "workspace:*",
+            sourceType: "workspace"
+          },
+          localSource: { kind: "member", outsideRepository: false },
+          priorSource,
+          resolvedRegistryPackage: undefined
+        })
+      );
+      expect(result.blockedReasons).toEqual([]);
+    }
+  });
+
+  it("exempts workspace members from allowedSources but checks other local sources", () => {
+    const config = createConfig({ allowedSources: ["registry"] });
+    const run = (
+      sourceType: "workspace" | "directory" | "file",
+      spec: string,
+      localSource: EvaluatePackageInput["localSource"]
+    ) =>
+      evaluatePackage(
+        createInput({
+          config,
+          requested: { name: "pkg", raw: `pkg@${spec}`, requested: spec, sourceType },
+          localSource,
+          resolvedRegistryPackage: undefined
+        })
+      ).blockedReasons.map((reason) => reason.message);
+
+    expect(run("workspace", "workspace:*", { kind: "member", outsideRepository: false })).toEqual([]);
+    expect(run("directory", "file:../shared", { kind: "member", outsideRepository: false })).toEqual([]);
+    expect(run("directory", "file:./vendor/x", { kind: "directory", outsideRepository: false })).toEqual([
+      "Blocked: untrusted source (directory)."
+    ]);
+    expect(run("directory", "file:../../x", { kind: "directory", outsideRepository: true })).toEqual([
+      "Blocked: untrusted source (directory, outside the repository)."
+    ]);
+    expect(run("file", "file:./vendor/x.tgz", { kind: "file", outsideRepository: false })).toEqual([
+      "Blocked: untrusted source (file)."
+    ]);
+    // A lockfile that labels a vendored directory "workspace" is still judged by what it is.
+    expect(run("workspace", "link:./vendor/x", { kind: "directory", outsideRepository: false })).toEqual([
+      "Blocked: untrusted source (directory)."
+    ]);
   });
 
   it("blocks trust downgrade when scripts are newly introduced", () => {
@@ -263,6 +313,7 @@ describe("evaluatePackage", () => {
           declaredSpec: "^1.13.2",
           declaredSourceType: "registry"
         },
+        priorSource: { status: "known", sourceType: "registry" },
         resolvedRegistryPackage: undefined
       })
     );

@@ -11,6 +11,7 @@ import {
   type ProjectInstallTargetsResult
 } from "./project-installs";
 import { RegistryClient } from "./registry";
+import { loadHeadSourceBaseline } from "./source-baseline";
 import { FLAGS_WITH_VALUES } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
 import type { CliReason, InstallPlan, PackageEvaluation, SafeInstallConfig } from "./types";
@@ -324,7 +325,7 @@ export async function runBoundInstall(options: {
     .map((target) => [target.requested.raw, target.requested])).values()];
   const additional = await evaluateRequestedPackages(packageDir,
     remaining,
-    registryClient, config, options.signal);
+    registryClient, config, options.signal, await loadHeadSourceBaseline(scope.manifests, config));
   const evaluations = [...options.evaluations, ...additional];
   const transitive = await evaluateTransitiveDependencies({ lockfilePath: targets.lockfilePath,
     directNames: new Set(evaluations.map((evaluation) => evaluation.requested.name)), config });

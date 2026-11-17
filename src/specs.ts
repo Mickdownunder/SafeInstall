@@ -268,6 +268,10 @@ export function parseManifestDependency(name: string, spec: string): RequestedPa
     };
   }
 
+  if (spec.startsWith("link:") || spec.startsWith("portal:")) {
+    return { name, raw: `${name}@${spec}`, requested: spec, sourceType: "directory" };
+  }
+
   const parsed = npa.resolve(name, spec);
   return {
     name,
