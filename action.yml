@@ -119,10 +119,6 @@ runs:
           CMD="safeinstall check --json $CONFIG_FLAG"
         fi
 
-        echo "::group::SafeInstall command"
-        echo "Running: $CMD"
-        echo "::endgroup::"
-
         OUTPUT=$($CMD 2>/dev/null)
         EXIT_CODE=$?
 

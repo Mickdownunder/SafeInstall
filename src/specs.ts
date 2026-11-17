@@ -1,6 +1,24 @@
 import npa from "npm-package-arg";
 
+import { containsSensitiveArgs, containsSensitiveCredentials } from "./redaction";
 import type { InstallPlan, PackageManagerName, RequestedPackage, SourceType } from "./types";
+
+export const CREDENTIAL_BEARING_SPEC_MESSAGE =
+  "Credential-bearing package specifications are not supported. Configure authentication with npmrc, environment variables, or a credential helper and retry.";
+
+function rejectCredentialBearingValue(value: string): void {
+  if (containsSensitiveCredentials(value)) {
+    throw new Error(CREDENTIAL_BEARING_SPEC_MESSAGE);
+  }
+}
+
+export function assertNoCredentialBearingPackages(packages: readonly RequestedPackage[]): void {
+  for (const requested of packages) {
+    rejectCredentialBearingValue(requested.name);
+    rejectCredentialBearingValue(requested.raw);
+    rejectCredentialBearingValue(requested.requested);
+  }
+}
 
 export const FLAGS_WITH_VALUES = new Set([
   "-C",
@@ -238,6 +256,9 @@ function splitManagerArgsAndCommand(argv: string[]): {
 }
 
 export function buildInstallPlan(argv: string[]): InstallPlan {
+  if (containsSensitiveArgs(argv)) {
+    throw new Error(CREDENTIAL_BEARING_SPEC_MESSAGE);
+  }
   const { manager, managerArgs, command, forwardedArgs } = splitManagerArgsAndCommand(argv);
 
   const canonicalCommand = normalizeInstallCommand(manager, command);
@@ -259,6 +280,8 @@ export function buildInstallPlan(argv: string[]): InstallPlan {
 }
 
 export function parseManifestDependency(name: string, spec: string): RequestedPackage {
+  rejectCredentialBearingValue(name);
+  rejectCredentialBearingValue(spec);
   if (spec.startsWith("workspace:")) {
     return {
       name,

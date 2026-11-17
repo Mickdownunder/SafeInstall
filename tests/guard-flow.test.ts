@@ -95,6 +95,17 @@ describe("parseGuardEvent", () => {
 });
 
 describe("decideGuard", () => {
+  it("denies credential-bearing commands without returning a reusable secret", async () => {
+    const secret = "top-secret";
+    const command = `npm install git+https://user:${secret}@example.test/repo.git`;
+    const decision = await decideGuard(command);
+
+    expect(decision.action).toBe("deny");
+    expect(decision.updatedCommand).toBeUndefined();
+    expect(JSON.stringify(decision)).not.toContain(secret);
+    expect(decision.agentMessage).toContain("npmrc");
+  });
+
   it("allows non-install commands", async () => {
     expect(await decideGuard("git status")).toEqual({ action: "allow" });
     expect(await decideGuard("npm test")).toEqual({ action: "allow" });

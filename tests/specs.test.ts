@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildInstallPlan,
+  CREDENTIAL_BEARING_SPEC_MESSAGE,
   extractRequestedSpecs,
   normalizeInstallCommand,
   parseManifestDependency
@@ -29,6 +30,26 @@ describe("extractRequestedSpecs", () => {
 });
 
 describe("buildInstallPlan", () => {
+  it.each([
+    "https://user:top-secret@example.test/pkg.tgz",
+    "git+https://top-secret@example.test/repo.git",
+    "https://example.test/pkg.tgz?access_token=top-secret"
+  ])("rejects credential-bearing package specs without reflecting the secret", (spec) => {
+    expect(() => buildInstallPlan(["npm", "install", spec])).toThrow(
+      CREDENTIAL_BEARING_SPEC_MESSAGE
+    );
+    expect(CREDENTIAL_BEARING_SPEC_MESSAGE).not.toContain("top-secret");
+  });
+
+  it("rejects credential options while preserving ordinary URL installs", () => {
+    expect(() =>
+      buildInstallPlan(["npm", "install", "axios", "--_authToken", "top-secret"])
+    ).toThrow(CREDENTIAL_BEARING_SPEC_MESSAGE);
+
+    const ordinary = "https://example.test/pkg.tgz?download=1";
+    expect(buildInstallPlan(["npm", "install", ordinary]).packages[0]?.raw).toBe(ordinary);
+  });
+
   it("builds a plan for explicit pnpm add installs", () => {
     const plan = buildInstallPlan(["pnpm", "add", "axios@1.14.0", "-D"]);
 
@@ -118,6 +139,12 @@ describe("normalizeInstallCommand", () => {
 });
 
 describe("parseManifestDependency", () => {
+  it("rejects credentials embedded in manifest dependency URLs", () => {
+    expect(() =>
+      parseManifestDependency("private-pkg", "https://user:top-secret@example.test/pkg.tgz")
+    ).toThrow(CREDENTIAL_BEARING_SPEC_MESSAGE);
+  });
+
   it("classifies workspace specs", () => {
     expect(parseManifestDependency("pkg-a", "workspace:*")).toMatchObject({
       name: "pkg-a",

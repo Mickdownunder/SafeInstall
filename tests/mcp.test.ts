@@ -68,6 +68,26 @@ function evaluation(overrides: Partial<PackageEvaluation> = {}): PackageEvaluati
 }
 
 describe("evaluationToVerdict", () => {
+  it("redacts credentials copied into agent-facing verdict fields", () => {
+    const secret = "top-secret";
+    const requested = `https://user:${secret}@example.test/pkg.tgz`;
+    const verdict = evaluationToVerdict(
+      evaluation({
+        requested: { name: requested, raw: requested, requested, sourceType: "url" },
+        resolvedRegistryPackage: undefined,
+        blockedReasons: [
+          { code: "untrusted-source", message: `Blocked untrusted source ${requested}.` }
+        ],
+        warnings: [`Warning for ${requested}`],
+        infos: [`Info for ${requested}`]
+      }),
+      NOW
+    );
+
+    expect(JSON.stringify(verdict)).not.toContain(secret);
+    expect(verdict.name).toContain("[REDACTED]");
+  });
+
   it("maps blocked reasons to a block verdict and carries codes, messages, and suggestions", () => {
     const reasons: PolicyBlockReason[] = [
       {

@@ -5,6 +5,7 @@ import { loadConfig } from "./config";
 import { analyzeShellCommand } from "./guard-commands";
 import type { GuardRunnerMatch } from "./guard-commands";
 import { findNearestUpward } from "./project-discovery";
+import { containsSensitiveCredentials } from "./redaction";
 import { isTrustSurfacePath } from "./trust-surface";
 import type { TrustSurfaceStatus } from "./trust-surface";
 import { checkTrustSurface, partitionTrustFindings } from "./trust-surface-check";
@@ -238,6 +239,15 @@ export async function decideGuard(command: string, cwd: string = process.cwd()):
 }
 
 async function decideGuardCommand(command: string, cwd: string): Promise<GuardDecision> {
+  if (containsSensitiveCredentials(command)) {
+    return {
+      action: "deny",
+      userMessage: "SafeInstall blocked a command containing embedded credentials.",
+      agentMessage:
+        "SafeInstall guard blocked this command because credentials in package URLs or arguments can leak into logs and decision records. Configure authentication with npmrc, environment variables, or a credential helper and retry."
+    };
+  }
+
   const analysis = analyzeShellCommand(command);
 
   const trustDecision = await decideTrustSurface(command, cwd, analysis);
