@@ -7,6 +7,7 @@ import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
 import { detectHiddenUnicode } from "./hidden-unicode";
 import { formatCommand } from "./output";
+import { findAncestorMarker, isActiveMarkerValue } from "./process-ancestry";
 import { parseCiProvider, scaffoldCiWorkflow } from "./trust-ci";
 import type { CiProvider } from "./trust-ci";
 import {
@@ -36,9 +37,11 @@ import type { CliReason, CliResult } from "./types";
  *
  * `approve` is human-gated: it reads its confirmation from the controlling
  * terminal (/dev/tty), never from stdin, so agent-piped input goes nowhere,
- * and it refuses to run in CI or known agent-hook contexts. This raises the
- * bar substantially — an agent would have to orchestrate a pseudo-terminal —
- * but it is not proof of human presence, and is documented as such.
+ * and it refuses to run in CI or known agent-hook contexts, including when a
+ * parent process carries the context marker that this process dropped. This
+ * raises the bar substantially — an agent would have to orchestrate a
+ * pseudo-terminal and detach from its own process tree — but it is not proof
+ * of human presence, and is documented as such.
  */
 
 type TrustSubcommand = "lock" | "status" | "approve" | "unlock";
@@ -60,10 +63,7 @@ export interface HumanGate {
 }
 
 function nonHumanMarker(): string | undefined {
-  return NON_HUMAN_ENV_MARKERS.find((name) => {
-    const value = process.env[name];
-    return value !== undefined && value !== "" && value !== "0" && value.toLowerCase() !== "false";
-  });
+  return NON_HUMAN_ENV_MARKERS.find((name) => isActiveMarkerValue(process.env[name]));
 }
 
 /**
@@ -83,6 +83,17 @@ export function createTtyHumanGate(): HumanGate {
         throw new Error(
           `safeinstall trust approve refuses to run here (${marker} is set). ` +
             "Approval must come from a human at an interactive terminal."
+        );
+      }
+      // Dropping the marker from this process (`env -u`, a script that
+      // deletes it before opening a pseudo-terminal) does not remove it from
+      // the processes that launched us.
+      const inherited = findAncestorMarker(NON_HUMAN_ENV_MARKERS);
+      if (inherited) {
+        throw new Error(
+          `safeinstall trust approve refuses to run here (a parent process has ${inherited} set). ` +
+            "Approval must come from a human at an interactive terminal; open a new terminal " +
+            "that was not started by an agent or CI job."
         );
       }
       if (process.platform === "win32") {
