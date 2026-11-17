@@ -127,9 +127,7 @@ runs:
         fi
 
         echo "::group::SafeInstall command"
-        printf 'Running:'
-        printf ' %q' "${SAFEINSTALL_CMD[@]}"
-        printf '\n'
+        echo "Running SafeInstall (arguments are not printed to avoid leaking credentials)."
         echo "::endgroup::"
 
         OUTPUT=$("${SAFEINSTALL_CMD[@]}" 2>/dev/null)

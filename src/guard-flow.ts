@@ -5,6 +5,7 @@ import { loadConfig } from "./config";
 import { analyzeShellCommand } from "./guard-commands";
 import type { GuardRunnerMatch } from "./guard-commands";
 import { findNearestUpward } from "./project-discovery";
+import { redactSensitiveText } from "./redaction";
 import { isTrustSurfacePath } from "./trust-surface";
 import type { TrustSurfaceStatus } from "./trust-surface";
 import { checkTrustSurface, partitionTrustFindings } from "./trust-surface-check";
@@ -247,7 +248,7 @@ async function decideGuardCommand(command: string, cwd: string): Promise<GuardDe
 
   if (analysis.unanalyzable.length > 0) {
     const reasons = analysis.unanalyzable
-      .map((segment) => `- ${JSON.stringify(segment.segmentText)}: ${segment.reason}`)
+      .map((segment) => `- ${JSON.stringify(redactSensitiveText(segment.segmentText))}:${segment.reason}`)
       .join("\n");
     return {
       action: "deny",
@@ -279,7 +280,7 @@ async function decideGuardCommand(command: string, cwd: string): Promise<GuardDe
         : "SafeInstall guard: package installs must run through the SafeInstall CLI so supply-chain policy " +
           "(release age, install scripts, untrusted sources, provenance) is enforced and lifecycle scripts stay disabled. " +
           "Run this command instead:\n\n" +
-          `${rewritten}\n\n` +
+          `${redactSensitiveText(rewritten)}\n\n` +
           "If SafeInstall blocks it, report the block reasons to the user instead of working around them."
     };
   }
@@ -293,7 +294,7 @@ async function decideGuardCommand(command: string, cwd: string): Promise<GuardDe
 
   if (remoteRunners.length > 0) {
     const targets = remoteRunners
-      .map((runner) => `${runner.tool} would fetch and execute ${runner.packageHint ? JSON.stringify(runner.packageHint) : "a package"} from the registry`)
+      .map((runner) => `${runner.tool} would fetch and execute ${runner.packageHint ? JSON.stringify(redactSensitiveText(runner.packageHint)) : "a package"} from the registry`)
       .join("; ");
     return {
       action: "ask",
