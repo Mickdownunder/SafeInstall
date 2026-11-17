@@ -395,8 +395,10 @@ Two things you must do for the check to actually enforce, because a CLI cannot s
 | Zone | Files | On drift |
 |:---|:---|:---|
 | **Enforcement** | `safeinstall.config.json`, `.claude/settings.json`, `.codex/hooks.json`, `.codex/config.toml`, `.cursor/hooks.json`, `.github/workflows/safeinstall-trust.yml`, `.safeinstall/` | Every agent command is denied until a human approves |
-| **Instruction** | `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.cursor/rules/**`, `.github/copilot-instructions.md` | Hidden Unicode is always blocked; content drift warns (blocks in `--mode strict`) |
+| **Instruction** | `AGENTS.md`, `CLAUDE.md`, `.cursorrules` and `.cursor/rules/**` at any depth (nested ones such as `packages/app/AGENTS.md` included, never under `node_modules`); at the root also `.claude/CLAUDE.md`, `.claude/rules/**` and `.github/copilot-instructions.md` | Hidden Unicode is always blocked; content drift warns (blocks in `--mode strict`) |
 | **Tool** | `.mcp.json`, `.cursor/mcp.json`, MCP blocks in `.claude/settings.json` | Installs and runners are denied until a human approves; unpinned MCP servers are flagged |
+
+Nested instruction files are found with one `git ls-files` call (tracked plus untracked files that are not ignored), or a bounded directory walk outside a git repository. A nested file that `.gitignore` excludes is not discovered, so it is neither hashed nor checked for hidden Unicode. A lock written by an earlier version shows nested files that already exist as added instruction drift until `safeinstall trust approve`.
 
 Instruction content drift only warns by default because Claude Code writes to `CLAUDE.md` itself (its memory feature) — blocking that would break a normal workflow. Hidden Unicode, on the other hand, has no legitimate purpose in these files and always blocks.
 

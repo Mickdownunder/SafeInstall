@@ -49,6 +49,8 @@ export interface ProtectedWrite {
 interface ProtectedModel {
   files: string[];
   subtrees: string[];
+  nestedNames: string[];
+  nestedSubtree: string[];
   /** Directories that contain protected paths, including the subtrees' parents. */
   ancestors: Set<string>;
   components: Set<string>;
@@ -58,7 +60,7 @@ let cachedModel: ProtectedModel | undefined;
 
 function protectedModel(): ProtectedModel {
   if (cachedModel) return cachedModel;
-  const { files, subtrees } = trustSurfaceProtectedPaths();
+  const { files, subtrees, nestedNames, nestedSubtree } = trustSurfaceProtectedPaths();
   const ancestors = new Set<string>();
   const components = new Set<string>();
   for (const entry of [...files, ...subtrees]) {
@@ -68,7 +70,7 @@ function protectedModel(): ProtectedModel {
       ancestors.add(segments.slice(0, length).join("/"));
     }
   }
-  cachedModel = { files, subtrees, ancestors, components };
+  cachedModel = { files, subtrees, nestedNames, nestedSubtree, ancestors, components };
   return cachedModel;
 }
 
@@ -224,6 +226,31 @@ function hasProtectedLiteralComponent(cells: PatternCell[]): boolean {
   });
 }
 
+/**
+ * Could `cells` name an instruction file at any depth (`AGENTS.md`, `CLAUDE.md`,
+ * `.cursorrules`, anything under a `.cursor/rules`)? Only the final components
+ * count, and a glob only counts when the component starts with a literal
+ * character, so `packages/*` or `rm *` are not read as nested-file targets while
+ * `packages/*\/AGENTS.md` and `AGENTS.m?` are. Nothing under `node_modules` or
+ * `.git` is protected.
+ */
+function matchesNestedInstruction(cells: PatternCell[], recursive: boolean): boolean {
+  const { nestedNames, nestedSubtree } = protectedModel();
+  const components = splitComponents(cells);
+  if (components.length === 0) return false;
+  if (components.some((component) => ["node_modules", ".git"].includes(literalName(component) ?? ""))) return false;
+  const startsLiteral = (component: PatternCell[]): boolean => component[0]?.t === "lit";
+  const last = components[components.length - 1] as PatternCell[];
+  if (startsLiteral(last) && nestedNames.some((name) => matchCells(last, name, false))) return true;
+  const [parent, child] = nestedSubtree as [string, string];
+  return components.some((component, index) => {
+    if (literalName(component) !== parent) return false;
+    const next = components[index + 1];
+    if (next === undefined) return recursive;
+    return startsLiteral(next) && matchCells(next, child, false);
+  });
+}
+
 /** Could `cells`, relative to the trust root, name a protected path? */
 function matchesProtectedFromRoot(cells: PatternCell[], recursive: boolean): boolean {
   const model = protectedModel();
@@ -308,7 +335,15 @@ export async function findProtectedWrite(
       return recursive && !isOutside(path.relative(absolute, root));
     }
     if (isTrustSurfacePath(root, absolute)) return true;
-    return recursive && (relative === "" || protectedModel().ancestors.has(toPosix(relative)));
+    if (!recursive) return false;
+    const posix = toPosix(relative);
+    if (relative === "" || protectedModel().ancestors.has(posix)) return true;
+    // A recursive removal of a nested `.cursor` directory takes its rules with it.
+    const segments = posix.split("/");
+    return (
+      segments[segments.length - 1] === protectedModel().nestedSubtree[0] &&
+      !segments.some((segment) => segment === "node_modules" || segment === ".git")
+    );
   };
 
   const literalHit = async (absolute: string, recursive: boolean): Promise<boolean> =>
@@ -345,7 +380,10 @@ export async function findProtectedWrite(
       const guarded = (matched: boolean): boolean => matched && (!guard || hasProtectedLiteralComponent(cells));
 
       if (floating) {
-        return guarded(matchesProtectedFromAnywhere(cells, operation.recursive))
+        return guarded(
+          matchesProtectedFromAnywhere(cells, operation.recursive) ||
+            matchesNestedInstruction(cells, operation.recursive)
+        )
           ? { operation, exact: false }
           : undefined;
       }
@@ -365,7 +403,13 @@ export async function findProtectedWrite(
           const restCells = joinComponents(
             rest.map((component) => (literalName(component) === ".." ? [{ t: "wild" } as PatternCell] : component))
           );
-          if (guarded(matchesProtectedFromRoot(joinComponents([...prefix, restCells]), operation.recursive))) {
+          const joined = joinComponents([...prefix, restCells]);
+          if (
+            guarded(
+              matchesProtectedFromRoot(joined, operation.recursive) ||
+                matchesNestedInstruction(joined, operation.recursive)
+            )
+          ) {
             return { operation, exact: false };
           }
         }
