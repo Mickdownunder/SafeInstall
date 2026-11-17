@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { listGitlinks, listWorkingTreeFiles } from "./git-blob";
 import { detectHiddenUnicode } from "./hidden-unicode";
 import { parseMcpServers } from "./mcp-server-parse";
 import { fileExists } from "./project-discovery";
@@ -67,8 +68,50 @@ const ENFORCEMENT_FILES = [
  * legitimately all the time (Claude Code's memory feature appends to
  * CLAUDE.md by design). "strict" mode hardens content drift to a block.
  */
-const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md", ".cursorrules", ".github/copilot-instructions.md"];
-const INSTRUCTION_DIRS = [".cursor/rules"];
+const INSTRUCTION_FILES = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".cursorrules",
+  ".github/copilot-instructions.md",
+  ".claude/CLAUDE.md"
+];
+const INSTRUCTION_DIRS = [".cursor/rules", ".claude/rules"];
+
+/**
+ * Agents also load instruction files from subdirectories (Claude Code reads
+ * nested CLAUDE.md, Codex nested AGENTS.md, Cursor nested `.cursor/rules`).
+ * These names are on the surface at ANY depth; `.claude/CLAUDE.md`,
+ * `.claude/rules` and `.github/copilot-instructions.md` stay root-only.
+ */
+const NESTED_INSTRUCTION_NAMES = ["AGENTS.md", "CLAUDE.md", ".cursorrules"];
+const NESTED_INSTRUCTION_DIR = [".cursor", "rules"];
+
+/** Directories whose content is never on the surface (dependencies, git internals). */
+const EXCLUDED_SEGMENTS = new Set(["node_modules", ".git"]);
+
+/**
+ * Directory-walk limits for the non-git fallback. Hitting the cap makes the
+ * snapshot throw, which every caller already treats as fail-closed.
+ */
+const WALK_MAX_DIRECTORIES = 20_000;
+
+/** Is this repository-relative POSIX path a nested (depth >= 0) instruction file by shape? */
+function isNestedInstructionPath(posixRelative: string): boolean {
+  const segments = posixRelative.split("/");
+  if (segments.some((segment) => EXCLUDED_SEGMENTS.has(segment))) {
+    return false;
+  }
+  if (NESTED_INSTRUCTION_NAMES.includes(segments[segments.length - 1] as string)) {
+    return true;
+  }
+  // A file below `<any>/.cursor/rules/`.
+  for (let index = 0; index + 2 < segments.length; index += 1) {
+    if (segments[index] === NESTED_INSTRUCTION_DIR[0] && segments[index + 1] === NESTED_INSTRUCTION_DIR[1]) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /** Zone 3 — files that define which tools/MCP servers the agent can reach. */
 const TOOL_FILES = [".mcp.json", ".cursor/mcp.json"];
@@ -203,9 +246,103 @@ async function createFileEntry(
   };
 }
 
+/**
+ * Bounded breadth-first walk used outside a git repository. Skips
+ * `node_modules`, `.git` and hidden directories other than `.cursor` and
+ * `.claude`. Throws when more than WALK_MAX_DIRECTORIES directories would be
+ * visited: silently ignoring part of the tree would let a nested file escape.
+ */
+async function walkForNestedInstructions(root: string): Promise<string[]> {
+  const found: string[] = [];
+  const queue: string[] = [""];
+  let visited = 0;
+  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+    visited += 1;
+    if (visited > WALK_MAX_DIRECTORIES) {
+      throw new Error(
+        `The trust surface walk stopped after ${WALK_MAX_DIRECTORIES} directories in ${root}; ` +
+          "nested instruction files cannot be enumerated reliably outside a git repository."
+      );
+    }
+    let entries;
+    try {
+      entries = await readdir(path.join(root, ...next.split("/").filter(Boolean)), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const relative = next === "" ? entry.name : `${next}/${entry.name}`;
+      if (entry.isDirectory()) {
+        const hidden = entry.name.startsWith(".") && entry.name !== ".cursor" && entry.name !== ".claude";
+        if (!EXCLUDED_SEGMENTS.has(entry.name) && !hidden) {
+          queue.push(relative);
+        }
+      } else if (entry.isFile() && isNestedInstructionPath(relative)) {
+        found.push(relative);
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Nested instruction files (repository-relative POSIX paths). In a git
+ * checkout this is ONE `git ls-files` call (tracked plus untracked-but-not-
+ * ignored, so a brand-new `sub/AGENTS.md` is seen) filtered by name. Files
+ * ignored by .gitignore are not discovered. If git cannot answer, the bounded
+ * directory walk is used instead.
+ */
+async function discoverNestedInstructionPaths(root: string): Promise<string[]> {
+  // Ask git from the trust root itself, which may be a subdirectory of the
+  // repository: `ls-files` then lists paths relative to that directory. This
+  // keeps the directory walk, which runs on every guard call, for trees that
+  // are not in a repository at all.
+  try {
+    return await listNestedInstructionsWithGit(root, "", 0);
+  } catch {
+    return walkForNestedInstructions(root);
+  }
+}
+
+/** Repositories nested inside the trust root are listed to this depth. */
+const NESTED_REPOSITORY_DEPTH = 8;
+
+/**
+ * `git ls-files` stops at the boundary of another repository: a submodule is
+ * one gitlink entry, and an untracked embedded checkout is one `dir/` entry.
+ * Files inside them are still inside the trust root and are read by agents,
+ * so each checked-out nested repository is listed in turn.
+ */
+async function listNestedInstructionsWithGit(dir: string, prefix: string, depth: number): Promise<string[]> {
+  const listed = await listWorkingTreeFiles(dir, new Set(NESTED_INSTRUCTION_NAMES));
+  const found = listed.filter((entry) => !entry.endsWith("/")).map((entry) => `${prefix}${entry}`);
+
+  const nestedRepositories = listed.filter((entry) => entry.endsWith("/")).map((entry) => entry.slice(0, -1));
+  if (await fileExists(path.join(dir, ".gitmodules"))) {
+    nestedRepositories.push(...(await listGitlinks(dir)));
+  }
+
+  for (const relative of new Set(nestedRepositories)) {
+    if (relative.split("/").some((segment) => EXCLUDED_SEGMENTS.has(segment))) {
+      continue;
+    }
+    const nestedDir = path.join(dir, ...relative.split("/"));
+    // A submodule that is not checked out has no files to read.
+    if (!(await fileExists(path.join(nestedDir, ".git")))) {
+      continue;
+    }
+    if (depth >= NESTED_REPOSITORY_DEPTH) {
+      throw new Error(`Nested repositories below ${dir} are deeper than ${NESTED_REPOSITORY_DEPTH} levels.`);
+    }
+    found.push(...(await listNestedInstructionsWithGit(nestedDir, `${prefix}${relative}/`, depth + 1)));
+  }
+  return found.filter(isNestedInstructionPath);
+}
+
 /** Hash every existing trust-surface file and parse MCP declarations. */
 export async function snapshotTrustSurface(root: string): Promise<TrustSurfaceSnapshot> {
   const files: TrustSurfaceFileEntry[] = [];
+  const seen = new Set<string>();
 
   const staticEntries: Array<{ relativePath: string; kind: TrustSurfaceKind }> = [
     ...ENFORCEMENT_FILES.map((relativePath) => ({ relativePath, kind: "enforcement" as const })),
@@ -216,6 +353,7 @@ export async function snapshotTrustSurface(root: string): Promise<TrustSurfaceSn
   for (const { relativePath, kind } of staticEntries) {
     const absolutePath = path.join(root, ...relativePath.split("/"));
     if (await fileExists(absolutePath)) {
+      seen.add(relativePath);
       files.push(await createFileEntry(root, absolutePath, kind));
     }
   }
@@ -223,7 +361,22 @@ export async function snapshotTrustSurface(root: string): Promise<TrustSurfaceSn
   for (const dir of INSTRUCTION_DIRS) {
     const absoluteDir = path.join(root, ...dir.split("/"));
     for (const filePath of await listFilesRecursive(absoluteDir)) {
-      files.push(await createFileEntry(root, filePath, "instruction"));
+      const entry = await createFileEntry(root, filePath, "instruction");
+      seen.add(entry.path);
+      files.push(entry);
+    }
+  }
+
+  for (const relativePath of await discoverNestedInstructionPaths(root)) {
+    if (seen.has(relativePath)) {
+      continue;
+    }
+    const absolutePath = path.join(root, ...relativePath.split("/"));
+    // A tracked file deleted from disk is still listed by git: no entry, so it
+    // reads as "removed" drift exactly like a deleted root file.
+    if (await fileExists(absolutePath)) {
+      seen.add(relativePath);
+      files.push(await createFileEntry(root, absolutePath, "instruction"));
     }
   }
 
@@ -375,7 +528,20 @@ export function isTrustSurfacePath(root: string, absolutePath: string): boolean 
   ) {
     return true;
   }
-  return INSTRUCTION_DIRS.some((dir) => posixRelative === dir || posixRelative.startsWith(`${dir}/`));
+  if (INSTRUCTION_DIRS.some((dir) => posixRelative === dir || posixRelative.startsWith(`${dir}/`))) {
+    return true;
+  }
+  if (isNestedInstructionPath(posixRelative)) {
+    return true;
+  }
+  // The nested rules directory itself (`a/.cursor/rules`), which has no file below it yet.
+  const segments = posixRelative.split("/");
+  return (
+    segments.length >= 2 &&
+    segments[segments.length - 2] === NESTED_INSTRUCTION_DIR[0] &&
+    segments[segments.length - 1] === NESTED_INSTRUCTION_DIR[1] &&
+    !segments.some((segment) => EXCLUDED_SEGMENTS.has(segment))
+  );
 }
 
 /**
@@ -384,7 +550,14 @@ export function isTrustSurfacePath(root: string, absolutePath: string): boolean 
  * to decide whether a write target pattern (glob, expansion, unknown cwd) could
  * reach the surface; `isTrustSurfacePath` stays the check for one concrete path.
  */
-export function trustSurfaceProtectedPaths(): { files: string[]; subtrees: string[] } {
+export function trustSurfaceProtectedPaths(): {
+  files: string[];
+  subtrees: string[];
+  /** File names protected at any depth below the root (never under node_modules or .git). */
+  nestedNames: string[];
+  /** Directory chains (`.cursor/rules`) whose whole subtree is protected at any depth. */
+  nestedSubtree: string[];
+} {
   const files = [
     ...new Set([
       ...ENFORCEMENT_FILES,
@@ -395,7 +568,12 @@ export function trustSurfaceProtectedPaths(): { files: string[]; subtrees: strin
       TRUST_LEDGER_RELATIVE_PATH
     ])
   ];
-  return { files, subtrees: [TRUST_DIR, ...INSTRUCTION_DIRS] };
+  return {
+    files,
+    subtrees: [TRUST_DIR, ...INSTRUCTION_DIRS],
+    nestedNames: [...NESTED_INSTRUCTION_NAMES],
+    nestedSubtree: [...NESTED_INSTRUCTION_DIR]
+  };
 }
 
 export type TrustFindingKind =

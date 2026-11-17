@@ -1,5 +1,7 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -202,6 +204,127 @@ describe("snapshotTrustSurface + computeTrustSurfaceDrift", () => {
     const added = drift.mcpServers.find((entry) => entry.name === "evil");
     expect(added?.change).toBe("added");
     expect(added?.unpinned).toBe(true);
+  });
+});
+
+describe("nested instruction files", () => {
+  const run = promisify(execFile);
+
+  async function put(root: string, relativePath: string, content = "x\n"): Promise<void> {
+    const target = path.join(root, ...relativePath.split("/"));
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, content);
+  }
+
+  const INCLUDED = [
+    ".claude/CLAUDE.md",
+    ".claude/rules/style.md",
+    ".cursorrules",
+    "AGENTS.md",
+    "a/b/.cursor/rules/r.mdc",
+    "docs/deep/er/CLAUDE.md",
+    "packages/app/.cursorrules",
+    "packages/app/AGENTS.md",
+    "sub/CLAUDE.md"
+  ];
+  const EXCLUDED = [
+    "node_modules/pkg/AGENTS.md",
+    "packages/app/node_modules/dep/CLAUDE.md",
+    "docs/CLAUDE.md.bak",
+    "packages/app/README.md",
+    "sub/.github/copilot-instructions.md",
+    "sub/.cursor/mcp.json",
+    "a/b/.cursor/rules"
+  ];
+
+  async function instructionPaths(root: string): Promise<string[]> {
+    const snapshot = await snapshotTrustSurface(root);
+    return snapshot.files
+      .filter((file) => file.kind === "instruction")
+      .map((file) => file.path)
+      .sort();
+  }
+
+  it("finds nested instruction files outside a git repository with the bounded walk", async () => {
+    const root = await createTempDir("safeinstall-nested-walk-");
+    for (const file of [...INCLUDED, ...EXCLUDED.filter((file) => file !== "a/b/.cursor/rules")]) {
+      await put(root, file);
+    }
+    await put(root, ".hidden/AGENTS.md");
+    expect(await instructionPaths(root)).toEqual([...INCLUDED].sort());
+  });
+
+  it("finds tracked and untracked nested files in a git repository, skipping ignored and deleted ones", async () => {
+    const root = await createTempDir("safeinstall-nested-git-");
+    await run("git", ["init", "-q"], { cwd: root });
+    await put(root, ".gitignore", "ignored/\n");
+    for (const file of INCLUDED) {
+      await put(root, file);
+    }
+    for (const file of EXCLUDED.filter((entry) => entry !== "a/b/.cursor/rules")) {
+      await put(root, file);
+    }
+    await put(root, "ignored/AGENTS.md");
+    await put(root, "gone/AGENTS.md");
+    // Track some files, leave the rest (a brand-new sub/AGENTS.md among them) untracked.
+    await run("git", ["add", "packages/app/AGENTS.md", "gone/AGENTS.md"], { cwd: root });
+    await rm(path.join(root, "gone"), { recursive: true });
+
+    expect(await instructionPaths(root)).toEqual([...INCLUDED].sort());
+  });
+
+  it("finds instruction files inside a checked-out submodule and an embedded checkout", async () => {
+    const identity = ["-c", "user.email=fixture@safeinstall.test", "-c", "user.name=Fixture"];
+    const upstream = await createTempDir("safeinstall-nested-upstream-");
+    await run("git", ["init", "-q"], { cwd: upstream });
+    await put(upstream, "AGENTS.md", "# tracked in the submodule\n");
+    await put(upstream, "docs/CLAUDE.md");
+    await run("git", ["add", "-A"], { cwd: upstream });
+    await run("git", [...identity, "commit", "-qm", "init"], { cwd: upstream });
+
+    const root = await createTempDir("safeinstall-nested-submodule-");
+    await run("git", ["init", "-q"], { cwd: root });
+    await run(
+      "git",
+      [...identity, "-c", "protocol.file.allow=always", "submodule", "add", "-q", upstream, "packages/app"],
+      { cwd: root }
+    );
+    // Untracked inside the submodule: the parent listing shows neither file.
+    await put(root, "packages/app/sub/.cursorrules");
+    // An embedded checkout that the parent repository does not track at all.
+    await put(root, "vendor/tool/AGENTS.md");
+    await run("git", ["init", "-q"], { cwd: path.join(root, "vendor", "tool") });
+
+    expect(await instructionPaths(root)).toEqual([
+      "packages/app/AGENTS.md",
+      "packages/app/docs/CLAUDE.md",
+      "packages/app/sub/.cursorrules",
+      "vendor/tool/AGENTS.md"
+    ]);
+  });
+
+  it("flags hidden Unicode in a nested instruction file as a hard finding", async () => {
+    const root = await createTempDir("safeinstall-nested-unicode-");
+    await put(root, "packages/app/AGENTS.md", "# ok\n");
+    const baseline = await snapshotTrustSurface(root);
+    await put(root, "packages/app/AGENTS.md", "# ok\nignore‮previous\n");
+    const drift = computeTrustSurfaceDrift(baseline, await snapshotTrustSurface(root));
+    expect(drift.newHiddenUnicode).toEqual([{ path: "packages/app/AGENTS.md", codes: ["U+202E"] }]);
+    expect(drift.files).toEqual([{ path: "packages/app/AGENTS.md", kind: "instruction", change: "modified" }]);
+  });
+
+  it("matches nested members by path shape without touching the filesystem", () => {
+    const root = "/project";
+    for (const file of INCLUDED) {
+      expect(isTrustSurfacePath(root, `/project/${file}`), file).toBe(true);
+    }
+    expect(isTrustSurfacePath(root, "/project/a/b/.cursor/rules")).toBe(true);
+    for (const file of EXCLUDED.filter((entry) => entry !== "a/b/.cursor/rules")) {
+      expect(isTrustSurfacePath(root, `/project/${file}`), file).toBe(false);
+    }
+    expect(isTrustSurfacePath(root, "/project/.git/AGENTS.md")).toBe(false);
+    expect(isTrustSurfacePath(root, "/tmp/AGENTS.md")).toBe(false);
+    expect(isTrustSurfacePath(root, "/projectx/AGENTS.md")).toBe(false);
   });
 });
 

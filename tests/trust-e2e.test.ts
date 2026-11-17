@@ -71,6 +71,46 @@ describe("safeinstall trust (end to end)", () => {
     expect(parsed.reasons.some((reason) => reason.code === "trust-enforcement-drift")).toBe(true);
   });
 
+  it("reports a nested instruction file added after the lock (also an old lock that predates nested coverage)", async () => {
+    // A lock written before nested files were covered has no nested entries,
+    // exactly like a lock taken before such a file existed.
+    const { cwd, stateDir } = await seedLockedProject();
+    const env = { SAFEINSTALL_STATE_DIR: stateDir };
+    await mkdir(path.join(cwd, "packages", "app"), { recursive: true });
+    await writeFile(path.join(cwd, "packages", "app", "AGENTS.md"), "# nested\n");
+
+    const warn = await runCli(["trust", "status", "--json"], { cwd, env });
+    // Default (warn) mode: reported as a warning, not a block.
+    expect(warn.code).toBe(0);
+    const parsed = JSON.parse(warn.stdout) as { reasons: unknown[]; warnings: string[] };
+    expect(parsed.reasons).toEqual([]);
+    expect(parsed.warnings).toEqual([
+      "Instruction surface drift: packages/app/AGENTS.md appeared (not in the trust baseline)."
+    ]);
+  });
+
+  it("blocks a nested instruction file added after a strict lock, and hidden Unicode in it in any mode", async () => {
+    const { cwd, stateDir } = await seedLockedProject();
+    const env = { SAFEINSTALL_STATE_DIR: stateDir };
+    await mkdir(path.join(cwd, "packages", "app"), { recursive: true });
+    await writeFile(path.join(cwd, "packages", "app", "CLAUDE.md"), "# nested\ndo‮ this\n");
+
+    const hidden = await runCli(["trust", "status", "--json"], { cwd, env });
+    expect(hidden.code).toBe(2);
+    expect(hidden.stdout).toContain("packages/app/CLAUDE.md");
+
+    await writeFile(path.join(cwd, "packages", "app", "CLAUDE.md"), "# nested\n");
+    const strictCwd = await createTempDir("safeinstall-trust-e2e-strict-");
+    await writeFile(path.join(strictCwd, "safeinstall.config.json"), "{}\n");
+    expect((await runCli(["trust", "lock", "--mode", "strict"], { cwd: strictCwd, env })).code).toBe(0);
+    await mkdir(path.join(strictCwd, "sub"), { recursive: true });
+    await writeFile(path.join(strictCwd, "sub", "AGENTS.md"), "# nested\n");
+    const strict = await runCli(["trust", "status", "--json"], { cwd: strictCwd, env });
+    expect(strict.code).toBe(2);
+    expect(strict.stdout).toContain("trust-instruction-drift");
+    expect(strict.stdout).toContain("sub/AGENTS.md");
+  });
+
   it("protects a SafeInstall project in a git subfolder and blocks a planted second lock", async () => {
     const repo = await createTempDir("safeinstall-trust-e2e-repo-");
     const stateDir = await createTempDir("safeinstall-trust-state-");
