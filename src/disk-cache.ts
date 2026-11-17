@@ -50,7 +50,8 @@ export class DiskCache {
         return undefined;
       }
 
-      if (Date.now() - entry.cachedAt > this.ttlMs) {
+      const ageMs = Date.now() - entry.cachedAt;
+      if (!Number.isFinite(entry.cachedAt) || ageMs < 0 || ageMs > this.ttlMs) {
         return undefined;
       }
 
