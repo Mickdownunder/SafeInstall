@@ -110,7 +110,8 @@ function dedupe(packages: TransitivePackage[]): TransitivePackage[] {
 
 export function collectNpmTransitivePackages(
   lockfile: NpmLockfileTree,
-  directNames: ReadonlySet<string>
+  directNames: ReadonlySet<string>,
+  registryUrl?: string
 ): TransitivePackage[] {
   const packages = lockfile.packages ?? {};
   const collected: TransitivePackage[] = [];
@@ -126,7 +127,10 @@ export function collectNpmTransitivePackages(
     collected.push({
       name,
       version: entry.version ?? "",
-      sourceType: classifyResolvedSource("registry", entry.resolved, Boolean(entry.integrity)),
+      // Lockfile integrity only binds bytes to the lockfile author's value;
+      // unlike direct targets, transitive entries are not compared with a
+      // freshly checked registry manifest here.
+      sourceType: classifyResolvedSource("registry", entry.resolved, undefined, registryUrl),
       hasInstallScript: entry.hasInstallScript === true
     });
   }
@@ -136,7 +140,8 @@ export function collectNpmTransitivePackages(
 
 export function collectPnpmTransitivePackages(
   lockfile: PnpmLockfileTree,
-  directNames: ReadonlySet<string>
+  directNames: ReadonlySet<string>,
+  registryUrl?: string
 ): TransitivePackage[] {
   const packages = lockfile.packages ?? {};
   const collected: TransitivePackage[] = [];
@@ -150,7 +155,7 @@ export function collectPnpmTransitivePackages(
     collected.push({
       name: parsed.name,
       version: entry.version ?? parsed.version,
-      sourceType: classifyResolvedSource("registry", tarball, Boolean(entry.resolution?.integrity)),
+      sourceType: classifyResolvedSource("registry", tarball, undefined, registryUrl),
       // pnpm lockfiles do not record install-script presence; left unknown.
       hasInstallScript: undefined
     });
@@ -240,18 +245,19 @@ export function evaluateTransitivePackages(
 function collectFromLockfile(
   lockfilePath: string,
   rawLockfile: string,
-  directNames: ReadonlySet<string>
+  directNames: ReadonlySet<string>,
+  registryUrl?: string
 ): TransitivePackage[] {
   const basename = path.basename(lockfilePath);
 
   if (basename === "pnpm-lock.yaml") {
     const lockfile = parseYaml(rawLockfile) as PnpmLockfileTree;
-    return collectPnpmTransitivePackages(lockfile, directNames);
+    return collectPnpmTransitivePackages(lockfile, directNames, registryUrl);
   }
 
   // package-lock.json or npm-shrinkwrap.json
   const lockfile = JSON.parse(rawLockfile) as NpmLockfileTree;
-  return collectNpmTransitivePackages(lockfile, directNames);
+  return collectNpmTransitivePackages(lockfile, directNames, registryUrl);
 }
 
 /**
@@ -290,7 +296,12 @@ export async function evaluateTransitiveDependencies(options: {
 
   let packages: TransitivePackage[];
   try {
-    packages = collectFromLockfile(options.lockfilePath, rawLockfile, options.directNames);
+    packages = collectFromLockfile(
+      options.lockfilePath,
+      rawLockfile,
+      options.directNames,
+      options.config.registryUrl
+    );
   } catch {
     return empty;
   }

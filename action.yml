@@ -108,22 +108,31 @@ runs:
       run: |
         set +e
 
-        CONFIG_FLAG=""
+        SAFEINSTALL_CMD=(safeinstall --json)
         if [ -n "$SAFEINSTALL_CONFIG" ]; then
-          CONFIG_FLAG="--config $SAFEINSTALL_CONFIG"
+          SAFEINSTALL_CMD+=(--config "$SAFEINSTALL_CONFIG")
         fi
 
         if [ "$SAFEINSTALL_MODE" = "install" ]; then
-          CMD="safeinstall --json $CONFIG_FLAG $SAFEINSTALL_PM install $SAFEINSTALL_ARGS"
+          IFS=$' \t\n' read -r -d '' -a SAFEINSTALL_EXTRA_ARGS < <(printf '%s\0' "$SAFEINSTALL_ARGS")
+          for ARG in "${SAFEINSTALL_EXTRA_ARGS[@]}"; do
+            if [ "$ARG" = "--config" ] || [[ "$ARG" == --config=* ]]; then
+              echo "SafeInstall Action: args must not contain --config; use the config-path input." >&2
+              exit 2
+            fi
+          done
+          SAFEINSTALL_CMD+=("$SAFEINSTALL_PM" install "${SAFEINSTALL_EXTRA_ARGS[@]}")
         else
-          CMD="safeinstall check --json $CONFIG_FLAG"
+          SAFEINSTALL_CMD+=(check)
         fi
 
         echo "::group::SafeInstall command"
-        echo "Running: $CMD"
+        printf 'Running:'
+        printf ' %q' "${SAFEINSTALL_CMD[@]}"
+        printf '\n'
         echo "::endgroup::"
 
-        OUTPUT=$($CMD 2>/dev/null)
+        OUTPUT=$("${SAFEINSTALL_CMD[@]}" 2>/dev/null)
         EXIT_CODE=$?
 
         DECISION=$(echo "$OUTPUT" | grep -o '"decision":\s*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
