@@ -378,6 +378,26 @@ export function isTrustSurfacePath(root: string, absolutePath: string): boolean 
   return INSTRUCTION_DIRS.some((dir) => posixRelative === dir || posixRelative.startsWith(`${dir}/`));
 }
 
+/**
+ * The protected shape of the trust surface in repository-relative POSIX form:
+ * exact files, and subtrees whose whole content is protected. The guard uses it
+ * to decide whether a write target pattern (glob, expansion, unknown cwd) could
+ * reach the surface; `isTrustSurfacePath` stays the check for one concrete path.
+ */
+export function trustSurfaceProtectedPaths(): { files: string[]; subtrees: string[] } {
+  const files = [
+    ...new Set([
+      ...ENFORCEMENT_FILES,
+      ...INSTRUCTION_FILES,
+      ...TOOL_FILES,
+      ...MCP_CONFIG_FILES,
+      TRUST_LOCK_RELATIVE_PATH,
+      TRUST_LEDGER_RELATIVE_PATH
+    ])
+  ];
+  return { files, subtrees: [TRUST_DIR, ...INSTRUCTION_DIRS] };
+}
+
 export type TrustFindingKind =
   | "enforcement-drift"
   | "instruction-drift"

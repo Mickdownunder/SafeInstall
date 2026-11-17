@@ -291,6 +291,7 @@ describe("decideGuard trust surface", () => {
     const root = await createTempDir("safeinstall-guard-trust-");
     await writeFile(path.join(root, "safeinstall.config.json"), "{}\n");
     await mkdir(path.join(root, ".cursor"), { recursive: true });
+    await mkdir(path.join(root, "packages", "app"), { recursive: true });
     await writeFile(path.join(root, ".cursor", "hooks.json"), JSON.stringify({ version: 1 }));
     await writeFile(path.join(root, "AGENTS.md"), "# rules\n");
     await runTrustLockFlow(root, ["trust", "lock"]);
@@ -317,6 +318,56 @@ describe("decideGuard trust surface", () => {
     const decision = await decideGuard("echo evil > safeinstall.config.json", root);
     expect(decision.action).toBe("deny");
     expect(decision.userMessage).toContain("safeinstall.config.json");
+  });
+
+  it("denies protected writes resolved from the shell execution cwd", async () => {
+    const root = await lockedProject();
+    for (const command of [
+      "cd packages/app && echo evil > ../../safeinstall.config.json",
+      "env --chdir packages/app tee ../../safeinstall.config.json",
+      "env --chdir packages/app echo evil > safeinstall.config.json",
+      "cd packages/app || echo evil > safeinstall.config.json"
+    ]) {
+      expect((await decideGuard(command, root)).action, command).toBe("deny");
+    }
+  });
+
+  it("fails closed when an expanded target or an unmodeled cwd change could reach the surface", async () => {
+    const root = await lockedProject();
+    for (const command of [
+      "echo evil > \"$(pwd)/safeinstall.config.json\"",
+      "pushd packages/app && echo evil > ../../safeinstall.config.json",
+      "time cd packages/app && echo evil > ../../safeinstall.config.json"
+    ]) {
+      const decision = await decideGuard(command, root);
+      expect(decision.action, command).toBe("deny");
+      expect(decision.userMessage, command).toContain("could not be resolved safely");
+    }
+    for (const command of [
+      "tee >(cat > safeinstall.config.json)",
+      "(cd packages/app) && echo evil > safeinstall.config.json"
+    ]) {
+      const decision = await decideGuard(command, root);
+      expect(decision.action, command).toBe("deny");
+      expect(decision.userMessage, command).toContain("safeinstall.config.json");
+    }
+  });
+
+  it("allows expanded targets whose literal parts name nothing protected", async () => {
+    const root = await lockedProject();
+    for (const command of ["echo ok > \"$TARGET\"", "echo ok > out-$(date +%F).txt"]) {
+      expect(await decideGuard(command, root), command).toEqual({ action: "allow" });
+    }
+  });
+
+  it("allows literal writes whose effective cwd stays outside the trust surface", async () => {
+    const root = await lockedProject();
+    for (const command of [
+      "cd packages/app && echo ok > build.log",
+      "env --chdir packages/app tee build.log"
+    ]) {
+      expect(await decideGuard(command, root), command).toEqual({ action: "allow" });
+    }
   });
 
   it("denies sed -i tampering of an agent rules file", async () => {
