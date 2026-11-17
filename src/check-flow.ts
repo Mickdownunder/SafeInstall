@@ -2,6 +2,7 @@ import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
 import { captureDecisionState, emitDecisionRecord } from "./decision-emit";
 import { evaluateRequestedPackages } from "./evaluations";
+import { lockfileArtifactBindingReasons } from "./install-binding";
 import { formatCommand } from "./output";
 import { loadManifestDependencies } from "./project-state";
 import { resolveInvocationContext } from "./project-discovery";
@@ -79,13 +80,13 @@ async function runCheckFlowInternal(
   const versionWarning = cliVersionWarning(config.minimumCliVersion);
   const cliVersionWarnings = versionWarning ? [versionWarning] : [];
 
-  const trust = await trustSurfacePrecheck(invocation.effectiveCwd);
+  const trust = await trustSurfacePrecheck(invocation.effectiveCwd, path);
   if (trust.reasons.length > 0) {
     return {
       mode: "check",
       decision: "block",
       exitCode: 2,
-      exitCodeMeaning: "Check was blocked because the Agent Trust Surface has drifted.",
+      exitCodeMeaning: "Check was blocked by the Agent Trust Surface.",
       command: argv,
       commandString,
       configPath: path,
@@ -177,6 +178,9 @@ async function runCheckFlowInternal(
     config,
     options.signal
   );
+  const artifactBindingReasons = projectTargets
+    ? lockfileArtifactBindingReasons(projectTargets, evaluations)
+    : [];
   const transitive = await evaluateTransitiveDependencies({
     lockfilePath: projectTargets?.lockfilePath,
     directNames: new Set(requestedPackages.map((requested) => requested.name)),
@@ -192,7 +196,11 @@ async function runCheckFlowInternal(
   ];
   const infos = evaluations.flatMap((evaluation) => evaluation.infos);
   const directBlockReasons = blocked.flatMap((evaluation) => evaluation.blockedReasons);
-  const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons];
+  const allBlockReasons = [
+    ...directBlockReasons,
+    ...artifactBindingReasons,
+    ...transitive.blockedReasons
+  ];
 
   // Opt-in audit trail for checks (`safeinstall check --record`): a check
   // changes no lockfile, so its record binds before == after. Not the

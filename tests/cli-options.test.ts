@@ -28,19 +28,29 @@ describe("parseCliOptions", () => {
   });
 
   it("extracts --config=path syntax", () => {
-    expect(parseCliOptions(["check", "--config=custom.json"])).toEqual({
+    expect(parseCliOptions(["--config=custom.json", "check"])).toEqual({
       json: false,
       args: ["check"],
       configPath: "custom.json"
     });
   });
 
-  it("combines --config and --json anywhere in the command", () => {
-    expect(parseCliOptions(["--json", "pnpm", "add", "axios", "--config", "policy.json"])).toEqual({
+  it("combines leading --config with --json after the command", () => {
+    expect(parseCliOptions(["--config", "policy.json", "pnpm", "add", "axios", "--json"])).toEqual({
       json: true,
       args: ["pnpm", "add", "axios"],
       configPath: "policy.json"
     });
+  });
+
+  it.each([
+    ["separate install option", ["pnpm", "add", "axios", "--config", "policy.json"]],
+    ["equals install option", ["npm", "install", "axios", "--config=policy.json"]],
+    ["manager option", ["pnpm", "--config", "policy.json", "add", "axios"]],
+    ["positional separator", ["npm", "install", "--", "--config=policy.json"]],
+    ["check option", ["check", "--config=policy.json"]]
+  ])("rejects a trailing --config in the %s form", (_label, argv) => {
+    expect(() => parseCliOptions(argv)).toThrow("--config must appear before the SafeInstall command.");
   });
 
   it("rejects --config without a path", () => {
