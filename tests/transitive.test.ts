@@ -238,10 +238,32 @@ describe("evaluateTransitivePackages", () => {
     hasInstallScript: false
   };
 
-  it("returns empty when transitive mode is off", () => {
-    const result = evaluateTransitivePackages([withScript, gitDep], createConfig());
+  it("ignores install scripts when transitive mode is off", () => {
+    const result = evaluateTransitivePackages([withScript, clean], createConfig());
     expect(result.blockedReasons).toHaveLength(0);
     expect(result.warnings).toHaveLength(0);
+  });
+
+  it.each(["off", "warn", "block"] as const)(
+    "blocks a lockfile entry from a source outside allowedSources in mode %s",
+    (mode) => {
+      // The source of an entry decides what gets downloaded; it is not an
+      // opt-in check and it never degrades to a warning.
+      const result = evaluateTransitivePackages(
+        [gitDep, clean],
+        createConfig({ transitive: { mode, checks: ["install-script"] } })
+      );
+      expect(result.blockedReasons.map((r) => r.code)).toEqual(["transitive-untrusted-source"]);
+      expect(result.untrustedSourcePackages).toEqual(["from-git@2.0.0 (git)"]);
+    }
+  );
+
+  it("allows that entry once its source type is in allowedSources", () => {
+    const result = evaluateTransitivePackages(
+      [gitDep],
+      createConfig({ allowedSources: ["registry", "git"] })
+    );
+    expect(result.blockedReasons).toHaveLength(0);
   });
 
   it("blocks transitive install scripts in block mode", () => {
@@ -461,6 +483,72 @@ describe("evaluateTransitiveDependencies evidence failures", () => {
 
     expect(result.blockedReasons).toHaveLength(0);
     expect(result.warnings).toHaveLength(0);
+  });
+
+  it.each([
+    ["an unsupported lockfile", "bun.lock", "{\"lockfileVersion\": 1}"],
+    ["an unparsable lockfile", "package-lock.json", "{not-json"]
+  ])("keeps transitive mode off silent for %s", async (_label, name, content) => {
+    const result = await evaluate(await createLockfile(name, content), createConfig());
+
+    expect(result.blockedReasons).toHaveLength(0);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it.each([
+    ["another host", "https://evil.example/is-number-4.0.0.tgz"],
+    ["a git repository", "git+ssh://git@github.com/attacker/is-number.git#0123456789abcdef0123456789abcdef01234567"]
+  ])("blocks a transitive npm lockfile entry resolved from %s with the default config", async (_label, resolved) => {
+    const lockfilePath = await createLockfile(
+      "package-lock.json",
+      JSON.stringify({
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "demo", version: "1.0.0" },
+          "node_modules/is-number": { version: "4.0.0", resolved }
+        }
+      })
+    );
+
+    const result = await evaluate(lockfilePath, createConfig());
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toEqual(["transitive-untrusted-source"]);
+    expect(result.blockedReasons[0]?.message).toContain("is-number@4.0.0");
+  });
+
+  it("blocks a transitive pnpm lockfile entry resolved from another host with the default config", async () => {
+    const lockfilePath = await createLockfile(
+      "pnpm-lock.yaml",
+      [
+        "lockfileVersion: '9.0'",
+        "packages:",
+        "  is-number@4.0.0:",
+        "    resolution: {integrity: sha512-x, tarball: https://evil.example/is-number-4.0.0.tgz}",
+        ""
+      ].join("\n")
+    );
+
+    const result = await evaluate(lockfilePath, createConfig());
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toEqual(["transitive-untrusted-source"]);
+  });
+
+  it("accepts entries from the public registry and from the configured registry", async () => {
+    const lockfilePath = await createLockfile(
+      "package-lock.json",
+      JSON.stringify({
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "demo", version: "1.0.0" },
+          "node_modules/a": { version: "1.0.0", resolved: "https://registry.npmjs.org/a/-/a-1.0.0.tgz" },
+          "node_modules/b": { version: "1.0.0", resolved: "https://mirror.example/npm/b/-/b-1.0.0.tgz" }
+        }
+      })
+    );
+
+    const result = await evaluate(lockfilePath, createConfig({ registryUrl: "https://mirror.example/npm/" }));
+
+    expect(result.blockedReasons).toHaveLength(0);
   });
 
   it("preserves clean evaluation for a supported valid lockfile", async () => {
