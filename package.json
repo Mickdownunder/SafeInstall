@@ -41,7 +41,8 @@
     "prepack": "pnpm build",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "attack-lab": "pnpm build && node attack-lab/run.mjs",
-    "release:check": "pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm pack:smoke",
+    "release:verify": "pnpm lint && pnpm typecheck && pnpm build && pnpm test",
+    "release:check": "pnpm release:verify && pnpm pack:smoke",
     "replay": "pnpm build && node demo/replay/run.cjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
