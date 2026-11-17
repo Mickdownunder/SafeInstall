@@ -5,6 +5,7 @@
 ### Fixed
 
 - A config selected with `--config` can no longer replace the policy protected by a trust lock. `install` and `check` block with `trust-unbound-config` unless the effective config is the locked `safeinstall.config.json` at the trust root. The GitHub Action builds its command as an argument list and rejects `--config` in `args`.
+- Provenance continuity now verifies every network or cached Sigstore bundle before trusting its repository identity, and binds the signed subject to the package version and artifact SHA-512. Missing verification tooling leaves continuity unevaluated instead of treating unsigned registry fields as provenance.
 
 ### Breaking changes
 

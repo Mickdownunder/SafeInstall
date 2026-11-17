@@ -310,11 +310,9 @@ export function createDefaultProvenanceDependencies(): ProvenanceDependencies {
 /**
  * The publish identity of a single package version, derived from npm's
  * attestation metadata. Used by the continuity check to compare a version
- * against the package's historical baseline. Identity extraction does NOT
- * cryptographically verify the bundle — npm verifies provenance at publish
- * time and binds the repository, so the presence and contents of the
- * attestation are meaningful on their own. This keeps continuity fast and
- * usable even when the optional sigstore package is not installed.
+ * against the package's historical baseline. Every populated identity comes
+ * from a statement whose package, version, artifact digest, statement shape,
+ * and GitHub Actions signer have been verified locally.
  */
 export interface AttestationIdentity {
   hasProvenance: boolean;
@@ -325,24 +323,28 @@ export interface AttestationIdentity {
 export interface FetchAttestationIdentityInput {
   packageName: string;
   version: string;
+  artifactIntegrity?: string | undefined;
   registryUrl: string;
   diskCache?: DiskCache | undefined;
-  deps?: Pick<ProvenanceDependencies, "fetchAttestations">;
+  deps?: Partial<ProvenanceDependencies> | undefined;
   signal?: AbortSignal | undefined;
 }
 
 /**
- * Fetch a single version's attestation from the registry and extract its
- * publish identity (whether it has SLSA provenance, and from which GitHub
- * repository and workflow). Returns `{ hasProvenance: false }` when the
- * version has no attestation or the attestation can't be parsed. Never
- * throws on ordinary failures; re-throws shutdown signals.
+ * Fetch a single version's attestation from the registry, verify it, and
+ * extract its publish identity (whether it has SLSA provenance, and from
+ * which GitHub repository and workflow). Returns `{ hasProvenance: false }`
+ * when the version has no valid attestation. Cached bundles are deliberately
+ * reverified before their fields are used. Missing verification tooling is
+ * re-thrown so continuity can report the check as unevaluated.
  */
 export async function fetchAttestationIdentity(
   input: FetchAttestationIdentityInput
 ): Promise<AttestationIdentity> {
   throwIfAborted(input.signal);
-  const fetchAttestations = input.deps?.fetchAttestations ?? defaultFetchAttestations;
+  const defaultDeps = createDefaultProvenanceDependencies();
+  const fetchAttestations = input.deps?.fetchAttestations ?? defaultDeps.fetchAttestations;
+  const verifyBundle = input.deps?.verifyBundle ?? defaultDeps.verifyBundle;
   const url = attestationUrl(input.registryUrl, input.packageName, input.version);
   const cacheKey = `${input.registryUrl}|${input.packageName}@${input.version}`;
 
@@ -379,18 +381,33 @@ export async function fetchAttestationIdentity(
   }
 
   const statement = parseStatement(slsa.bundle);
-  const workflow = statement?.predicate?.buildDefinition?.externalParameters?.workflow;
-  const sourceRepository = extractRepositorySlug(workflow?.repository);
-  if (!sourceRepository) {
-    // Has an attestation but no usable repository — treat as provenance
-    // present but identity unknown.
-    return { hasProvenance: true };
+  if (!statement) {
+    return { hasProvenance: false };
+  }
+
+  let validatedStatement: ValidatedProvenanceStatement | string;
+  try {
+    validatedStatement = validateProvenanceStatement(slsa.bundle, statement, input);
+  } catch {
+    return { hasProvenance: false };
+  }
+  if (typeof validatedStatement === "string") {
+    return { hasProvenance: false };
+  }
+
+  try {
+    await verifyBundle(slsa.bundle, validatedStatement.signingIdentity);
+  } catch (error) {
+    if (error instanceof SigstoreToolingUnavailableError) {
+      throw error;
+    }
+    return { hasProvenance: false };
   }
 
   return {
     hasProvenance: true,
-    sourceRepository,
-    workflowPath: workflow?.path
+    sourceRepository: validatedStatement.sourceRepository,
+    workflowPath: validatedStatement.workflowPath
   };
 }
 

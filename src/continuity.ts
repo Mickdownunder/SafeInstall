@@ -4,7 +4,9 @@ import type { AttestationIdentity } from "./provenance";
 import { getShutdownSignalError, throwIfAborted } from "./signals";
 import type { ContinuityConfig, ContinuityResult } from "./types";
 
-const VERSION_HISTORY_CACHE_NAMESPACE = "registry-version-history-v1";
+// v2 records the artifact integrity needed to bind each verified attestation
+// to the exact package bytes. v1 entries cannot safely supply that binding.
+const VERSION_HISTORY_CACHE_NAMESPACE = "registry-version-history-v2";
 const VERSION_HISTORY_FETCH_TIMEOUT_MS = 15_000;
 
 // A package whose recent history is at least this provenance-bearing is
@@ -17,6 +19,7 @@ const BASELINE_PROVENANCE_THRESHOLD = 0.5;
 export interface VersionRecord {
   version: string;
   publishedAt: Date;
+  artifactIntegrity?: string | undefined;
 }
 
 export interface ContinuityDependencies {
@@ -29,13 +32,21 @@ export interface ContinuityDependencies {
     packageName: string,
     version: string,
     registryUrl: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    artifactIntegrity?: string
   ): Promise<AttestationIdentity>;
 }
 
 interface PackumentTimeShape {
   time?: Record<string, string>;
-  versions?: Record<string, unknown>;
+  versions?: Record<
+    string,
+    {
+      dist?: {
+        integrity?: unknown;
+      };
+    }
+  >;
 }
 
 function encodePackageNameForUrl(name: string): string {
@@ -52,7 +63,9 @@ export function createDefaultContinuityDependencies(diskCache?: DiskCache): Cont
     async fetchVersionHistory(packageName, registryUrl, signal) {
       const cacheKey = `${registryUrl}|${packageName}`;
       const cached = diskCache
-        ? await diskCache.getJson<Array<{ version: string; publishedAt: string }>>(
+        ? await diskCache.getJson<
+            Array<{ version: string; publishedAt: string; artifactIntegrity?: string }>
+          >(
             VERSION_HISTORY_CACHE_NAMESPACE,
             cacheKey
           )
@@ -60,7 +73,10 @@ export function createDefaultContinuityDependencies(diskCache?: DiskCache): Cont
       if (cached) {
         return cached.map((entry) => ({
           version: entry.version,
-          publishedAt: new Date(entry.publishedAt)
+          publishedAt: new Date(entry.publishedAt),
+          ...(typeof entry.artifactIntegrity === "string"
+            ? { artifactIntegrity: entry.artifactIntegrity }
+            : {})
         }));
       }
 
@@ -87,7 +103,12 @@ export function createDefaultContinuityDependencies(diskCache?: DiskCache): Cont
         if (Number.isNaN(publishedAt.getTime())) {
           continue;
         }
-        records.push({ version, publishedAt });
+        const artifactIntegrity = versions[version]?.dist?.integrity;
+        records.push({
+          version,
+          publishedAt,
+          ...(typeof artifactIntegrity === "string" ? { artifactIntegrity } : {})
+        });
       }
 
       if (diskCache) {
@@ -96,7 +117,10 @@ export function createDefaultContinuityDependencies(diskCache?: DiskCache): Cont
           cacheKey,
           records.map((record) => ({
             version: record.version,
-            publishedAt: record.publishedAt.toISOString()
+            publishedAt: record.publishedAt.toISOString(),
+            ...(record.artifactIntegrity
+              ? { artifactIntegrity: record.artifactIntegrity }
+              : {})
           }))
         );
       }
@@ -104,8 +128,15 @@ export function createDefaultContinuityDependencies(diskCache?: DiskCache): Cont
       return records;
     },
 
-    async fetchIdentity(packageName, version, registryUrl, signal) {
-      return fetchAttestationIdentity({ packageName, version, registryUrl, diskCache, signal });
+    async fetchIdentity(packageName, version, registryUrl, signal, artifactIntegrity) {
+      return fetchAttestationIdentity({
+        packageName,
+        version,
+        artifactIntegrity,
+        registryUrl,
+        diskCache,
+        signal
+      });
     }
   };
 }
@@ -155,6 +186,7 @@ function dominantRepository(identities: AttestationIdentity[]): string | undefin
 export interface EvaluateContinuityInput {
   packageName: string;
   targetVersion: string;
+  targetArtifactIntegrity?: string | undefined;
   registryUrl: string;
   config: ContinuityConfig;
   diskCache: DiskCache;
@@ -202,14 +234,21 @@ export async function evaluateContinuity(
   try {
     baselineIdentities = await Promise.all(
       baseline.map((record) =>
-        deps.fetchIdentity(input.packageName, record.version, input.registryUrl, input.signal)
+        deps.fetchIdentity(
+          input.packageName,
+          record.version,
+          input.registryUrl,
+          input.signal,
+          record.artifactIntegrity
+        )
       )
     );
     targetIdentity = await deps.fetchIdentity(
       input.packageName,
       input.targetVersion,
       input.registryUrl,
-      input.signal
+      input.signal,
+      input.targetArtifactIntegrity
     );
   } catch (error) {
     const shutdownError = getShutdownSignalError(input.signal);

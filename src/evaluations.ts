@@ -85,6 +85,7 @@ export async function evaluateRequestedPackages(
         continuityResult = await evaluateContinuity({
           packageName: requested.name,
           targetVersion: resolvedRegistryPackage.resolvedVersion,
+          targetArtifactIntegrity: resolvedRegistryPackage.artifact?.integrity,
           registryUrl: config.registryUrl,
           config: config.continuity,
           diskCache: provenanceCache,

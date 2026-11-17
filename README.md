@@ -141,7 +141,7 @@ Continuity learns a per-package trust baseline from the provenance identity of r
 
 Because the baseline is learned **per package**, there are no false positives on the large majority of packages that never adopted provenance — they simply have no baseline and the check stays silent. No global "require provenance" sledgehammer.
 
-It reads npm's published attestation metadata, so it works **without the optional sigstore package**. Opt in with `continuity.mode` set to `"warn"` or `"block"`.
+Continuity verifies each attestation locally with the optional `sigstore` package before using its repository identity. If the verifier is unavailable, continuity is reported as unevaluated and does not block. Opt in with `continuity.mode` set to `"warn"` or `"block"`.
 
 > **Honest limit:** continuity does not catch an attack that comes *through* a legitimately-compromised CI workflow with valid provenance from the real repository (e.g. the Shai-Hulud worm class). There is no identity discontinuity to detect there. SafeInstall raises the bar against the dominant 2026 attack pattern; it does not close every door.
 

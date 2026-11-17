@@ -150,6 +150,41 @@ describe("evaluateContinuity", () => {
     expect(result.status).toBe("consistent");
   });
 
+  it("binds baseline and target identities to their artifact integrity", async () => {
+    const boundIdentities: Array<{ version: string; artifactIntegrity: string | undefined }> = [];
+    const integrityHistory: VersionRecord[] = history.map((record) => ({
+      ...record,
+      artifactIntegrity: `sha512-${record.version}`
+    }));
+    const bindingDeps: ContinuityDependencies = {
+      async fetchVersionHistory() {
+        return integrityHistory;
+      },
+      async fetchIdentity(_packageName, identityVersion, _registryUrl, _signal, artifactIntegrity) {
+        boundIdentities.push({ version: identityVersion, artifactIntegrity });
+        return provFrom("demo/demo");
+      }
+    };
+
+    const result = await evaluateContinuity({
+      packageName: "demo",
+      targetVersion: "1.3.0",
+      targetArtifactIntegrity: "sha512-resolved-target",
+      registryUrl: "https://registry.npmjs.org",
+      config: config(),
+      diskCache: await createDiskCache(),
+      deps: bindingDeps
+    });
+
+    expect(result.status).toBe("consistent");
+    expect(boundIdentities).toEqual([
+      { version: "1.2.0", artifactIntegrity: "sha512-1.2.0" },
+      { version: "1.1.0", artifactIntegrity: "sha512-1.1.0" },
+      { version: "1.0.0", artifactIntegrity: "sha512-1.0.0" },
+      { version: "1.3.0", artifactIntegrity: "sha512-resolved-target" }
+    ]);
+  });
+
   it("returns no-baseline when the package was never reliably provenance-bearing", async () => {
     // Only one of three baseline versions had provenance -> rate < 0.5
     const result = await run("1.3.0", {
