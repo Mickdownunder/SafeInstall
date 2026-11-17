@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { detectHiddenUnicode } from "./hidden-unicode";
@@ -426,19 +426,14 @@ export interface TrustSurfaceStatus {
  */
 async function isGitBoundary(candidate: string): Promise<boolean> {
   const gitPath = path.join(candidate, ".git");
+  // Read first and let the failure tell file from directory: a separate
+  // stat-then-read would leave a window in which the entry can be swapped.
   try {
-    const info = await stat(gitPath);
-    if (info.isDirectory()) {
-      return await fileExists(path.join(gitPath, "HEAD"));
-    }
-    if (info.isFile()) {
-      const head = (await readFile(gitPath, "utf8")).slice(0, 512);
-      return head.startsWith("gitdir:");
-    }
+    return (await readFile(gitPath, "utf8")).slice(0, 512).startsWith("gitdir:");
   } catch {
-    /* no .git entry */
+    // A directory (or no entry at all): a checkout only if it holds HEAD.
+    return fileExists(path.join(gitPath, "HEAD"));
   }
-  return false;
 }
 
 /** The nearest repository root, recognizing normal checkouts and worktrees. */
