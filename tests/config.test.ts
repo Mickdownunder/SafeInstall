@@ -21,6 +21,31 @@ afterEach(async () => {
 describe("config", () => {
   it("uses the npm registry by default", () => {
     expect(createDefaultConfig().registryUrl).toBe("https://registry.npmjs.org");
+    expect(createDefaultConfig().sourceBaselines).toEqual({});
+  });
+
+  it("accepts reviewed source baselines and normalizes package names", async () => {
+    const cwd = await createTempDir("safeinstall-config-source-baselines-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ sourceBaselines: { Axios: "registry", "@scope/tool": "git" } }, null, 2)
+    );
+
+    const { config } = await loadConfig(cwd);
+
+    expect(config.sourceBaselines).toEqual({ axios: "registry", "@scope/tool": "git" });
+  });
+
+  it("rejects source baselines that cannot establish transition history", async () => {
+    const cwd = await createTempDir("safeinstall-config-source-baselines-invalid-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ sourceBaselines: { axios: "workspace" } }, null, 2)
+    );
+
+    await expect(loadConfig(cwd)).rejects.toThrow(
+      'sourceBaselines.axios must be one of "registry", "git", "tarball", or "url"'
+    );
   });
 
   it("normalizes a configured registry URL", async () => {

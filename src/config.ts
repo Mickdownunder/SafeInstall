@@ -15,6 +15,7 @@ const KNOWN_CONFIG_KEYS = new Set<keyof SafeInstallConfig>([
   "registryUrl",
   "allowedScripts",
   "allowedSources",
+  "sourceBaselines",
   "allowedPackages",
   "packageManagerDefaults",
   "typoSquat",
@@ -48,6 +49,17 @@ const TOOLING_UNAVAILABLE_BEHAVIORS = new Set(["warn", "fail-closed"]);
 const TRANSITIVE_MODES = new Set(["off", "warn", "block"]);
 const TRANSITIVE_CHECKS = new Set(["install-script", "untrusted-source"]);
 const CONTINUITY_MODES = new Set(["off", "warn", "block"]);
+const SOURCE_TYPES = new Set([
+  "registry",
+  "git",
+  "tarball",
+  "url",
+  "file",
+  "directory",
+  "workspace",
+  "unknown"
+]);
+const BASELINE_SOURCE_TYPES = new Set(["registry", "git", "tarball", "url"]);
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -82,6 +94,7 @@ export function createDefaultConfig(): SafeInstallConfig {
     registryUrl: DEFAULT_REGISTRY_URL,
     allowedScripts: {},
     allowedSources: ["registry", "workspace", "file", "directory"],
+    sourceBaselines: {},
     allowedPackages: [],
     packageManagerDefaults: {
       npm: { ignoreScripts: true },
@@ -314,6 +327,7 @@ function mergeConfig(input: Partial<SafeInstallConfig>): SafeInstallConfig {
       ...defaultConfig.allowedScripts,
       ...(input.allowedScripts ?? {})
     },
+    sourceBaselines: {},
     allowedPackages: (input.allowedPackages ?? defaultConfig.allowedPackages).map((name) =>
       name.toLowerCase()
     ),
@@ -352,19 +366,25 @@ function mergeConfig(input: Partial<SafeInstallConfig>): SafeInstallConfig {
   merged.registryUrl = normalizeRegistryUrl(merged.registryUrl);
 
   for (const source of merged.allowedSources) {
-    if (
-      source !== "registry" &&
-      source !== "git" &&
-      source !== "tarball" &&
-      source !== "url" &&
-      source !== "file" &&
-      source !== "directory" &&
-      source !== "workspace" &&
-      source !== "unknown"
-    ) {
+    if (!SOURCE_TYPES.has(source)) {
       throw new Error(`Config error: unsupported source type "${source}".`);
     }
   }
+
+  const sourceBaselines = input.sourceBaselines ?? defaultConfig.sourceBaselines ?? {};
+  if (typeof sourceBaselines !== "object" || sourceBaselines === null || Array.isArray(sourceBaselines)) {
+    throw new Error("Config error: sourceBaselines must be an object mapping package names to source types.");
+  }
+  const normalizedSourceBaselines: Record<string, SafeInstallConfig["allowedSources"][number]> = {};
+  for (const [packageName, sourceType] of Object.entries(sourceBaselines)) {
+    if (!BASELINE_SOURCE_TYPES.has(sourceType)) {
+      throw new Error(
+        `Config error: sourceBaselines.${packageName} must be one of "registry", "git", "tarball", or "url".`
+      );
+    }
+    normalizedSourceBaselines[packageName.toLowerCase()] = sourceType;
+  }
+  merged.sourceBaselines = normalizedSourceBaselines;
 
   for (const [packageName, scripts] of Object.entries(merged.allowedScripts)) {
     if (!Array.isArray(scripts)) {

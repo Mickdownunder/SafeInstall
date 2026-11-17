@@ -1,3 +1,5 @@
+import nodePath from "node:path";
+
 import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
 import { captureDecisionState, emitDecisionRecord } from "./decision-emit";
@@ -8,6 +10,8 @@ import { loadManifestDependencies } from "./project-state";
 import { hasAmbiguousWorkspaceFlags, resolveInvocationContext } from "./project-discovery";
 import { loadProjectInstallTargetsForManager } from "./project-installs";
 import { RegistryClient } from "./registry";
+import { loadHeadSourceBaseline } from "./source-baseline";
+import { redactCliResult, redactSensitiveText } from "./redaction";
 import { throwIfAborted } from "./signals";
 import { buildInstallPlan, parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
@@ -124,7 +128,7 @@ function createAffectedPackage(evaluation: PackageEvaluation) {
   };
 }
 
-export async function runInstallFlow(
+async function runInstallFlowInternal(
   cwd: string,
   argv: string[],
   options: InstallFlowOptions
@@ -277,12 +281,14 @@ export async function runInstallFlow(
     registryUrl: config.registryUrl,
     signal: options.signal
   });
+  const evaluationDir = invocation.packageDir ?? invocation.effectiveCwd;
   const evaluations = await evaluateRequestedPackages(
-    invocation.packageDir ?? invocation.effectiveCwd,
+    evaluationDir,
     plan.packages,
     registryClient,
     config,
-    options.signal
+    options.signal,
+    await loadHeadSourceBaseline([nodePath.join(evaluationDir, "package.json")], config)
   );
   // Explicit additions do not have their candidate lockfile yet. Their
   // transitive policy is enforced by runBoundInstall after lockfile-only
@@ -365,11 +371,13 @@ export async function runInstallFlow(
   if (!options.jsonMode) {
     printConfigInfo(path);
     for (const warning of cliVersionWarnings) {
-      console.error(`Warning: ${warning}`);
+      console.error(`Warning: ${redactSensitiveText(warning)}`);
     }
     printWarnings(evaluations);
     if (!decisionState.captured) {
-      console.error(`Info: Decision record not written: ${decisionState.skippedReason}.`);
+      console.error(
+        `Info: Decision record not written: ${redactSensitiveText(decisionState.skippedReason)}.`
+      );
     }
     console.error("Policy checks passed; verifying install artifacts.");
   }
@@ -404,7 +412,9 @@ export async function runInstallFlow(
   warnings.push(...addedWarnings);
   infos.push(...additional.flatMap((evaluation) => evaluation.infos));
   if (!options.jsonMode) {
-    for (const warning of addedWarnings) console.error(`Warning: ${warning}`);
+    for (const warning of addedWarnings) {
+      console.error(`Warning: ${redactSensitiveText(warning)}`);
+    }
   }
 
   if (decisionState.captured) {
@@ -422,13 +432,13 @@ export async function runInstallFlow(
     if (emitted.info) {
       infos.push(emitted.info);
       if (!options.jsonMode) {
-        console.error(`Info: ${emitted.info}`);
+        console.error(`Info: ${redactSensitiveText(emitted.info)}`);
       }
     }
     if (emitted.warning) {
       warnings.push(emitted.warning);
       if (!options.jsonMode) {
-        console.error(`Warning: ${emitted.warning}`);
+        console.error(`Warning: ${redactSensitiveText(emitted.warning)}`);
       }
     }
   }
@@ -464,4 +474,12 @@ export async function runInstallFlow(
       suppressHumanOutput: !options.jsonMode
     }
   };
+}
+
+export async function runInstallFlow(
+  cwd: string,
+  argv: string[],
+  options: InstallFlowOptions
+): Promise<CliResult> {
+  return redactCliResult(await runInstallFlowInternal(cwd, argv, options));
 }

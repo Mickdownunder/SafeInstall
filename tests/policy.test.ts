@@ -122,6 +122,31 @@ describe("evaluatePackage", () => {
     expect(result.blockedReasons.map((reason) => reason.code)).toContain("untrusted-source");
   });
 
+  it.each(["git", "url", "tarball"] as const)(
+    "fails closed for allowed %s sources without independent prior evidence",
+    (sourceType) => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            allowedSources: ["registry", sourceType]
+          }),
+          requested: {
+            name: "axios",
+            raw: `axios@${sourceType}:attacker-controlled`,
+            requested: `${sourceType}:attacker-controlled`,
+            sourceType
+          },
+          priorSource: { status: "unavailable" },
+          resolvedRegistryPackage: undefined
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toEqual([
+        "trust-level-dropped"
+      ]);
+    }
+  );
+
   it("does not block local workspace sources by default", () => {
     const result = evaluatePackage(
       createInput({
@@ -234,6 +259,7 @@ describe("evaluatePackage", () => {
           declaredSpec: "^1.13.2",
           declaredSourceType: "registry"
         },
+        priorSource: { status: "known", sourceType: "registry" },
         resolvedRegistryPackage: undefined
       })
     );
