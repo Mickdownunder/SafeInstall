@@ -39,4 +39,36 @@ describe("GitHub workflow security boundaries", () => {
     expect(publishJob).toContain("npm publish ./release-artifact/package.tgz --ignore-scripts --provenance");
     expect(publishJob).not.toContain("npm publish release-artifact/package.tgz");
   });
+
+  it("seals the publish artifact before resolving smoke-test dependencies", async () => {
+    const content = await readFile(path.join(workflows, "release.yml"), "utf8");
+    const verifyJob = content.slice(content.indexOf("  verify:"), content.indexOf("  smoke:"));
+    const smokeJob = content.slice(content.indexOf("  smoke:"), content.indexOf("  publish:"));
+    const publishJob = content.slice(content.indexOf("  publish:"));
+    const smokeScript = await readFile(path.join(root, "scripts", "pack-smoke.mjs"), "utf8");
+
+    expect(verifyJob).toContain("pnpm release:verify");
+    expect(verifyJob).not.toContain("pack:smoke");
+    expect(verifyJob).toContain("npm pack --ignore-scripts --pack-destination release-artifact");
+    expect(verifyJob).toContain("actions/upload-artifact@");
+    expect(verifyJob.indexOf("npm pack --ignore-scripts --pack-destination release-artifact"))
+      .toBeLessThan(verifyJob.indexOf("actions/upload-artifact@"));
+
+    expect(smokeJob).toContain("needs: verify");
+    expect(smokeJob).toContain("actions/download-artifact@");
+    expect(smokeJob).toContain("persist-credentials: false");
+    expect(smokeJob).toContain(
+      "node scripts/pack-smoke.mjs release-artifact/safeinstall-cli-*.tgz"
+    );
+    expect(smokeJob).not.toContain("actions/upload-artifact@");
+    expect(smokeJob).not.toContain("id-token: write");
+    expect(smokeJob).not.toContain("npm publish");
+    expect(publishJob).toContain("needs: [verify, smoke]");
+
+    expect(smokeScript).toContain(
+      '["install", "--package-lock-only", "--ignore-scripts", tarballPath]'
+    );
+    expect(smokeScript).toContain('["ci", "--ignore-scripts"]');
+    expect(smokeScript).not.toContain('["install", tarballPath]');
+  });
 });

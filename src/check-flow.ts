@@ -1,14 +1,19 @@
+import nodePath from "node:path";
+
 import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
 import { captureDecisionState, emitDecisionRecord } from "./decision-emit";
 import { evaluateRequestedPackages } from "./evaluations";
+import { lockfileArtifactBindingReasons } from "./install-binding";
 import { formatCommand } from "./output";
 import { loadManifestDependencies } from "./project-state";
 import { resolveInvocationContext } from "./project-discovery";
-import { inferProjectInstallTargetsForCheck } from "./project-installs";
+import { directLockfileKeys, inferProjectInstallTargetsForCheck } from "./project-installs";
 import { RegistryClient } from "./registry";
+import { loadHeadSourceBaseline } from "./source-baseline";
+import { redactCliResult } from "./redaction";
 import { throwIfAborted } from "./signals";
-import { parseManifestDependency } from "./specs";
+import { assertNoCredentialBearingArgs, parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
 import { trustSurfacePrecheck } from "./trust-surface-check";
 import type { CliReason, CliResult, PackageEvaluation } from "./types";
@@ -61,12 +66,13 @@ function createAffectedPackage(evaluation: PackageEvaluation) {
   };
 }
 
-export async function runCheckFlow(
+async function runCheckFlowInternal(
   cwd: string,
   argv: string[],
   options: { signal?: AbortSignal; configPath?: string | undefined } = {}
 ): Promise<CliResult> {
   throwIfAborted(options.signal);
+  assertNoCredentialBearingArgs(argv.slice(1));
 
   const invocation = await resolveInvocationContext(cwd, []);
   const { config, path } = await loadConfig(invocation.effectiveCwd, options.configPath);
@@ -78,13 +84,13 @@ export async function runCheckFlow(
   const versionWarning = cliVersionWarning(config.minimumCliVersion);
   const cliVersionWarnings = versionWarning ? [versionWarning] : [];
 
-  const trust = await trustSurfacePrecheck(invocation.effectiveCwd);
+  const trust = await trustSurfacePrecheck(invocation.effectiveCwd, path);
   if (trust.reasons.length > 0) {
     return {
       mode: "check",
       decision: "block",
       exitCode: 2,
-      exitCodeMeaning: "Check was blocked because the Agent Trust Surface has drifted.",
+      exitCodeMeaning: "Check was blocked by the Agent Trust Surface.",
       command: argv,
       commandString,
       configPath: path,
@@ -168,16 +174,21 @@ export async function runCheckFlow(
     registryUrl: config.registryUrl,
     signal: options.signal
   });
+  const packageDir = invocation.packageDir ?? invocation.effectiveCwd;
   const evaluations = await evaluateRequestedPackages(
-    invocation.packageDir ?? invocation.effectiveCwd,
+    packageDir,
     requestedPackages,
     registryClient,
     config,
-    options.signal
+    options.signal,
+    await loadHeadSourceBaseline([nodePath.join(packageDir, "package.json")], config)
   );
+  const artifactBindingReasons = projectTargets
+    ? lockfileArtifactBindingReasons(projectTargets, evaluations)
+    : [];
   const transitive = await evaluateTransitiveDependencies({
     lockfilePath: projectTargets?.lockfilePath,
-    directNames: new Set(requestedPackages.map((requested) => requested.name)),
+    directLockfileKeys: projectTargets ? directLockfileKeys(projectTargets) : new Set<string>(),
     config
   });
 
@@ -190,7 +201,11 @@ export async function runCheckFlow(
   ];
   const infos = evaluations.flatMap((evaluation) => evaluation.infos);
   const directBlockReasons = blocked.flatMap((evaluation) => evaluation.blockedReasons);
-  const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons];
+  const allBlockReasons = [
+    ...directBlockReasons,
+    ...artifactBindingReasons,
+    ...transitive.blockedReasons
+  ];
 
   // Opt-in audit trail for checks (`safeinstall check --record`): a check
   // changes no lockfile, so its record binds before == after. Not the
@@ -262,4 +277,12 @@ export async function runCheckFlow(
       infos: []
     }))
   };
+}
+
+export async function runCheckFlow(
+  cwd: string,
+  argv: string[],
+  options: { signal?: AbortSignal; configPath?: string | undefined } = {}
+): Promise<CliResult> {
+  return redactCliResult(await runCheckFlowInternal(cwd, argv, options));
 }

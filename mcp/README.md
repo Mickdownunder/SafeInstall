@@ -49,16 +49,40 @@ The server uses the **same config resolution as the CLI** — it walks up from t
 
 ## Install once, protect forever
 
-Two steps, then every install the agent proposes is screened automatically:
+Three steps, then every install the agent proposes is screened automatically:
 
-### 1. Add the MCP server to your client
+### 1. Install a reviewed, locked server
+
+Create a dedicated directory for the server, then install exact supported
+versions without lifecycle scripts:
+
+```bash
+mkdir safeinstall-mcp
+cd safeinstall-mcp
+npm init -y
+npm install --save-exact --ignore-scripts safeinstall-cli@0.15.0 @modelcontextprotocol/sdk@1.32.2
+```
+
+Before enabling the server, compare the `safeinstall-cli` SHA-512 integrity in
+`package-lock.json` with the release's signed npm provenance, review the full
+lockfile, and retain it. Use `npm ci --ignore-scripts` for subsequent installs.
+The client configuration below executes that reviewed local binary and never
+resolves a package publication at MCP startup.
+
+### 2. Add the MCP server to your client
 
 **Claude Code / Claude Desktop** — add to your MCP config (`claude_desktop_config.json`, or a project-local `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
-    "safeinstall": { "command": "npx", "args": ["safeinstall-cli", "mcp"] }
+    "safeinstall": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/safeinstall-mcp/node_modules/safeinstall-cli/dist/cli.js",
+        "mcp"
+      ]
+    }
   }
 }
 ```
@@ -68,14 +92,22 @@ Two steps, then every install the agent proposes is screened automatically:
 ```json
 {
   "mcpServers": {
-    "safeinstall": { "command": "npx", "args": ["safeinstall-cli", "mcp"] }
+    "safeinstall": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/safeinstall-mcp/node_modules/safeinstall-cli/dist/cli.js",
+        "mcp"
+      ]
+    }
   }
 }
 ```
 
-**Windsurf / Cline** and other MCP clients use the same shape — a server named `safeinstall` whose `command` is `npx` and `args` are `["safeinstall-cli", "mcp"]`. If you have SafeInstall installed globally you can instead use `"command": "safeinstall", "args": ["mcp"]`.
+**Windsurf / Cline** and other MCP clients use the same shape — a server named
+`safeinstall` whose `command` is `node` and whose first argument is the absolute
+path to the reviewed local `safeinstall-cli/dist/cli.js`, followed by `"mcp"`.
 
-### 2. Add the agent rule
+### 3. Add the agent rule
 
 > [!IMPORTANT]
 > **MCP tools are advisory.** Installing the server makes `check_package` *available* — it does **not** force the agent to call it. You must instruct the agent to use it.
@@ -84,9 +116,9 @@ Paste the snippet from [`agent-rule.md`](agent-rule.md) into your `CLAUDE.md`, C
 
 ## Optional dependency
 
-The MCP SDK (`@modelcontextprotocol/sdk`) is an **optional dependency**, loaded lazily only when `safeinstall mcp` runs — exactly like the optional `sigstore` package. Users who only use the CLI never install it.
+The MCP SDK (`@modelcontextprotocol/sdk`) is an **optional dependency**, loaded lazily only when `safeinstall mcp` runs — exactly like the optional `sigstore` package. Users who only use the CLI never install it. The locked setup above installs the SDK explicitly for the MCP server.
 
-`npx safeinstall-cli mcp` pulls it in automatically. If you installed SafeInstall in a way that skipped optional dependencies and run `safeinstall mcp`, the command prints:
+If your reviewed installation omitted optional dependencies and you run `safeinstall mcp`, the command prints:
 
 ```
 The MCP server requires the optional '@modelcontextprotocol/sdk' package. Install it with: npm install @modelcontextprotocol/sdk
@@ -96,10 +128,19 @@ and exits non-zero.
 
 ## Verifying the server manually
 
-`safeinstall mcp` speaks JSON-RPC over stdio. Quickest check with the official inspector:
+`safeinstall mcp` speaks JSON-RPC over stdio. To check it with the official
+inspector, first install an exact inspector version into its own retained
+lockfile and verify that lockfile's integrity. Configure the inspected server
+with the same local command used above:
 
-```bash
-npx @modelcontextprotocol/inspector npx safeinstall-cli mcp
+```json
+{
+  "command": "node",
+  "args": [
+    "/absolute/path/to/safeinstall-mcp/node_modules/safeinstall-cli/dist/cli.js",
+    "mcp"
+  ]
+}
 ```
 
 List the tools, then call `check_package` with `{ "name": "axios" }` (expect `allow`) and `{ "name": "raect" }` (expect a `typo-squat-suspected` block under the secure preset).

@@ -1,17 +1,24 @@
 import { FLAGS_WITH_VALUES, normalizeInstallCommand } from "./specs";
 import {
+  collectWriteTargetTokens,
   collectWriteTargets,
   findCommandTokenIndex,
+  hasDynamicCommandName,
+  leadingBraceOpens,
+  packageManagerFromWord,
   shellBasename as basename,
   splitShellSegments,
+  startsWithBraceClose,
   stripRedirections
 } from "./guard-shell";
-import type { ShellSegment, ShellToken } from "./guard-shell";
+import type { ScopeEvent, ShellSegment, ShellToken } from "./guard-shell";
+import { literalDirectoryWord, parseWordAlternatives } from "./guard-words";
 import type {
   GuardCommandAnalysis,
   GuardInstallMatch,
   GuardRunnerMatch,
-  GuardUnanalyzableSegment
+  GuardUnanalyzableSegment,
+  GuardWriteOperation
 } from "./guard-types";
 import type { PackageManagerName } from "./types";
 
@@ -20,7 +27,8 @@ export type {
   GuardCommandAnalysis,
   GuardInstallMatch,
   GuardRunnerMatch,
-  GuardUnanalyzableSegment
+  GuardUnanalyzableSegment,
+  GuardWriteOperation
 } from "./guard-types";
 
 /**
@@ -87,15 +95,83 @@ const NON_INSTALL_SUBCOMMANDS = new Set([
   "test",
   "uninstall",
   "unlink",
-  "update",
-  "upgrade",
   "version",
   "view",
   "whoami",
   "why",
   "x"
 ]);
-const NESTED_SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
+/** `eval` re-parses its arguments as shell text, exactly like a nested shell. */
+const NESTED_SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "eval"]);
+
+/**
+ * Subcommands that resolve and fetch new package versions but are not install
+ * flows the SafeInstall CLI can route. Allowing them raw would skip release
+ * age, provenance, and script blocking, so the guard denies them.
+ */
+const UPDATE_SUBCOMMANDS: Record<string, ReadonlySet<string>> = {
+  npm: new Set(["update", "up", "upgrade", "udpate"]),
+  pnpm: new Set(["update", "up", "upgrade"]),
+  bun: new Set(["update"]),
+  yarn: new Set(["up", "upgrade", "upgrade-interactive"])
+};
+/** npm install variants that also run the project's tests. */
+const NPM_INSTALL_TEST_SUBCOMMANDS = new Set(["install-test", "it", "install-ci-test", "cit"]);
+
+/**
+ * Commands whose arguments run somewhere else (a container, another host).
+ * A package manager named there does not install into this project.
+ */
+const REMOTE_EXECUTORS = new Set(["docker", "podman", "nerdctl", "kubectl", "ssh"]);
+/**
+ * Common commands that only read or print their arguments. A package-manager
+ * word among them (`echo npm install is dangerous`, `grep npm install log`)
+ * is text, never an invocation.
+ */
+const ARGUMENT_ONLY_COMMANDS = new Set([
+  "echo", "printf", "grep", "egrep", "fgrep", "rg", "cat", "man", "which", "type", "ls", "git"
+]);
+
+function isFetchingSubcommand(manager: string, value: string): boolean {
+  const normalized = value.toLowerCase();
+  if (UPDATE_SUBCOMMANDS[manager]?.has(normalized)) return true;
+  if (manager === "yarn") return normalized === "install" || normalized === "add" || normalized === "global";
+  if (manager === "npm" && NPM_INSTALL_TEST_SUBCOMMANDS.has(normalized)) return true;
+  return normalizeInstallCommand(manager as PackageManagerName, normalized) !== undefined;
+}
+
+/**
+ * Find a package manager that is run as an argument of another command
+ * (`timeout 60 npm install x`, `xargs npm install`, `pnpm exec npm i x`,
+ * `node .../npm-cli.js install x`): an unquoted manager word followed by one
+ * of its install or update subcommands.
+ */
+function findWrappedInstall(tokens: ShellToken[]): { manager: string; keyword: string } | undefined {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === undefined || token.quoted) continue;
+    const manager = packageManagerFromWord(token.value);
+    if (!manager) continue;
+    const keyword = tokens
+      .slice(index + 1)
+      .find((candidate) => !candidate.quoted && isFetchingSubcommand(manager, candidate.value));
+    if (keyword) return { manager, keyword: keyword.value };
+  }
+  return undefined;
+}
+
+function wrappedInstallFinding(
+  executable: string,
+  wrapped: { manager: string; keyword: string },
+  segmentText: string
+): SegmentFinding {
+  return {
+    unanalyzable: {
+      segmentText,
+      reason: `The command runs \`${wrapped.manager} ${wrapped.keyword}\` through \`${executable}\`, which SafeInstall cannot route. Run the install as a plain top-level command instead.`
+    }
+  };
+}
 const INSTALL_HINT_PATTERN = /\b(npm|pnpm|bun|yarn)\b/i;
 
 /** Standalone package-runner binaries. */
@@ -227,11 +303,457 @@ function createRunnerFinding(
   };
 }
 
+/**
+ * The local-runner fast path is safe only for one direct invocation whose
+ * package target is positional. Earlier shell segments, substitutions,
+ * wrappers, and pre-target options can change state or package resolution
+ * before execution.
+ */
+function hasStableLocalRunnerResolution(
+  segments: ShellSegment[],
+  runners: GuardRunnerMatch[]
+): boolean {
+  if (segments.length !== 1 || runners.length !== 1 || segments[0]?.hasSubstitution) {
+    return false;
+  }
+
+  const segment = segments[0];
+  const runner = runners[0];
+  if (segment === undefined || runner === undefined) {
+    return false;
+  }
+
+  const { index: commandIndex } = findCommandTokenIndex(segment.tokens);
+  if (commandIndex !== 0) {
+    return false;
+  }
+
+  const commandToken = segment.tokens[commandIndex];
+  if (commandToken === undefined) {
+    return false;
+  }
+  const executable = basename(commandToken.value);
+  const rest = stripRedirections(segment.tokens.slice(commandIndex + 1));
+
+  let targetTokens: ShellToken[];
+  if (RUNNER_EXECUTABLES[executable]) {
+    targetTokens = rest;
+  } else {
+    const subcommand = findSubcommand(rest);
+    if (subcommand === undefined || rest.indexOf(subcommand) !== 0) {
+      return false;
+    }
+    const config = RUNNER_SUBCOMMANDS[executable]?.[subcommand.value.toLowerCase()];
+    if (config?.alwaysRemote !== false) {
+      return false;
+    }
+    targetTokens = rest.slice(1);
+  }
+
+  if (targetTokens[0]?.value === "--") {
+    targetTokens = targetTokens.slice(1);
+  }
+  return runner.packageHint !== undefined && targetTokens[0]?.value === runner.packageHint;
+}
+
 function analyzeSegment(segment: ShellSegment, command: string): SegmentFinding {
   const finding = analyzeSegmentCore(segment, command);
   const { index } = findCommandTokenIndex(segment.tokens);
   const writeTargets = collectWriteTargets(segment.tokens, index);
   return writeTargets.length > 0 ? { ...finding, writeTargets } : finding;
+}
+
+interface ShellState {
+  cwdChanges: string[];
+  cwdUncertain: boolean;
+  succeeded: boolean;
+}
+
+interface CwdEffect {
+  changes: string[];
+  uncertain: boolean;
+}
+
+const ENV_VALUE_OPTIONS = new Set([
+  "-u", "--unset", "-C", "--chdir", "--block-signal", "--default-signal", "--ignore-signal"
+]);
+const NON_PERSISTENT_WRAPPERS = new Set(["sudo", "nohup", "env", "exec", "corepack"]);
+/**
+ * Commands whose effect on the shell's working directory the guard does not
+ * follow. `alias`, `case` and `function` can hide a `cd` in text that runs
+ * later or in an arm that may or may not run.
+ */
+const UNMODELED_CWD_COMMANDS = new Set(["pushd", "popd", "eval", "source", ".", "alias", "case", "function"]);
+/** Words that change the directory wherever they appear, e.g. inside a function body. */
+const CWD_WORDS = new Set(["cd", "pushd", "popd", "chdir"]);
+const MAX_CWD_VARIANTS = 32;
+const MAX_CWD_CHANGES = 64;
+
+function commandCwdEffect(command: string, tokens: ShellToken[], commandIndex: number): CwdEffect {
+  const changes: string[] = [];
+  let uncertain = false;
+  const addChange = (directory: string): void => {
+    if (changes.length >= MAX_CWD_CHANGES) uncertain = true;
+    else changes.push(directory);
+  };
+
+  for (let wrapperIndex = 0; wrapperIndex < commandIndex; wrapperIndex += 1) {
+    const wrapper = tokens[wrapperIndex];
+    if (wrapper === undefined) continue;
+    const executable = basename(wrapper.value);
+
+    if (executable === "sudo") {
+      for (let index = wrapperIndex + 1; index < commandIndex; index += 1) {
+        const value = tokens[index]?.value ?? "";
+        if (
+          value === "-D" ||
+          value === "--chdir" ||
+          value.startsWith("-D") ||
+          value.startsWith("--chdir=") ||
+          value === "-R" ||
+          value === "--chroot" ||
+          value.startsWith("-R") ||
+          value.startsWith("--chroot=")
+        ) {
+          uncertain = true;
+        }
+      }
+      continue;
+    }
+
+    if (executable !== "env") continue;
+    for (let index = wrapperIndex + 1; index < commandIndex;) {
+      const token = tokens[index];
+      if (token === undefined) break;
+      const value = token.value;
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(value)) {
+        index += 1;
+        continue;
+      }
+      if (value === "--") break;
+      if (value === "-C" || value === "--chdir") {
+        const directory = tokens[index + 1];
+        const resolved = directory === undefined ? undefined : literalDirectoryWord(command, directory.start);
+        if (resolved === undefined) uncertain = true;
+        else addChange(resolved);
+        index += 2;
+        continue;
+      }
+      if (value.startsWith("--chdir=")) {
+        const prefix = "--chdir=";
+        const resolved = command.startsWith(prefix, token.start)
+          ? literalDirectoryWord(command, token.start + prefix.length)
+          : undefined;
+        if (resolved === undefined) uncertain = true;
+        else addChange(resolved);
+        index += 1;
+        continue;
+      }
+      if (value.startsWith("-C") && value.length > 2) {
+        const resolved = command.startsWith("-C", token.start)
+          ? literalDirectoryWord(command, token.start + 2)
+          : undefined;
+        if (resolved === undefined) uncertain = true;
+        else addChange(resolved);
+        index += 1;
+        continue;
+      }
+      if (value.startsWith("-")) {
+        index += ENV_VALUE_OPTIONS.has(value) ? 2 : 1;
+        continue;
+      }
+      break;
+    }
+  }
+
+  return { changes, uncertain };
+}
+
+function commandCanMutateParentCwd(tokens: ShellToken[], commandIndex: number): boolean {
+  return !tokens
+    .slice(0, commandIndex)
+    .some((token) => NON_PERSISTENT_WRAPPERS.has(basename(token.value)));
+}
+
+function persistentCwdEffect(command: string, segment: ShellSegment): CwdEffect | undefined {
+  const { index: commandIndex } = findCommandTokenIndex(segment.tokens);
+  if (commandIndex < 0) {
+    return segment.tokens.some((token) => token.value.startsWith("CDPATH="))
+      ? { changes: [], uncertain: true }
+      : undefined;
+  }
+
+  const commandToken = segment.tokens[commandIndex];
+  if (commandToken === undefined || !commandCanMutateParentCwd(segment.tokens, commandIndex)) {
+    return undefined;
+  }
+  if (hasDynamicCommandName(commandToken)) {
+    // `$c .claude`, `cd${IFS}.claude`, `$(echo cd) .claude`: the word may be `cd`.
+    return { changes: [], uncertain: true };
+  }
+  const executable = basename(commandToken.value);
+  const args = stripRedirections(segment.tokens.slice(commandIndex + 1));
+
+  if (executable === "cd") {
+    if (segment.hasCommandSubstitution) {
+      return { changes: [], uncertain: true };
+    }
+    if (segment.tokens.slice(0, commandIndex).some((token) => basename(token.value) === "time")) {
+      return { changes: [], uncertain: true };
+    }
+    if (segment.tokens.slice(0, commandIndex).some((token) => token.value.startsWith("CDPATH="))) {
+      return { changes: [], uncertain: true };
+    }
+    let optionsEnded = false;
+    const directories: ShellToken[] = [];
+    for (const token of args) {
+      if (!optionsEnded && token.value === "--") {
+        optionsEnded = true;
+      } else if (!optionsEnded && /^-[LPe@]+$/.test(token.value)) {
+        continue;
+      } else {
+        directories.push(token);
+      }
+    }
+    const directory = directories[0];
+    const resolved =
+      directories.length !== 1 || directory === undefined || directory.value === "-"
+        ? undefined
+        : literalDirectoryWord(command, directory.start);
+    if (resolved === undefined) return { changes: [], uncertain: true };
+    return { changes: [resolved], uncertain: false };
+  }
+
+  if (
+    UNMODELED_CWD_COMMANDS.has(executable) ||
+    (executable === "builtin" && args.some((token) => token.value === "cd" || UNMODELED_CWD_COMMANDS.has(token.value))) ||
+    (executable === "export" && args.some((token) => token.value.startsWith("CDPATH=")))
+  ) {
+    return { changes: [], uncertain: true };
+  }
+  return undefined;
+}
+
+function stateKey(state: ShellState): string {
+  return JSON.stringify([state.cwdChanges, state.cwdUncertain, state.succeeded]);
+}
+
+function uniqueStates(states: ShellState[]): ShellState[] {
+  const byKey = new Map<string, ShellState>();
+  for (const state of states) {
+    byKey.set(stateKey(state), state);
+    if (byKey.size > MAX_CWD_VARIANTS) {
+      return [
+        { cwdChanges: [], cwdUncertain: true, succeeded: true },
+        { cwdChanges: [], cwdUncertain: true, succeeded: false }
+      ];
+    }
+  }
+  return [...byKey.values()];
+}
+
+function completedStates(states: ShellState[], effect: CwdEffect | undefined): ShellState[] {
+  return states.flatMap((state) => {
+    if (effect === undefined) {
+      return [
+        { ...state, succeeded: true },
+        { ...state, succeeded: false }
+      ];
+    }
+    const cwdChanges = [...state.cwdChanges, ...effect.changes];
+    const exceededLimit = cwdChanges.length > MAX_CWD_CHANGES;
+    return [
+      {
+        cwdChanges: exceededLimit ? [] : cwdChanges,
+        cwdUncertain: state.cwdUncertain || effect.uncertain || exceededLimit,
+        succeeded: true
+      },
+      { ...state, succeeded: false }
+    ];
+  });
+}
+
+function operationForTarget(
+  command: string,
+  target: ReturnType<typeof collectWriteTargetTokens>[number],
+  states: ShellState[],
+  commandEffect: CwdEffect
+): GuardWriteOperation {
+  const usesCommandCwd = target.kind === "argument";
+  const variants = states
+    .filter((state) => !state.cwdUncertain)
+    .map((state) => [
+      ...state.cwdChanges,
+      ...(usesCommandCwd && !commandEffect.uncertain ? commandEffect.changes : [])
+    ]);
+  const uniqueVariants = [...new Map(variants.map((variant) => [JSON.stringify(variant), variant])).values()];
+  return {
+    target: target.token.value,
+    hasExpansion: target.token.hasExpansion,
+    words: target.processSubstitution
+      ? [[{ kind: "unknown" }]]
+      : parseWordAlternatives(command, target.token.start),
+    kind: target.kind,
+    recursive: target.recursive,
+    cwdVariants: uniqueVariants,
+    cwdUncertain:
+      states.some((state) => state.cwdUncertain) || (usesCommandCwd && commandEffect.uncertain)
+  };
+}
+
+interface SegmentScope {
+  /** Subshell parentheses that open the segment and close in a later one. */
+  leadingOpens: number;
+  /** `{` group openers at the start of the segment. */
+  braceOpens: number;
+  /** Substitutions opened after the first token and closed in a later segment. */
+  midOpens: number;
+  /** Parentheses that close a scope opened in an earlier segment. */
+  closes: number;
+  braceClose: boolean;
+  /** The whole segment sits inside its own `( ... )`: its cd does not escape. */
+  wrapped: boolean;
+  /** `name() ...`: the segment defines a function. */
+  functionDefinition: boolean;
+}
+
+function segmentScope(segment: ShellSegment): SegmentScope {
+  const scope: SegmentScope = {
+    leadingOpens: 0,
+    braceOpens: leadingBraceOpens(segment.tokens),
+    midOpens: 0,
+    closes: 0,
+    braceClose: startsWithBraceClose(segment.tokens),
+    wrapped: false,
+    functionDefinition: false
+  };
+  const open: ScopeEvent[] = [];
+  for (const event of segment.scopeEvents) {
+    if (event.type === "open") {
+      open.push(event);
+      continue;
+    }
+    const matching = open.pop();
+    if (matching === undefined) {
+      scope.closes += 1;
+    } else if (matching.tokenCount === 0) {
+      scope.wrapped = true;
+    } else if (!matching.substitution && matching.tokenCount === event.tokenCount) {
+      scope.functionDefinition = true;
+    }
+  }
+  for (const event of open) {
+    if (event.tokenCount === 0) scope.leadingOpens += 1;
+    else scope.midOpens += 1;
+  }
+  return scope;
+}
+
+interface OpenScope {
+  kind: "paren" | "brace";
+  /** States to return to when the scope ends. */
+  saved: ShellState[];
+  /** True when the group opened as part of a pipeline or background job. */
+  isolatedAtOpen: boolean;
+}
+
+function bothOutcomes(states: ShellState[]): ShellState[] {
+  return states.flatMap((state) => [
+    { ...state, succeeded: true },
+    { ...state, succeeded: false }
+  ]);
+}
+
+function collectWriteOperations(segments: ShellSegment[], command: string): GuardWriteOperation[] {
+  const operations: GuardWriteOperation[] = [];
+  let states: ShellState[] = [{ cwdChanges: [], cwdUncertain: false, succeeded: true }];
+  const scopes: OpenScope[] = [];
+  const scopeInfo = segments.map(segmentScope);
+  // A function body may `cd` when it is called; once any function is defined
+  // and the command changes directory anywhere, the cwd is no longer known.
+  const changesDirectory = segments.some(
+    (segment) =>
+      persistentCwdEffect(command, segment) !== undefined ||
+      segment.tokens.some((token) => CWD_WORDS.has(basename(token.value)))
+  );
+
+  for (let groupStart = 0; groupStart < segments.length;) {
+    let groupEnd = groupStart;
+    while (segments[groupEnd + 1]?.connector === "pipe") groupEnd += 1;
+
+    const connector = segments[groupStart]?.connector;
+    const executed =
+      connector === "and"
+        ? states.filter((state) => state.succeeded)
+        : connector === "or"
+          ? states.filter((state) => !state.succeeded)
+          : states;
+    const skipped =
+      connector === "and"
+        ? states.filter((state) => !state.succeeded)
+        : connector === "or"
+          ? states.filter((state) => state.succeeded)
+          : [];
+
+    const inPipeline = groupEnd > groupStart;
+    const nextConnector = segments[groupEnd + 1]?.connector;
+
+    for (let index = groupStart; index <= groupEnd; index += 1) {
+      const segment = segments[index];
+      const info = scopeInfo[index];
+      if (segment === undefined || info === undefined) continue;
+      // Scopes that open at the start of a segment cover its own commands.
+      for (let opened = 0; opened < info.leadingOpens; opened += 1) {
+        scopes.push({ kind: "paren", saved: states, isolatedAtOpen: false });
+      }
+      for (let opened = 0; opened < info.braceOpens; opened += 1) {
+        scopes.push({ kind: "brace", saved: states, isolatedAtOpen: inPipeline || nextConnector === "background" });
+      }
+      if (executed.length === 0) continue;
+      const { index: commandIndex } = findCommandTokenIndex(segment.tokens);
+      const commandEffect = commandCwdEffect(command, segment.tokens, commandIndex);
+      for (const target of collectWriteTargetTokens(segment.tokens, commandIndex)) {
+        operations.push(operationForTarget(command, target, executed, commandEffect));
+      }
+    }
+
+    // A pipeline's commands run in subshells, so their `cd` does not reach the
+    // parent shell. The last one still sets the directory for the rest of a
+    // `( ... )` or `{ ...; }` group it opens (`echo x | (cd d && tee f)`).
+    const lastInfo = scopeInfo[groupEnd] as SegmentScope;
+    const opensScope = lastInfo.leadingOpens + lastInfo.braceOpens > 0;
+    const persistent =
+      nextConnector !== "background" && (!inPipeline || opensScope) && !lastInfo.wrapped;
+    let effect = persistent ? persistentCwdEffect(command, segments[groupEnd] as ShellSegment) : undefined;
+    if (persistent && lastInfo.functionDefinition && changesDirectory) {
+      effect = { changes: effect?.changes ?? [], uncertain: true };
+    }
+    const completed = persistent ? completedStates(executed, effect) : bothOutcomes(executed);
+    states = uniqueStates([...skipped, ...completed]);
+
+    for (let index = groupStart; index <= groupEnd; index += 1) {
+      const info = scopeInfo[index] as SegmentScope;
+      for (let opened = 0; opened < info.midOpens; opened += 1) {
+        scopes.push({ kind: "paren", saved: states, isolatedAtOpen: false });
+      }
+      for (let closed = 0; closed < info.closes; closed += 1) {
+        if (scopes[scopes.length - 1]?.kind === "paren") {
+          states = uniqueStates(bothOutcomes((scopes.pop() as OpenScope).saved));
+        }
+      }
+      if (info.braceClose && scopes[scopes.length - 1]?.kind === "brace") {
+        const scope = scopes.pop() as OpenScope;
+        if (scope.isolatedAtOpen || inPipeline || nextConnector === "background") {
+          states = uniqueStates(bothOutcomes(scope.saved));
+        } else {
+          states = uniqueStates(bothOutcomes(states));
+        }
+      }
+    }
+    groupStart = groupEnd + 1;
+  }
+
+  return operations;
 }
 
 function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFinding {
@@ -270,6 +792,27 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
     return { usesSafeInstall: true };
   }
 
+  if (hasDynamicCommandName(commandToken)) {
+    // `$tool install x`, `{npm,install,x}`: the command word itself is only
+    // known after expansion. Fail closed when the segment still looks like an
+    // install; any other dynamic command is none of the guard's business.
+    // Only the subcommand position counts, so `$PYTHON -m pip install x` and
+    // similar non-npm commands stay untouched.
+    const subcommand = findSubcommand(rest);
+    const looksLikeInstall =
+      subcommand !== undefined &&
+      ["npm", "pnpm", "bun", "yarn"].some((manager) => isFetchingSubcommand(manager, subcommand.value));
+    if (INSTALL_HINT_PATTERN.test(segmentText) || looksLikeInstall) {
+      return {
+        unanalyzable: {
+          segmentText,
+          reason: "The command name is produced by shell expansion and the segment looks like a package install, so SafeInstall cannot see what would run and fails closed. Spell out the package-manager command literally."
+        }
+      };
+    }
+    return {};
+  }
+
   if (NESTED_SHELLS.has(executable)) {
     const nestedScript = rest.map((token) => token.value).join(" ");
     if (INSTALL_HINT_PATTERN.test(nestedScript)) {
@@ -299,8 +842,7 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
         segmentText
       );
     }
-    const isInstall =
-      normalized === undefined || normalized === "install" || normalized === "add" || normalized === "global";
+    const isInstall = normalized === undefined || isFetchingSubcommand("yarn", normalized);
     if (isInstall) {
       return {
         unanalyzable: {
@@ -321,6 +863,12 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
         }
       };
     }
+    if (!REMOTE_EXECUTORS.has(executable) && !ARGUMENT_ONLY_COMMANDS.has(executable)) {
+      const wrapped = findWrappedInstall(rest);
+      if (wrapped) {
+        return wrappedInstallFinding(executable, wrapped, segmentText);
+      }
+    }
     return {};
   }
 
@@ -330,8 +878,42 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
     return {};
   }
 
+  if (subcommandToken.hasExpansion) {
+    return {
+      unanalyzable: {
+        segmentText,
+        reason: `The ${manager} subcommand ${JSON.stringify(subcommandToken.value)} is produced by shell expansion, so SafeInstall cannot tell whether it is an install and fails closed. Spell out the subcommand literally.`
+      }
+    };
+  }
+
   const canonical = normalizeInstallCommand(manager, subcommandToken.value);
   if (!canonical) {
+    const subcommand = subcommandToken.value.toLowerCase();
+    if (UPDATE_SUBCOMMANDS[manager]?.has(subcommand)) {
+      return {
+        unanalyzable: {
+          segmentText,
+          reason: `\`${manager} ${subcommand}\` resolves and fetches new package versions without SafeInstall's policy checks, and the SafeInstall CLI cannot route it. Set the wanted versions explicitly and install them with \`safeinstall ${manager} ${manager === "npm" ? "install" : "add"} <package>@<version>\`, or ask the user to run the update themselves.`
+        }
+      };
+    }
+    if (manager === "npm" && NPM_INSTALL_TEST_SUBCOMMANDS.has(subcommand)) {
+      return {
+        unanalyzable: {
+          segmentText,
+          reason: `\`npm ${subcommand}\` is an install followed by the test script, which the SafeInstall CLI cannot route as one command. Run the install as \`npm ${subcommand.startsWith("install-ci") || subcommand === "cit" ? "ci" : "install"}\` and the tests as a separate command.`
+        }
+      };
+    }
+    if (subcommand === "exec") {
+      // pnpm exec runs a local binary; a package manager named there is a
+      // raw install one level down.
+      const wrapped = findWrappedInstall(rest.slice(rest.indexOf(subcommandToken) + 1));
+      if (wrapped) {
+        return wrappedInstallFinding(`${manager} exec`, wrapped, segmentText);
+      }
+    }
     const runnerSubcommand = RUNNER_SUBCOMMANDS[manager]?.[subcommandToken.value.toLowerCase()];
     if (runnerSubcommand) {
       return createRunnerFinding(
@@ -402,6 +984,7 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
 
 export function analyzeShellCommand(command: string): GuardCommandAnalysis {
   const segments = splitShellSegments(command);
+  const writeOperations = collectWriteOperations(segments, command);
 
   const installs: NonNullable<SegmentFinding["install"]>[] = [];
   const runners: GuardRunnerMatch[] = [];
@@ -465,9 +1048,11 @@ export function analyzeShellCommand(command: string): GuardCommandAnalysis {
       segmentText
     })),
     runners,
+    localRunnerResolutionSafe: hasStableLocalRunnerResolution(segments, runners),
     unanalyzable,
     usesSafeInstall,
     writeTargets,
+    writeOperations,
     rewrittenCommand
   };
 }

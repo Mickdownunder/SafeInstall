@@ -1,13 +1,16 @@
 import { mapConcurrent } from "./async";
 import { evaluateContinuity } from "./continuity";
 import { DiskCache } from "./disk-cache";
+import { LocalSourceClassifier } from "./local-source";
 import { loadProjectDependencyState } from "./project-state";
 import { evaluatePackage } from "./policy";
 import { verifyProvenance } from "./provenance";
 import { RegistryClient } from "./registry";
 import type {
   ContinuityResult,
+  DependencySourceBaseline,
   PackageEvaluation,
+  PriorSourceEvidence,
   ProvenanceVerificationResult,
   RequestedPackage,
   SafeInstallConfig
@@ -23,14 +26,32 @@ export interface EvaluateRequestedPackagesOptions {
   signal?: AbortSignal;
 }
 
+function configuredSourceBaseline(config: SafeInstallConfig): DependencySourceBaseline {
+  return { complete: false, sourceTypes: config.sourceBaselines ?? {} };
+}
+
+function priorSourceEvidence(
+  packageName: string,
+  baseline: DependencySourceBaseline
+): PriorSourceEvidence {
+  const normalizedName = packageName.toLowerCase();
+  if (Object.hasOwn(baseline.sourceTypes, normalizedName)) {
+    return { status: "known", sourceType: baseline.sourceTypes[normalizedName] };
+  }
+
+  return baseline.complete ? { status: "known" } : { status: "unavailable" };
+}
+
 export async function evaluateRequestedPackages(
   projectDir: string,
   requestedPackages: RequestedPackage[],
   registryClient: RegistryClient,
   config: SafeInstallConfig,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  sourceBaseline: DependencySourceBaseline = configuredSourceBaseline(config)
 ): Promise<PackageEvaluation[]> {
   const now = new Date();
+  const localSources = new LocalSourceClassifier(projectDir);
   const provenanceCache = new DiskCache({ ttlMs: 60 * 60 * 1000 });
 
   return mapConcurrent(
@@ -68,6 +89,7 @@ export async function evaluateRequestedPackages(
         provenanceResult = await verifyProvenance({
           packageName: requested.name,
           version: resolvedRegistryPackage.resolvedVersion,
+          artifactIntegrity: resolvedRegistryPackage.artifact?.integrity,
           registryUrl: config.registryUrl,
           diskCache: provenanceCache,
           config: config.provenance,
@@ -84,6 +106,7 @@ export async function evaluateRequestedPackages(
         continuityResult = await evaluateContinuity({
           packageName: requested.name,
           targetVersion: resolvedRegistryPackage.resolvedVersion,
+          targetArtifactIntegrity: resolvedRegistryPackage.artifact?.integrity,
           registryUrl: config.registryUrl,
           config: config.continuity,
           diskCache: provenanceCache,
@@ -96,6 +119,8 @@ export async function evaluateRequestedPackages(
         requested,
         now,
         priorState,
+        priorSource: priorSourceEvidence(requested.name, sourceBaseline),
+        localSource: await localSources.classify(requested),
         resolvedRegistryPackage,
         priorLifecycleScripts,
         provenanceResult,

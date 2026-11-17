@@ -19,4 +19,11 @@ jobs:
         with:
           fail-on-severity: moderate
           fail-on-scopes: runtime, development
+          # picomatch <= 4.0.7 (ReDoS through repeated extglobs): no patched
+          # version exists, 4.0.7 is the latest release. It is a development
+          # dependency of the test and build tooling, is not shipped in the
+          # package, and receives no untrusted patterns here. Without this
+          # entry every lockfile change is rejected, including the ones that
+          # fix other advisories. Remove it once a fixed version is published.
+          allow-ghsas: GHSA-fc5q-39xc-vjpf
           comment-summary-in-pr: never

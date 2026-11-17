@@ -13,6 +13,10 @@ import type {
   ResolvedRegistryPackage
 } from "../src/types";
 
+// The continuity check verifies each Sigstore bundle locally; the stubbed
+// bundles in this file are not real signatures, so the verifier is mocked.
+vi.mock("sigstore", () => ({ verify: vi.fn(async () => ({})) }));
+
 const tempDirs: string[] = [];
 
 async function createTempDir(prefix: string): Promise<string> {
@@ -68,6 +72,26 @@ function evaluation(overrides: Partial<PackageEvaluation> = {}): PackageEvaluati
 }
 
 describe("evaluationToVerdict", () => {
+  it("redacts credentials copied into agent-facing verdict fields", () => {
+    const secret = "top-secret";
+    const requested = `https://user:${secret}@example.test/pkg.tgz`;
+    const verdict = evaluationToVerdict(
+      evaluation({
+        requested: { name: requested, raw: requested, requested, sourceType: "url" },
+        resolvedRegistryPackage: undefined,
+        blockedReasons: [
+          { code: "untrusted-source", message: `Blocked untrusted source ${requested}.` }
+        ],
+        warnings: [`Warning for ${requested}`],
+        infos: [`Info for ${requested}`]
+      }),
+      NOW
+    );
+
+    expect(JSON.stringify(verdict)).not.toContain(secret);
+    expect(verdict.name).toContain("[REDACTED]");
+  });
+
   it("maps blocked reasons to a block verdict and carries codes, messages, and suggestions", () => {
     const reasons: PolicyBlockReason[] = [
       {
@@ -225,12 +249,20 @@ describe("check_package tool definition", () => {
 describe("check_package continuity verdict (E2E through the MCP layer)", () => {
   const TARGET_VERSION = "2.0.0";
   const BASELINE_REPO = "acme/shapes";
+  const ATTESTED_DIGEST = Buffer.alloc(64, 7);
+  const ATTESTED_INTEGRITY = `sha512-${ATTESTED_DIGEST.toString("base64")}`;
+  const ATTESTED_SHA512 = ATTESTED_DIGEST.toString("hex");
 
   // A registry packument whose time/versions give the continuity check a
   // baseline of three releases published before the target version.
   const packument = {
     "dist-tags": { latest: TARGET_VERSION },
-    versions: { "1.0.0": {}, "1.1.0": {}, "1.2.0": {}, "2.0.0": {} },
+    versions: {
+      "1.0.0": { dist: { integrity: ATTESTED_INTEGRITY } },
+      "1.1.0": { dist: { integrity: ATTESTED_INTEGRITY } },
+      "1.2.0": { dist: { integrity: ATTESTED_INTEGRITY } },
+      "2.0.0": { dist: { integrity: ATTESTED_INTEGRITY } }
+    },
     time: {
       created: "2025-01-01T00:00:00.000Z",
       modified: "2025-06-01T00:00:00.000Z",
@@ -243,11 +275,16 @@ describe("check_package continuity verdict (E2E through the MCP layer)", () => {
 
   // An npm attestation response carrying a SLSA provenance statement that names
   // the publishing GitHub repository — the exact shape src/provenance.ts parses.
-  function attestationResponse(repo: string) {
+  function attestationResponse(repo: string, version: string) {
     const statement = {
       _type: "https://in-toto.io/Statement/v1",
       predicateType: "https://slsa.dev/provenance/v1",
-      subject: [{ name: "acme-shapes", digest: { sha512: "deadbeef" } }],
+      subject: [
+        {
+          name: `pkg:npm/acme-shapes@${version}`,
+          digest: { sha512: ATTESTED_SHA512 }
+        }
+      ],
       predicate: {
         buildDefinition: {
           externalParameters: {
@@ -281,6 +318,7 @@ describe("check_package continuity verdict (E2E through the MCP layer)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+    vi.resetModules();
   });
 
   it("reports a provenance-downgrade block with the actionable why to the agent", async () => {
@@ -299,7 +337,9 @@ describe("check_package continuity verdict (E2E through the MCP layer)", () => {
       if (url.includes("/-/npm/v1/attestations/")) {
         const version = decodeURIComponent(url.split("@").pop() ?? "");
         return Promise.resolve(
-          version === TARGET_VERSION ? notFound() : jsonResponse(attestationResponse(BASELINE_REPO))
+          version === TARGET_VERSION
+            ? notFound()
+            : jsonResponse(attestationResponse(BASELINE_REPO, version))
         );
       }
       if (url.endsWith("/acme-shapes")) {
@@ -317,7 +357,11 @@ describe("check_package continuity verdict (E2E through the MCP layer)", () => {
           requested,
           resolvedVersion: TARGET_VERSION,
           publishedAt: new Date("2025-06-01T00:00:00.000Z"),
-          lifecycleScripts: []
+          lifecycleScripts: [],
+          artifact: {
+            tarballUrl: `https://registry.npmjs.org/acme-shapes/-/acme-shapes-${TARGET_VERSION}.tgz`,
+            integrity: ATTESTED_INTEGRITY
+          }
         };
       },
       async getLifecycleScripts() {

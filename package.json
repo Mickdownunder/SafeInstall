@@ -41,7 +41,8 @@
     "prepack": "pnpm build",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "attack-lab": "pnpm build && node attack-lab/run.mjs",
-    "release:check": "pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm pack:smoke",
+    "release:verify": "pnpm lint && pnpm typecheck && pnpm build && pnpm test",
+    "release:check": "pnpm release:verify && pnpm pack:smoke",
     "replay": "pnpm build && node demo/replay/run.cjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -55,7 +56,7 @@
     "yaml": "^2.9.0"
   },
   "peerDependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "sigstore": "^5.0.0"
   },
   "peerDependenciesMeta": {
@@ -68,15 +69,15 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.4",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@types/node": "^25.9.1",
     "@types/npm-package-arg": "^6.1.4",
     "@types/semver": "^7.7.1",
     "eslint": "9.39.4",
     "sigstore": "^5.0.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "8.63.0",
-    "vite": "8.1.4",
+    "typescript-eslint": "8.71.0",
+    "vite": "8.3.8",
     "vitest": "4.1.11"
   },
   "pnpm": {
