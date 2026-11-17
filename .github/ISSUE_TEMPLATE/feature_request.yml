@@ -1,0 +1,31 @@
+name: Feature request
+description: Propose a new check, command, or integration before writing code.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        New features start with an issue. See [CONTRIBUTING.md](https://github.com/Mickdownunder/SafeInstall/blob/main/CONTRIBUTING.md) for what makes a good contribution.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: The situation SafeInstall does not handle today. A concrete install scenario or incident helps most.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What SafeInstall should do, including the verdict (allow, warn, block) and any new configuration.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Effect on existing projects
+      description: Would a project that passes today start to warn or block? If so, what is the migration path?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
