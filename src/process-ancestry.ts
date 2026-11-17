@@ -65,6 +65,30 @@ function readLinuxProcess(pid: number): ProcessInfo | undefined {
   return { parentPid, env };
 }
 
+/**
+ * Pick marker values out of `ps eww -o command=` output, which is the
+ * command line followed by the environment with nothing separating the two.
+ * A `NAME=value` token may therefore be an argument or a variable, so every
+ * occurrence counts and an active one wins: an argument `CODEX_SHELL=0`
+ * must not hide `CODEX_SHELL=1` in the environment behind it.
+ */
+export function markersFromPsOutput(output: string, markers: readonly string[]): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const name of markers) {
+    const pattern = new RegExp(`(?:^|\\s)${name}=(\\S*)`, "g");
+    for (const match of output.matchAll(pattern)) {
+      const value = match[1] ?? "";
+      if (env[name] === undefined || isActiveMarkerValue(value)) {
+        env[name] = value;
+      }
+      if (isActiveMarkerValue(value)) {
+        break;
+      }
+    }
+  }
+  return env;
+}
+
 function readDarwinProcess(pid: number, markers: readonly string[]): ProcessInfo | undefined {
   const run = (args: string[]): string =>
     execFileSync("/bin/ps", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2000 });
@@ -84,14 +108,7 @@ function readDarwinProcess(pid: number, markers: readonly string[]): ProcessInfo
     // `ps eww` appends the environment to the command line for processes of
     // the same user. It cannot be split reliably, so only the wanted
     // NAME=value tokens are picked out.
-    const commandWithEnv = run(["eww", "-o", "command=", "-p", String(pid)]);
-    env = {};
-    for (const name of markers) {
-      const match = new RegExp(`(?:^|\\s)${name}=(\\S*)`).exec(commandWithEnv);
-      if (match) {
-        env[name] = match[1] ?? "";
-      }
-    }
+    env = markersFromPsOutput(run(["eww", "-o", "command=", "-p", String(pid)]), markers);
   } catch {
     env = undefined;
   }

@@ -5,7 +5,12 @@ import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { findAncestorMarker, type ProcessInfo } from "../src/process-ancestry";
+import {
+  findAncestorMarker,
+  isActiveMarkerValue,
+  markersFromPsOutput,
+  type ProcessInfo
+} from "../src/process-ancestry";
 import { cleanupTempDirs, cliPath, createTempDir, ensureBuiltCli, runCli } from "./cli-e2e-helpers";
 
 const MARKERS = ["CI", "CLAUDECODE", "CODEX_SHELL", "CURSOR_AGENT"];
@@ -58,6 +63,27 @@ describe("findAncestorMarker", () => {
 
   it("does nothing on a platform without a process reader", () => {
     expect(findAncestorMarker(MARKERS, 30, undefined)).toBeUndefined();
+  });
+});
+
+describe("markersFromPsOutput", () => {
+  it("reads a marker from the environment part", () => {
+    expect(markersFromPsOutput("node launcher.js HOME=/Users/me CODEX_SHELL=1 PATH=/bin", MARKERS)).toEqual({
+      CODEX_SHELL: "1"
+    });
+  });
+
+  it("is not fooled by an argument that spells the marker as disabled", () => {
+    const output = "node launcher.js CODEX_SHELL=0 --flag HOME=/Users/me CODEX_SHELL=1";
+    expect(isActiveMarkerValue(markersFromPsOutput(output, MARKERS).CODEX_SHELL)).toBe(true);
+  });
+
+  it("keeps a disabled value when no occurrence is active", () => {
+    expect(markersFromPsOutput("node x CI=false HOME=/Users/me", MARKERS)).toEqual({ CI: "false" });
+  });
+
+  it("does not match a longer variable name that ends with a marker", () => {
+    expect(markersFromPsOutput("node x NOT_CI=1 MY_CLAUDECODE=1", MARKERS)).toEqual({});
   });
 });
 
