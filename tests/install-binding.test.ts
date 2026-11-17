@@ -48,28 +48,29 @@ describe("artifact-bound installation controls", () => {
       warnings: [],
       infos: []
     } satisfies PackageEvaluation;
-    const targets = {
+    const baseTarget: ProjectInstallTargetsResult["targets"][number] = {
+      requested,
+      manifestSpec: "1.14.0",
+      integrity: expectedIntegrity,
+      tarballUrl: expectedTarballUrl
+    };
+    const targets: ProjectInstallTargetsResult = {
       lockfilePath: "/project/package-lock.json",
       issues: [],
-      targets: [{
-        requested,
-        manifestSpec: "1.14.0",
-        integrity: expectedIntegrity,
-        tarballUrl: expectedTarballUrl
-      }]
-    } satisfies ProjectInstallTargetsResult;
+      targets: [baseTarget]
+    };
 
     expect(lockfileArtifactBindingReasons(targets, [evaluation])).toEqual([]);
     expect(lockfileArtifactBindingReasons({
       ...targets,
       targets: [{
-        ...targets.targets[0],
+        ...baseTarget,
         tarballUrl: "https://attacker.example/axios-1.14.0.tgz"
       }]
     }, [evaluation])[0]?.message).toContain("differs from the checked registry artifact");
     expect(lockfileArtifactBindingReasons({
       ...targets,
-      targets: [{ ...targets.targets[0], integrity: attackerIntegrity }]
+      targets: [{ ...baseTarget, integrity: attackerIntegrity }]
     }, [evaluation])[0]?.message).toContain("checked registry SHA-512");
   });
 

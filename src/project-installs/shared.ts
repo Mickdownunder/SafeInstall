@@ -23,6 +23,30 @@ function isPublicRegistryUrl(value: string): boolean {
   }
 }
 
+/**
+ * True when `value` is served by the configured registry: same origin and,
+ * if the registry URL has a non-root path, a path under that prefix.
+ */
+export function isConfiguredRegistryUrl(value: string, registryUrl: string | undefined): boolean {
+  if (!registryUrl) {
+    return false;
+  }
+  try {
+    const candidate = new URL(value);
+    const registry = new URL(registryUrl);
+    if (candidate.origin !== registry.origin) {
+      return false;
+    }
+    const prefix = registry.pathname.endsWith("/") ? registry.pathname : `${registry.pathname}/`;
+    if (prefix === "/") {
+      return true;
+    }
+    return candidate.pathname.startsWith(prefix);
+  } catch {
+    return false;
+  }
+}
+
 export function extractSemverPrefix(value: string): string | undefined {
   const match = value.match(/^(\d+\.\d+\.\d+(?:[-+][^()\s]+)?)/);
   return match?.[1];
@@ -55,7 +79,8 @@ export function createNonRegistryRequestedPackage(
 export function classifyResolvedSource(
   declaredSourceType: SourceType,
   resolvedReference?: string,
-  hasIntegrity?: boolean
+  hasIntegrity?: boolean,
+  registryUrl?: string
 ): SourceType {
   if (declaredSourceType !== "unknown" && declaredSourceType !== "registry") {
     return declaredSourceType;
@@ -86,10 +111,13 @@ export function classifyResolvedSource(
     // may remain registry candidates here only because every production
     // consumer binds their URL and SHA-512 to fresh registry metadata before
     // check, authorization, or install can succeed. Transitive callers omit
-    // hasIntegrity because they have no equivalent artifact binding.
+    // hasIntegrity because they have no equivalent artifact binding; they
+    // accept only public registries and the configured registry URL.
     if (
       declaredSourceType === "registry" &&
-      (hasIntegrity || isPublicRegistryUrl(resolvedReference))
+      (hasIntegrity ||
+        isPublicRegistryUrl(resolvedReference) ||
+        isConfiguredRegistryUrl(resolvedReference, registryUrl))
     ) {
       return "registry";
     }
