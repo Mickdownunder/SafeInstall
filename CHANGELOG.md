@@ -5,6 +5,7 @@
 ### Fixed
 
 - A config selected with `--config` can no longer replace the policy protected by a trust lock. `install` and `check` block with `trust-unbound-config` unless the effective config is the locked `safeinstall.config.json` at the trust root. The GitHub Action builds its command as an argument list and rejects `--config` in `args`.
+- `trust approve` and `trust unlock` also refuse to run when a parent process carries an agent or CI marker (`CI`, `CLAUDECODE`, `CODEX_SHELL`, `CURSOR_AGENT`). Removing the marker from the command's own environment (`env -u`, a script that opens a pseudo-terminal) no longer passes the human gate on Linux and macOS. The gate remains a barrier, not proof of human presence: Windows is not inspected, and a process that detaches from its parents is not recognised.
 
 - Credentials in package specs are redacted in human and `--json` output, guard messages, MCP results, and `.safeinstall/decisions` records. Detection is structural: userinfo in `http`, `https`, `git`, and `git+http(s)` URLs (and `user:password@` in `ssh` URLs), a fixed list of credential query parameters such as `token` and `access_token`, and npm credential flags such as `--//host/:_authToken=`. Version ranges like `next-auth@>=4` and ordinary `key=value` text are not affected. The guard decides exactly as before; redaction applies only to text it prints. A credentialed dependency already in `package.json` is still evaluated under the source policy and shown redacted.
 
