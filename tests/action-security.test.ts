@@ -40,6 +40,14 @@ require("node:fs").writeFileSync(${JSON.stringify(logPath)}, args.join("\\n") + 
 process.stdout.write(${JSON.stringify('{"decision":"allow","summary":"Policy passed."}\n')});
 `
   );
+  if (process.platform === "win32") {
+    // The Action step runs under bash, which does not resolve the .cmd shim by
+    // its bare name. Give it a sh wrapper, as the npm stub above does.
+    const portable = (file: string) => file.split(path.sep).join("/");
+    await writeFile(path.join(dir, "safeinstall"), `#!/bin/sh
+exec "${portable(process.execPath)}" "${portable(path.join(dir, "safeinstall-stub.js"))}" "$@"
+`, { mode: 0o755 });
+  }
   return { dir, logPath };
 }
 
