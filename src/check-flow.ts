@@ -11,8 +11,9 @@ import { resolveInvocationContext } from "./project-discovery";
 import { inferProjectInstallTargetsForCheck } from "./project-installs";
 import { RegistryClient } from "./registry";
 import { loadHeadSourceBaseline } from "./source-baseline";
+import { redactCliResult } from "./redaction";
 import { throwIfAborted } from "./signals";
-import { parseManifestDependency } from "./specs";
+import { assertNoCredentialBearingArgs, parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
 import { trustSurfacePrecheck } from "./trust-surface-check";
 import type { CliReason, CliResult, PackageEvaluation } from "./types";
@@ -65,12 +66,13 @@ function createAffectedPackage(evaluation: PackageEvaluation) {
   };
 }
 
-export async function runCheckFlow(
+async function runCheckFlowInternal(
   cwd: string,
   argv: string[],
   options: { signal?: AbortSignal; configPath?: string | undefined } = {}
 ): Promise<CliResult> {
   throwIfAborted(options.signal);
+  assertNoCredentialBearingArgs(argv.slice(1));
 
   const invocation = await resolveInvocationContext(cwd, []);
   const { config, path } = await loadConfig(invocation.effectiveCwd, options.configPath);
@@ -275,4 +277,12 @@ export async function runCheckFlow(
       infos: []
     }))
   };
+}
+
+export async function runCheckFlow(
+  cwd: string,
+  argv: string[],
+  options: { signal?: AbortSignal; configPath?: string | undefined } = {}
+): Promise<CliResult> {
+  return redactCliResult(await runCheckFlowInternal(cwd, argv, options));
 }

@@ -66,6 +66,16 @@ async function runActionPolicyStep(
 }
 
 describe("GitHub Action install input boundary", () => {
+  it("does not echo the reconstructed command containing free-form install arguments", async () => {
+    const action = parse(await readFile(path.join(projectRoot, "action.yml"), "utf8")) as {
+      runs: { steps: Array<{ name: string; run?: string }> };
+    };
+    const step = action.runs.steps.find(entry => entry.name === "Run SafeInstall")!;
+
+    expect(step.run).not.toContain("Running: $CMD");
+    expect(step.run).not.toMatch(/echo[^\n]*\$CMD/);
+  });
+
   it.each(["substitution", "quote-breakout", "backticks"])("passes %s as data, not shell code", async attack => {
     const cwd = await createTempDir("safeinstall-action-security-");
     const marker = path.join(cwd, "injected").split(path.sep).join("/");

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { createDefaultConfig } from "../src/config";
+import { toObservation } from "../src/decision-emit";
 import {
   DECISION_GENESIS_DIGEST,
   decisionRecordDigest,
@@ -50,6 +52,30 @@ describe("decision record encoding", () => {
     const bytes = encodeDecisionRecord(createRecord());
     const digest = decisionRecordDigest(bytes);
     expect(decisionRecordFileName(3, digest)).toBe(`000003-${digest.slice(0, 12)}.json`);
+  });
+});
+
+describe("decision observation hygiene", () => {
+  it("redacts credential-bearing requested specs and copied findings", () => {
+    const secret = "top-secret";
+    const requested = `git+https://user:${secret}@example.test/repo.git`;
+    const observation = toObservation(
+      {
+        requested: { name: requested, raw: requested, requested, sourceType: "git" },
+        blockedReasons: [
+          {
+            code: "untrusted-source",
+            message: `Blocked untrusted source ${requested}.`
+          }
+        ],
+        warnings: [],
+        infos: []
+      },
+      createDefaultConfig()
+    );
+
+    expect(JSON.stringify(observation)).not.toContain(secret);
+    expect(observation.requestedSpec).toContain("[REDACTED]");
   });
 });
 

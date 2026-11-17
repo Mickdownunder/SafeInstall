@@ -191,6 +191,7 @@ export type PolicyBlockCode =
   | "attestation-tooling-unavailable"
   | "publisher-mismatch"
   | "package-resolution-failed"
+  | "transitive-evaluation-unavailable"
   | "transitive-install-script"
   | "transitive-untrusted-source"
   | "provenance-downgrade"
