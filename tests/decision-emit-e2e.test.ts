@@ -136,6 +136,35 @@ describe("decision record emission (e2e)", () => {
     expect(record.lockfile.after).toBeNull();
   });
 
+  it("redacts registry credentials from blocked command output and decision records", async () => {
+    const project = await createGitProject();
+    const stub = await createStubPackageManager("npm");
+    commitAll(project, "base");
+    const credentialedRegistry =
+      registry.url.replace("http://", "http://build-user:decision-secret@") +
+      "/npm?token=query-secret#fragment-secret";
+
+    const result = await runCli(
+      ["npm", "install", "left-pad@1.13.2", `--registry=${credentialedRegistry}`, "--json"],
+      {
+        cwd: project,
+        env: {
+          ...process.env,
+          PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+        }
+      }
+    );
+
+    expect(result.code).toBe(2);
+    const serializedRecord = JSON.stringify(present((await readDecisionChain(project, "package-lock.json"))[0]).record);
+    for (const secret of ["decision-secret", "query-secret", "fragment-secret"]) {
+      expect(result.stdout).not.toContain(secret);
+      expect(serializedRecord).not.toContain(secret);
+    }
+    const record = present((await readDecisionChain(project, "package-lock.json"))[0]).record;
+    expect(record.request.command).toContain(`--registry=${registry.url}/npm`);
+  });
+
   it("marks file: sources with explicit non-registry findings that never read clean (D4)", async () => {
     const project = await createGitProject();
     await writeDefaultConfig(project, { allowedSources: ["registry", "file", "directory"] });

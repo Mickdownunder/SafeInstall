@@ -6,6 +6,10 @@ import { DEFAULT_REGISTRY_URL } from "./config";
 import { appendDecisionRecord, type DecisionRecordDraft } from "./decision-store";
 import { DECISIONS_RELATIVE_DIR, type DecisionObservation } from "./decision-record";
 import { fileExists } from "./project-discovery";
+import {
+  redactRegistryUrlArguments,
+  requireCredentialFreeRegistryUrl
+} from "./registry-url";
 import { nonHumanContextMarker } from "./trust-flow";
 import { TRUST_LOCK_RELATIVE_PATH } from "./trust-surface";
 import {
@@ -206,6 +210,7 @@ export async function emitDecisionRecord(options: {
   installed: boolean | null;
 }): Promise<{ info?: string; warning?: string }> {
   try {
+    requireCredentialFreeRegistryUrl(options.config.registryUrl);
     const { capture } = options;
     const observations = options.evaluations.map((evaluation) =>
       toObservation(evaluation, options.config)
@@ -219,7 +224,7 @@ export async function emitDecisionRecord(options: {
       createdAt: new Date().toISOString(),
       cliVersion: PACKAGE_VERSION,
       request: {
-        command: options.argv,
+        command: redactRegistryUrlArguments(options.argv),
         packageManager: options.packageManager
       },
       policy: {

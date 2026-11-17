@@ -4,6 +4,7 @@ import path from "node:path";
 import semver from "semver";
 
 import { findNearestUpward } from "./project-discovery";
+import { redactRegistryUrl, requireCredentialFreeRegistryUrl } from "./registry-url";
 import type { PackageManagerName, SafeInstallConfig } from "./types";
 
 export const CONFIG_FILE_NAME = "safeinstall.config.json";
@@ -54,20 +55,11 @@ function isLoopbackHost(hostname: string): boolean {
 }
 
 function normalizeRegistryUrl(input: string): string {
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(input);
-  } catch {
-    throw new Error("Config error: registryUrl must be a valid http or https URL.");
-  }
-
-  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-    throw new Error("Config error: registryUrl must use http or https.");
-  }
+  const parsedUrl = requireCredentialFreeRegistryUrl(input);
 
   if (parsedUrl.protocol === "http:" && !isLoopbackHost(parsedUrl.hostname)) {
     console.error(
-      `Warning: registryUrl ${input} uses plaintext HTTP; package metadata is not protected against tampering in transit.`
+      `Warning: registryUrl ${redactRegistryUrl(input)} uses plaintext HTTP; package metadata is not protected against tampering in transit.`
     );
   }
 

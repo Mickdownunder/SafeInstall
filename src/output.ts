@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { redactRegistryUrlArguments } from "./registry-url";
 import type { CliReason, CliResult, PackageEvaluation } from "./types";
 
 export function printConfigInfo(configPath?: string): void {
@@ -11,7 +12,7 @@ export function printConfigInfo(configPath?: string): void {
 }
 
 export function formatCommand(command: string, args: string[]): string {
-  return [path.basename(command), ...args].join(" ");
+  return [path.basename(command), ...redactRegistryUrlArguments(args)].join(" ");
 }
 
 export function printWarnings(evaluations: PackageEvaluation[]): void {
@@ -34,7 +35,10 @@ function printReason(reason: CliReason, indent = ""): void {
 
 function serializeCliResult(result: CliResult): Omit<CliResult, "details"> {
   const { details: _details, ...serialized } = result;
-  return serialized;
+  return {
+    ...serialized,
+    command: redactRegistryUrlArguments(serialized.command)
+  };
 }
 
 export function writeCliResult(result: CliResult, jsonMode: boolean): void {

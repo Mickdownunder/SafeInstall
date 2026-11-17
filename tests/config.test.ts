@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultConfig, loadConfig } from "../src/config";
 
@@ -55,6 +55,45 @@ describe("config", () => {
     );
 
     await expect(loadConfig(cwd)).rejects.toThrow("Config error: registryUrl must use http or https.");
+  });
+
+  it.each([
+    ["userinfo", "http://build-user:build-secret@registry.example.internal/npm", "build-secret"],
+    ["encoded userinfo", "https://%62uild:%73ecret@registry.example.internal/npm", "%73ecret"],
+    ["query", "https://registry.example.internal/npm?token=query-secret", "query-secret"],
+    ["fragment", "https://registry.example.internal/npm#fragment-secret", "fragment-secret"]
+  ])("rejects registry URLs containing %s without disclosing them", async (_kind, registryUrl, secret) => {
+    const cwd = await createTempDir("safeinstall-config-sensitive-registry-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ registryUrl }, null, 2)
+    );
+    const warningSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const rejection = loadConfig(cwd);
+    await expect(rejection).rejects.toThrow(
+      "registryUrl must not contain credentials, query parameters, or fragments"
+    );
+    await expect(rejection).rejects.not.toThrow(secret);
+    expect(warningSpy).not.toHaveBeenCalled();
+    warningSpy.mockRestore();
+  });
+
+  it("preserves credential-free HTTP registry warnings and path normalization", async () => {
+    const cwd = await createTempDir("safeinstall-config-http-registry-");
+    await writeFile(
+      path.join(cwd, "safeinstall.config.json"),
+      JSON.stringify({ registryUrl: "http://registry.example.internal/npm/" }, null, 2)
+    );
+    const warningSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { config } = await loadConfig(cwd);
+
+    expect(config.registryUrl).toBe("http://registry.example.internal/npm");
+    expect(warningSpy).toHaveBeenCalledWith(
+      "Warning: registryUrl http://registry.example.internal/npm/ uses plaintext HTTP; package metadata is not protected against tampering in transit."
+    );
+    warningSpy.mockRestore();
   });
 
   it("leaves minimumCliVersion unset in the default config", () => {

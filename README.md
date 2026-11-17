@@ -440,7 +440,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 |:---|:---|
 | `minimumCliVersion` | Optional. Lowest safeinstall-cli version whose behavior this project's protections assume (exact semver). An older running CLI **warns** — in the guard, `install`/`check`, and `trust status` — but never hard-fails |
 | `minimumReleaseAgeHours` | Minimum age in hours for registry versions |
-| `registryUrl` | npm-compatible registry URL for metadata and installation (mirrors, Artifactory, Verdaccio) |
+| `registryUrl` | Credential-free npm-compatible registry URL for metadata and installation (mirrors, Artifactory, Verdaccio); userinfo, query parameters, and fragments are rejected |
 | `allowedScripts` | Per-package lifecycle script exceptions |
 | `allowedSources` | Permitted source types |
 | `allowedPackages` | Names that skip release-age, install-script, and typo-squat checks (with warning). Source, trust-downgrade, and provenance checks still apply. |
@@ -457,6 +457,13 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `transitive.checks` | Which checks run transitively: `"install-script"` and/or `"untrusted-source"` |
 | `continuity.mode` | `"off"` / `"warn"` / `"block"` — detect provenance downgrades and source-repo changes against a learned per-package baseline |
 | `continuity.baselineSize` | How many recent versions to sample when learning the baseline (default 5) |
+
+Keep private-registry authentication in an environment-backed `.npmrc` entry, such as an
+`_authToken=${NPM_TOKEN}` setting, rather than embedding authority material in `registryUrl`.
+If a credential-bearing URL was previously used, treat the credential as exposed: audit
+`.safeinstall/decisions/`, CI logs and artifacts, and Git history; revoke and rotate the
+credential; then remove it from retained artifacts and repository history using your host's
+secret-removal procedure.
 
 ### Pinning a minimum CLI version
 

@@ -178,6 +178,29 @@ describe("verifyDecisions", () => {
     expect(allowlisted.findings.map((finding) => finding.code)).not.toContain("registry-not-default");
   });
 
+  it("rejects credential-bearing registry trust roots without copying secrets into findings", async () => {
+    const fixture = await createBaseFixture();
+    const credentialedRegistry =
+      "https://build-user:decision-secret@registry.example.internal/npm?token=query-secret#fragment-secret";
+    await writeFile(
+      path.join(fixture.dir, "safeinstall.config.json"),
+      JSON.stringify({ registryUrl: credentialedRegistry }, null, 2)
+    );
+    const head = commitAll(fixture.dir, "credential-bearing registry");
+
+    const result = await verifyDecisions(fixture.dir, {
+      baseRef: fixture.base,
+      headRef: head,
+      allowedRegistryUrls: [credentialedRegistry]
+    });
+
+    expect(result.findings.map((finding) => finding.code)).toContain("registry-not-default");
+    const serializedFindings = JSON.stringify(result.findings);
+    expect(serializedFindings).not.toContain("decision-secret");
+    expect(serializedFindings).not.toContain("query-secret");
+    expect(serializedFindings).not.toContain("fragment-secret");
+  });
+
   it("passes and reports when no lockfile changed", async () => {
     const fixture = await createBaseFixture();
     await writeFile(path.join(fixture.dir, "README.md"), "docs only\n");
