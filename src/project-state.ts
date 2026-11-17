@@ -38,6 +38,11 @@ export function classifyDeclaredSource(spec: string): SourceType {
     return "git";
   }
 
+  // npm-package-arg rejects link:/portal:, which are local directory references.
+  if (spec.startsWith("link:") || spec.startsWith("portal:")) {
+    return "directory";
+  }
+
   try {
     const result = npa(spec);
 

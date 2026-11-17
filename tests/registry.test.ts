@@ -229,84 +229,67 @@ describe("RegistryClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("falls back to the tarball last-modified header when the time map lacks the version", async () => {
+  function tarballFallbackMock(tarball: string, headResponse?: Response) {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        jsonResponse({
-          "dist-tags": {
-            latest: "1.14.0"
-          },
-          versions: {
-            "1.14.0": {
-              version: "1.14.0"
-            }
-          }
-        })
+        jsonResponse({ "dist-tags": { latest: "1.14.0" }, versions: { "1.14.0": { version: "1.14.0" } } })
       )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          version: "1.14.0",
-          dist: {
-            tarball: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz"
-          }
-        })
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          time: {
-            created: "2020-01-01T00:00:00.000Z"
-          }
-        })
-      )
-      .mockResolvedValueOnce(
-        new Response(null, {
-          status: 200,
-          headers: {
-            "last-modified": "Fri, 27 Mar 2026 19:01:42 GMT"
-          }
-        })
-      );
-
+      .mockResolvedValueOnce(jsonResponse({ version: "1.14.0", dist: { tarball } }))
+      .mockResolvedValueOnce(jsonResponse({ time: { created: "2020-01-01T00:00:00.000Z" } }));
+    if (headResponse) {
+      fetchMock.mockResolvedValueOnce(headResponse);
+    }
     vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("falls back to the tarball last-modified header for a same-origin tarball, without following redirects", async () => {
+    const fetchMock = tarballFallbackMock(
+      "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+      new Response(null, { status: 200, headers: { "last-modified": "Fri, 27 Mar 2026 19:01:42 GMT" } })
+    );
 
     const result = await (await createClient()).resolvePackage(createRequestedPackage());
 
     expect(result.publishedAt.toISOString()).toBe("2026-03-27T19:01:42.000Z");
     expect(result.publishTimeSource).toBe("tarball-last-modified");
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(present(fetchMock.mock.calls[3])[1]).toMatchObject({
-      method: "HEAD"
-    });
+    expect(present(fetchMock.mock.calls[3])[1]).toMatchObject({ method: "HEAD", redirect: "manual" });
+  });
+
+  it.each([
+    "http://169.254.169.254/latest/meta-data",
+    "http://localhost:8080/axios.tgz",
+    "https://attacker.invalid/axios.tgz",
+    "http://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+    "https://user:pw@registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+    "not a url"
+  ])("never requests an off-origin tarball (%s) and fails closed on the publish time", async (tarball) => {
+    const fetchMock = tarballFallbackMock(tarball);
+
+    await expect((await createClient()).resolvePackage(createRequestedPackage())).rejects.toThrow(
+      "Registry error: missing publish time for axios@1.14.0."
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("treats a redirecting tarball HEAD as no publish time", async () => {
+    tarballFallbackMock(
+      "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+      new Response(null, { status: 302, headers: { location: "http://169.254.169.254/" } })
+    );
+
+    await expect((await createClient()).resolvePackage(createRequestedPackage())).rejects.toThrow(
+      "Registry error: missing publish time for axios@1.14.0."
+    );
   });
 
   it("errors when neither the time map nor the tarball header provide a publish time", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse({
-          "dist-tags": {
-            latest: "1.14.0"
-          },
-          versions: {
-            "1.14.0": {
-              version: "1.14.0"
-            }
-          }
-        })
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          version: "1.14.0",
-          dist: {
-            tarball: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz"
-          }
-        })
-      )
-      .mockResolvedValueOnce(jsonResponse({}))
-      .mockResolvedValueOnce(new Response(null, { status: 200 }));
-
-    vi.stubGlobal("fetch", fetchMock);
+    tarballFallbackMock(
+      "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
+      new Response(null, { status: 200 })
+    );
 
     await expect((await createClient()).resolvePackage(createRequestedPackage())).rejects.toThrow(
       "Registry error: missing publish time for axios@1.14.0."

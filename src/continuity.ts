@@ -16,6 +16,7 @@ const BASELINE_PROVENANCE_THRESHOLD = 0.5;
 export interface VersionRecord {
   version: string;
   publishedAt: Date;
+  artifactIntegrity?: string | undefined;
 }
 
 export interface ContinuityDependencies {
@@ -28,13 +29,21 @@ export interface ContinuityDependencies {
     packageName: string,
     version: string,
     registryUrl: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    artifactIntegrity?: string
   ): Promise<AttestationIdentity>;
 }
 
 interface PackumentTimeShape {
   time?: Record<string, string>;
-  versions?: Record<string, unknown>;
+  versions?: Record<
+    string,
+    {
+      dist?: {
+        integrity?: unknown;
+      };
+    }
+  >;
 }
 
 function encodePackageNameForUrl(name: string): string {
@@ -74,14 +83,26 @@ export function createDefaultContinuityDependencies(diskCache?: DiskCache): Cont
         if (Number.isNaN(publishedAt.getTime())) {
           continue;
         }
-        records.push({ version, publishedAt });
+        const artifactIntegrity = versions[version]?.dist?.integrity;
+        records.push({
+          version,
+          publishedAt,
+          ...(typeof artifactIntegrity === "string" ? { artifactIntegrity } : {})
+        });
       }
 
       return records;
     },
 
-    async fetchIdentity(packageName, version, registryUrl, signal) {
-      return fetchAttestationIdentity({ packageName, version, registryUrl, diskCache, signal });
+    async fetchIdentity(packageName, version, registryUrl, signal, artifactIntegrity) {
+      return fetchAttestationIdentity({
+        packageName,
+        version,
+        artifactIntegrity,
+        registryUrl,
+        diskCache,
+        signal
+      });
     }
   };
 }
@@ -131,6 +152,7 @@ function dominantRepository(identities: AttestationIdentity[]): string | undefin
 export interface EvaluateContinuityInput {
   packageName: string;
   targetVersion: string;
+  targetArtifactIntegrity?: string | undefined;
   registryUrl: string;
   config: ContinuityConfig;
   diskCache: DiskCache;
@@ -178,14 +200,21 @@ export async function evaluateContinuity(
   try {
     baselineIdentities = await Promise.all(
       baseline.map((record) =>
-        deps.fetchIdentity(input.packageName, record.version, input.registryUrl, input.signal)
+        deps.fetchIdentity(
+          input.packageName,
+          record.version,
+          input.registryUrl,
+          input.signal,
+          record.artifactIntegrity
+        )
       )
     );
     targetIdentity = await deps.fetchIdentity(
       input.packageName,
       input.targetVersion,
       input.registryUrl,
-      input.signal
+      input.signal,
+      input.targetArtifactIntegrity
     );
   } catch (error) {
     const shutdownError = getShutdownSignalError(input.signal);

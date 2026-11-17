@@ -35,12 +35,19 @@ inputs:
     default: ""
   version:
     description: >
-      SafeInstall CLI version to install. Defaults to the latest
-      published version. Accepts an exact version or a named dist-tag,
-      not shell expressions or version ranges. Pin an exact version
-      for reproducible builds.
+      Exact SafeInstall CLI version to install. Update this and integrity
+      together after reviewing a release.
     required: false
-    default: "latest"
+    default: "0.15.0"
+  integrity:
+    description: >
+      sha512 SRI of the selected SafeInstall CLI tarball (for example,
+      sha512-...). Optional for the default version, whose digest is recorded
+      in this Action. Required when `version` is set to anything else, so a
+      registry or publishing account cannot replace the executable after this
+      Action is pinned.
+    required: false
+    default: ""
   verify-trust:
     description: >
       When "true", verify the Agent Trust Surface before running the
@@ -73,10 +80,58 @@ runs:
       shell: bash
       env:
         SAFEINSTALL_CLI_VERSION: ${{ inputs.version }}
+        SAFEINSTALL_CLI_INTEGRITY: ${{ inputs.integrity }}
       run: |
-        set -e
-        node -e 'if (!/^(?:[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?|[A-Za-z][A-Za-z0-9._-]*)$/.test(process.env.SAFEINSTALL_CLI_VERSION || "")) { console.error("Invalid SafeInstall version: expected an exact version or dist-tag."); process.exit(2); }'
-        npm install -g "safeinstall-cli@${SAFEINSTALL_CLI_VERSION}" --ignore-scripts
+        set -euo pipefail
+
+        # The default CLI version and the digest of its published tarball are
+        # recorded together, so a workflow that pins this Action by commit
+        # also pins the executable. Bump both in the same change.
+        SAFEINSTALL_DEFAULT_VERSION="0.15.0"
+        SAFEINSTALL_DEFAULT_INTEGRITY="sha512-GjMB+YaFv7WtewK/JpCHndgWFTnAdQREUQUuLruzEzR3+rDhBElyKdf3fm/cK3ZrsGPtJayTU9aWkHoCrttBbg=="
+        if [ -z "$SAFEINSTALL_CLI_INTEGRITY" ] && [ "$SAFEINSTALL_CLI_VERSION" = "$SAFEINSTALL_DEFAULT_VERSION" ]; then
+          SAFEINSTALL_CLI_INTEGRITY="$SAFEINSTALL_DEFAULT_INTEGRITY"
+        fi
+        export SAFEINSTALL_CLI_INTEGRITY
+
+        node -e '
+          const version = process.env.SAFEINSTALL_CLI_VERSION || "";
+          const integrity = process.env.SAFEINSTALL_CLI_INTEGRITY || "";
+          const exactVersion = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+          if (!exactVersion.test(version)) {
+            console.error("Invalid SafeInstall version: expected an exact semantic version such as `version: 0.15.0`, not a dist-tag (latest, next) or a range.");
+            process.exit(2);
+          }
+          if (!integrity.startsWith("sha512-")) {
+            console.error("SafeInstall Action: the `integrity` input is required when `version` is not the default. Add `integrity: sha512-...` (the dist.integrity of safeinstall-cli@" + version + ", verified against the release provenance, for example `npm view safeinstall-cli@" + version + " dist.integrity`) next to `version: " + version + "`, and pin this Action to a reviewed commit SHA.");
+            process.exit(2);
+          }
+          const encoded = integrity.slice("sha512-".length);
+          const digest = Buffer.from(encoded, "base64");
+          if (digest.length !== 64 || digest.toString("base64") !== encoded) {
+            console.error("Invalid SafeInstall integrity: expected a canonical sha512 SRI.");
+            process.exit(2);
+          }
+        '
+
+        SAFEINSTALL_TARBALL="${RUNNER_TEMP:?}/safeinstall-cli-${SAFEINSTALL_CLI_VERSION}.tgz"
+        curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+          --fail --silent --show-error --location \
+          "https://registry.npmjs.org/safeinstall-cli/-/safeinstall-cli-${SAFEINSTALL_CLI_VERSION}.tgz" \
+          --output "$SAFEINSTALL_TARBALL"
+
+        node -e '
+          const { createHash, timingSafeEqual } = require("node:crypto");
+          const { readFileSync } = require("node:fs");
+          const expected = Buffer.from(process.env.SAFEINSTALL_CLI_INTEGRITY.slice("sha512-".length), "base64");
+          const actual = createHash("sha512").update(readFileSync(process.argv[1])).digest();
+          if (!timingSafeEqual(actual, expected)) {
+            console.error("SafeInstall tarball integrity mismatch; refusing to install.");
+            process.exit(2);
+          }
+        ' "$SAFEINSTALL_TARBALL"
+
+        npm install -g "$SAFEINSTALL_TARBALL" --ignore-scripts
 
     - name: Verify trust surface
       if: ${{ inputs.verify-trust == 'true' }}

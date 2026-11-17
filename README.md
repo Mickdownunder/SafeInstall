@@ -121,8 +121,8 @@ No registry proxy. No tarball rewriting. No cloud dependency.
 |:---|:---|:---|
 | **Release age** | 72 hours minimum | `Blocked: release too new` |
 | **Lifecycle scripts** | preinstall, install, postinstall blocked | `Blocked: install script present` |
-| **Source types** | registry, workspace, file, directory allowed | `Blocked: untrusted source` |
-| **Trust downgrade** | Flags a dependency that was `registry` in the committed manifest and is now git/url/tarball. `decisions authorize` compares against the base commit's manifest (never the config); `check` and installs compare against the manifest at git `HEAD`. `sourceBaselines` applies only when there is no `HEAD` manifest (no git, unborn `HEAD`, untracked manifest), and then missing history fails closed | `Blocked: trust level dropped` |
+| **Source types** | registry, workspace, file, directory allowed. First-party workspace packages (`workspace:`, or a path matched by the workspace globs) are always allowed; any other local directory counts as `directory` and a local tarball as `file` | `Blocked: untrusted source` |
+| **Trust downgrade** | Flags a dependency that was `registry` in the committed manifest and is now git/url/tarball or any local source (`file:`, `link:`, directory, `workspace:`). A dependency that was already local at the baseline is not flagged. `decisions authorize` compares against the base commit's manifest (never the config); `check` and installs compare against the manifest at git `HEAD`. `sourceBaselines` applies only when there is no `HEAD` manifest (no git, unborn `HEAD`, untracked manifest), and then missing history fails closed | `Blocked: trust level dropped` |
 | **Typo-squat detection** | Off by default; opt in via `typoSquat.mode` | `Blocked: suspected typo-squat` |
 | **Provenance verification** | Off by default; opt in via `provenance.mode` | `Blocked: attestation missing/invalid/publisher mismatch` |
 | **Transitive dependencies** | Off by default; opt in via `transitive.mode` | `Blocked: transitive install script / untrusted source` |
@@ -141,7 +141,7 @@ Continuity learns a per-package trust baseline from the provenance identity of r
 
 Because the baseline is learned **per package**, there are no false positives on the large majority of packages that never adopted provenance — they simply have no baseline and the check stays silent. No global "require provenance" sledgehammer.
 
-It reads npm's published attestation metadata, so it works **without the optional sigstore package**. Opt in with `continuity.mode` set to `"warn"` or `"block"`.
+Continuity verifies the attestation of the target version and of each baseline version locally with the optional `sigstore` package before using its repository identity (about one second per package, and it needs the Sigstore trust root, so it needs network access to it the first time). An attestation that fails verification counts as no provenance. If `sigstore` is not installed or the trust root cannot be fetched, continuity is reported as unevaluated with a warning and does not block. Opt in with `continuity.mode` set to `"warn"` or `"block"`.
 
 > **Honest limit:** continuity does not catch an attack that comes *through* a legitimately-compromised CI workflow with valid provenance from the real repository (e.g. the Shai-Hulud worm class). There is no identity discontinuity to detect there. SafeInstall raises the bar against the dominant 2026 attack pattern; it does not close every door.
 
@@ -247,7 +247,7 @@ Installation requires one canonical SHA-512 digest in the checked registry manif
 
 Explicit additions resolve into a lockfile with the evaluated exact version before installation. Preparation can update `package.json` and the lockfile, and can populate the manager's cache, even if the later binding/policy check blocks. Those files are left for inspection, not automatically rolled back. npm's frozen phase uses `ci`, which replaces `node_modules`. Shared workspace lockfiles cause all recorded importers' direct dependencies to be reviewed under the selected policy, not just the selected package.
 
-Lifecycle scripts are always disabled, including when legacy `packageManagerDefaults.*.ignoreScripts` is `false`. `allowedScripts` permits a policy exception, not script execution. pnpm's executable `.pnpmfile.cjs` hooks are disabled too. Explicit non-registry additions currently block; existing local/workspace dependencies remain governed by `allowedSources` and are not claimed to have registry-artifact binding. The previous source of a dependency comes from a committed manifest, not from the working-tree manifest being checked: the base commit's manifest in `decisions authorize` (for the root project and every importer; a moved importer is matched to the base package with the same `name`), and the manifest at git `HEAD` in project-level `check` and installs. Only when no `HEAD` manifest exists (not a git repository, unborn `HEAD`, or an untracked manifest) do git, URL, and tarball dependencies need a reviewed `sourceBaselines` entry; category-wide `allowedSources` alone cannot prove that a registry dependency was not replaced.
+Lifecycle scripts are always disabled, including when legacy `packageManagerDefaults.*.ignoreScripts` is `false`. `allowedScripts` permits a policy exception, not script execution. pnpm's executable `.pnpmfile.cjs` hooks are disabled too. Explicit non-registry additions currently block; existing local/workspace dependencies are governed by `allowedSources` (workspace packages are always allowed; other local directories are `directory`, local tarballs `file`, whether inside or outside the repository) and are not claimed to have registry-artifact binding. The previous source of a dependency comes from a committed manifest, not from the working-tree manifest being checked: the base commit's manifest in `decisions authorize` (for the root project and every importer; a moved importer is matched to the base package with the same `name`), and the manifest at git `HEAD` in project-level `check` and installs. Only when no `HEAD` manifest exists (not a git repository, unborn `HEAD`, or an untracked manifest) do git, URL, and tarball dependencies need a reviewed `sourceBaselines` entry; category-wide `allowedSources` alone cannot prove that a registry dependency was not replaced.
 
 ---
 
@@ -262,12 +262,30 @@ The CLI reaches humans who type `safeinstall`. The **MCP server reaches AI codin
 
 ### Wire it into your agent
 
+Install the supported CLI and MCP SDK into a dedicated local directory with
+exact versions and a retained lockfile:
+
+```bash
+npm install --save-exact --ignore-scripts safeinstall-cli@0.15.0 @modelcontextprotocol/sdk@1.29.0
+```
+
+Before enabling the server, compare the `safeinstall-cli` SHA-512 integrity in
+`package-lock.json` with the release's signed npm provenance, review the lockfile,
+and retain it. Recreate the installation with `npm ci --ignore-scripts`; do not
+let an MCP client fetch executable code on startup.
+
 **Claude Code / Claude Desktop** — add to your MCP config (`claude_desktop_config.json` or `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
-    "safeinstall": { "command": "npx", "args": ["safeinstall-cli", "mcp"] }
+    "safeinstall": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/safeinstall-mcp/node_modules/safeinstall-cli/dist/cli.js",
+        "mcp"
+      ]
+    }
   }
 }
 ```
@@ -381,7 +399,7 @@ Instruction content drift only warns by default because Claude Code writes to `C
 
 ### How it defends itself
 
-- **The verifier comes from the protected base branch; human review still owns intentional re-baselines.** Run `safeinstall trust lock --ci github` to scaffold a workflow that re-hashes the candidate trust surface against its committed lock on every pull request, on a machine the agent does not control, with the CLI pinned to an exact version and its sha512 content hash. `pull_request_target` keeps the verifier definition outside the PR's control, while the candidate checkout is inert data with no credentials. This blocks a PR from editing the workflow to waive its own failure. Honest boundary: a PR can still rewrite policy and baseline *consistently*, so require independent review of those diffs. (Wiring the Action directly also works — but pin its `version:` input; the default `latest` floats.)
+- **The verifier comes from the protected base branch; human review still owns intentional re-baselines.** Run `safeinstall trust lock --ci github` to scaffold a workflow that re-hashes the candidate trust surface against its committed lock on every pull request, on a machine the agent does not control, with the CLI pinned to an exact version and its sha512 content hash. `pull_request_target` keeps the verifier definition outside the PR's control, while the candidate checkout is inert data with no credentials. This blocks a PR from editing the workflow to waive its own failure. Honest boundary: a PR can still rewrite policy and baseline *consistently*, so require independent review of those diffs. (Wiring the Action directly also works — pin the Action commit, which also pins the CLI version and its recorded digest.)
 - **Reconciliation on top of interception.** The guard is the fast layer; every `safeinstall` install/check also reconciles against the baseline. Deleting the hook to silence the guard, or editing a protected file, shows up as drift on the next SafeInstall run locally — and, regardless, fails CI re-verification.
 - **Human-gated changes.** Both commands that relax enforcement require a human: `safeinstall trust approve` reads its confirmation from the controlling terminal (`/dev/tty`), never from stdin, and `trust unlock` likewise requires a controlling terminal — both refuse to run in CI or known agent-hook contexts, including when only a parent process carries the context marker (Linux and macOS), so an agent cannot silently re-baseline or remove the surface by dropping the marker from its own environment. This is a barrier, not proof of human presence. `trust status` is read-only (safe in CI, never mutates the repo).
 - **Hash-chained ledger.** Baseline decisions are chained in `.safeinstall/ledger.jsonl`; the lock binds to a ledger entry (including its enforcement `mode`), so editing the committed lock to drop a file or downgrade strict→warn breaks the binding. A local head mirror under `~/.safeinstall/` catches naive/accidental history rewrites; a vanished mirror is self-healed from the verified head on the next clean run, so a fresh clone establishes it automatically without noise.
@@ -443,9 +461,9 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 |:---|:---|
 | `minimumCliVersion` | Optional. Lowest safeinstall-cli version whose behavior this project's protections assume (exact semver). An older running CLI **warns** — in the guard, `install`/`check`, and `trust status` — but never hard-fails |
 | `minimumReleaseAgeHours` | Minimum age in hours for registry versions |
-| `registryUrl` | npm-compatible registry URL for metadata and installation (mirrors, Artifactory, Verdaccio) |
+| `registryUrl` | Credential-free npm-compatible registry URL for metadata and installation (mirrors, Artifactory, Verdaccio); userinfo, query parameters, and fragments are rejected |
 | `allowedScripts` | Per-package lifecycle script exceptions |
-| `allowedSources` | Permitted source types |
+| `allowedSources` | Permitted source types: `registry`, `git`, `url`, `tarball`, `workspace`, `file` (local tarball), `directory` (local directory that is not a workspace package). First-party workspace packages are always allowed |
 | `sourceBaselines` | Reviewed package-to-source identities (`registry`, `git`, `url`, or `tarball`). Fallback only when there is no git `HEAD` manifest for the project; never consulted by `decisions authorize` and ignored whenever `HEAD` has the manifest |
 | `allowedPackages` | Names that skip release-age, install-script, and typo-squat checks (with warning). Source, trust-downgrade, and provenance checks still apply. |
 | `packageManagerDefaults` | Legacy configuration; lifecycle scripts remain disabled even when `ignoreScripts` is `false` |
@@ -461,6 +479,17 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `transitive.checks` | Which checks run transitively: `"install-script"` and/or `"untrusted-source"` |
 | `continuity.mode` | `"off"` / `"warn"` / `"block"` — detect provenance downgrades and source-repo changes against a learned per-package baseline |
 | `continuity.baselineSize` | How many recent versions to sample when learning the baseline (default 5) |
+
+Keep private-registry authentication in an environment-backed `.npmrc` entry, such as an
+`_authToken=${NPM_TOKEN}` setting, rather than embedding authority material in `registryUrl`.
+SafeInstall's own metadata requests do not send credentials (Node's `fetch` refuses URLs that
+carry them), and it does not read registry URLs from `.npmrc` or `npm_config_registry`, so those
+never reach its output or decision records. A `registryUrl` with userinfo, query parameters, or a
+fragment is a config error, and `decisions verify` reports a committed one as `registry-not-default`.
+If a credential-bearing URL was previously used, treat the credential as exposed: audit
+`.safeinstall/decisions/`, CI logs and artifacts, and Git history; revoke and rotate the
+credential; then remove it from retained artifacts and repository history using your host's
+secret-removal procedure.
 
 ### Pinning a minimum CLI version
 
@@ -591,7 +620,10 @@ Install blocked.
 
 ## GitHub Action
 
-Run SafeInstall policy checks automatically on every pull request. Five lines of YAML, no configuration required — defaults apply immediately.
+Run SafeInstall policy checks automatically on every pull request. Pin the
+Action to a reviewed full commit SHA, and bind the CLI release to its
+independently verified SHA-512 SRI. Replace both placeholders below from the
+same reviewed Action release before enabling the workflow.
 
 ```yaml
 # .github/workflows/safeinstall.yml
@@ -601,12 +633,23 @@ jobs:
   policy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
-      - uses: Mickdownunder/SafeInstall@v1
+      - uses: Mickdownunder/SafeInstall@<full-40-character-commit-sha>
 ```
+
+Pinning the Action to a commit also pins the CLI: the Action records an exact default CLI version together with the SHA-512 of its published tarball, downloads that tarball, and refuses to install bytes that do not match. To run a different CLI version, set both inputs:
+
+```yaml
+      - uses: Mickdownunder/SafeInstall@<full-40-character-commit-sha>
+        with:
+          version: 0.15.0
+          integrity: sha512-<verified-release-integrity>
+```
+
+Take the digest from `npm view safeinstall-cli@<version> dist.integrity` and check it against the release provenance. `latest`, other dist-tags and ranges are rejected.
 
 The action runs `safeinstall check` against your direct dependencies and sets the job status to pass or fail. Blocked dependencies appear in the GitHub Actions job summary with the exact block reason and suggestion.
 
@@ -615,7 +658,7 @@ The action runs `safeinstall check` against your direct dependencies and sets th
 To enforce policy during the actual install step (not just a check):
 
 ```yaml
-      - uses: Mickdownunder/SafeInstall@v1
+      - uses: Mickdownunder/SafeInstall@<full-40-character-commit-sha>
         with:
           mode: install
           package-manager: pnpm
@@ -630,7 +673,8 @@ To enforce policy during the actual install step (not just a check):
 | `package-manager` | `pnpm` | `npm` or `pnpm` for installation; `bun` fails closed |
 | `args` | | Additional arguments forwarded to the package manager |
 | `config-path` | | Explicit path to `safeinstall.config.json` (auto-discovered if omitted) |
-| `version` | `latest` | SafeInstall CLI version to install |
+| `version` | `0.15.0` | Exact SafeInstall CLI version to install; dist-tags and ranges are rejected |
+| `integrity` | recorded for the default version | SHA-512 SRI of the selected CLI tarball; required when `version` is not the default |
 
 ### Outputs
 

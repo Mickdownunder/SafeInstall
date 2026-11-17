@@ -13,6 +13,12 @@ import type { PackageManagerName } from "./types";
 export type { ProjectInstallTargetsResult } from "./project-installs/types";
 export { loadNpmProjectInstallTargets, loadPnpmProjectInstallTargets };
 
+export function directLockfileKeys(targets: ProjectInstallTargetsResult): Set<string> {
+  return new Set(
+    targets.targets.flatMap((target) => target.lockfileKey === undefined ? [] : [target.lockfileKey])
+  );
+}
+
 type LockfileManager = Extract<PackageManagerName, "npm" | "pnpm">;
 
 export interface ProjectInstallScopePaths {

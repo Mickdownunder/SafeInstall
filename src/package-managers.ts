@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 
+import { requireCredentialFreeRegistryUrl } from "./registry-url";
 import { getShutdownSignalError, throwIfAborted } from "./signals";
 import { planPackageManagerSpawn, WindowsCommandResolutionError } from "./win32-spawn";
 import type { PackageManagerName, SafeInstallConfig } from "./types";
@@ -35,6 +36,7 @@ export function buildPackageManagerCommand(
   forwardedArgs: string[],
   config: SafeInstallConfig
 ): { command: string; args: string[] } {
+  requireCredentialFreeRegistryUrl(config.registryUrl);
   const args = [...managerArgs, command, ...forwardedArgs];
   const ignoreScriptsFlag = IGNORE_SCRIPTS_FLAG[manager];
   if (args.some((arg) => arg === "--no-ignore-scripts" ||

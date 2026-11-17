@@ -105,24 +105,6 @@ function parseStatement(bundle: Bundle): Slsa1Statement | undefined {
   }
 }
 
-function statementSubjectMatchesPackage(
-  statement: Slsa1Statement,
-  packageName: string,
-  version: string
-): boolean {
-  if (
-    statement._type !== "https://in-toto.io/Statement/v1" ||
-    !statement.predicateType?.startsWith(SLSA_PREDICATE_TYPE_PREFIX)
-  ) {
-    return false;
-  }
-
-  return (statement.subject ?? []).some((subject) => {
-    const identity = parseNpmPurl(typeof subject.name === "string" ? subject.name : undefined);
-    return identity?.packageName === packageName && identity.version === version;
-  });
-}
-
 /**
  * Extract the `<owner>/<repo>` slug from a GitHub repository URL in a SLSA
  * statement. Returns undefined if the URL doesn't look like a GitHub URL.
@@ -318,6 +300,27 @@ export async function defaultVerifyBundle(
   });
 }
 
+/**
+ * True when a verification error says nothing about the bundle itself: the
+ * Sigstore trust root (TUF) could not be fetched, e.g. while offline. The
+ * continuity check treats this as "unevaluated" instead of "no provenance",
+ * otherwise an offline run would report a false provenance downgrade.
+ */
+function isSigstoreInfrastructureError(error: unknown): boolean {
+  for (let current: unknown = error, depth = 0; current && depth < 4; depth += 1) {
+    const candidate = current as { name?: unknown; code?: unknown; cause?: unknown };
+    if (
+      candidate.name === "TUFError" ||
+      (typeof candidate.code === "string" &&
+        /^(TUF_|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ENETUNREACH|UND_ERR)/.test(candidate.code))
+    ) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
+}
+
 export function createDefaultProvenanceDependencies(): ProvenanceDependencies {
   return {
     fetchAttestations: defaultFetchAttestations,
@@ -328,11 +331,9 @@ export function createDefaultProvenanceDependencies(): ProvenanceDependencies {
 /**
  * The publish identity of a single package version, derived from npm's
  * attestation metadata. Used by the continuity check to compare a version
- * against the package's historical baseline. Identity extraction does NOT
- * cryptographically verify the bundle — npm verifies provenance at publish
- * time and binds the repository, so the presence and contents of the
- * attestation are meaningful on their own. This keeps continuity fast and
- * usable even when the optional sigstore package is not installed.
+ * against the package's historical baseline. Every populated identity comes
+ * from a statement whose package, version, artifact digest, statement shape,
+ * and GitHub Actions signer have been verified locally.
  */
 export interface AttestationIdentity {
   hasProvenance: boolean;
@@ -343,29 +344,33 @@ export interface AttestationIdentity {
 export interface FetchAttestationIdentityInput {
   packageName: string;
   version: string;
+  artifactIntegrity?: string | undefined;
   registryUrl: string;
   diskCache?: DiskCache | undefined;
-  deps?: Pick<ProvenanceDependencies, "fetchAttestations">;
+  deps?: Partial<ProvenanceDependencies> | undefined;
   signal?: AbortSignal | undefined;
 }
 
 /**
- * Fetch a single version's attestation from the registry and extract its
- * publish identity (whether it has SLSA provenance, and from which GitHub
- * repository and workflow). Returns `{ hasProvenance: false }` when the
- * version has no matching attestation or the attestation can't be parsed.
- * Fetch failures propagate so continuity can remain unevaluated.
+ * Fetch a single version's attestation from the registry, verify it, and
+ * extract its publish identity (whether it has SLSA provenance, and from
+ * which GitHub repository and workflow). Returns `{ hasProvenance: false }`
+ * when the version has no valid attestation. Cached bundles are deliberately
+ * reverified before their fields are used. Missing verification tooling is
+ * re-thrown so continuity can report the check as unevaluated.
  */
 export async function fetchAttestationIdentity(
   input: FetchAttestationIdentityInput
 ): Promise<AttestationIdentity> {
   throwIfAborted(input.signal);
-  const fetchAttestations = input.deps?.fetchAttestations ?? defaultFetchAttestations;
+  const defaultDeps = createDefaultProvenanceDependencies();
+  const fetchAttestations = input.deps?.fetchAttestations ?? defaultDeps.fetchAttestations;
+  const verifyBundle = input.deps?.verifyBundle ?? defaultDeps.verifyBundle;
   const url = attestationUrl(input.registryUrl, input.packageName, input.version);
   const cacheKey = `${input.registryUrl}|${input.packageName}@${input.version}`;
 
-  // Continuity identity is security-sensitive but intentionally does not run
-  // Sigstore verification, so it must always be observed from the registry.
+  // Continuity identity is security-sensitive, so it is always observed from
+  // the registry (never read back from the cache) and verified below.
   const rawResponse = await fetchAttestations(url, input.signal);
   if (rawResponse && input.diskCache) {
     await input.diskCache.setJson(ATTESTATION_CACHE_NAMESPACE, cacheKey, rawResponse);
@@ -383,21 +388,33 @@ export async function fetchAttestationIdentity(
   }
 
   const statement = parseStatement(slsa.bundle);
-  if (!statement || !statementSubjectMatchesPackage(statement, input.packageName, input.version)) {
+  if (!statement) {
     return { hasProvenance: false };
   }
-  const workflow = statement?.predicate?.buildDefinition?.externalParameters?.workflow;
-  const sourceRepository = extractRepositorySlug(workflow?.repository);
-  if (!sourceRepository) {
-    // Has an attestation but no usable repository — treat as provenance
-    // present but identity unknown.
-    return { hasProvenance: true };
+
+  let validatedStatement: ValidatedProvenanceStatement | string;
+  try {
+    validatedStatement = validateProvenanceStatement(slsa.bundle, statement, input);
+  } catch {
+    return { hasProvenance: false };
+  }
+  if (typeof validatedStatement === "string") {
+    return { hasProvenance: false };
+  }
+
+  try {
+    await verifyBundle(slsa.bundle, validatedStatement.signingIdentity);
+  } catch (error) {
+    if (error instanceof SigstoreToolingUnavailableError || isSigstoreInfrastructureError(error)) {
+      throw error;
+    }
+    return { hasProvenance: false };
   }
 
   return {
     hasProvenance: true,
-    sourceRepository,
-    workflowPath: workflow?.path
+    sourceRepository: validatedStatement.sourceRepository,
+    workflowPath: validatedStatement.workflowPath
   };
 }
 
@@ -489,7 +506,11 @@ function parseNpmPurl(
 function validateProvenanceStatement(
   bundle: Bundle,
   statement: Slsa1Statement,
-  input: Pick<VerifyProvenanceInput, "packageName" | "version" | "artifactIntegrity">
+  input: {
+    packageName: string;
+    version: string;
+    artifactIntegrity?: string | undefined;
+  }
 ): ValidatedProvenanceStatement | string {
   if (bundle.dsseEnvelope?.payloadType !== IN_TOTO_PAYLOAD_TYPE) {
     return "SLSA bundle has an unexpected DSSE payload type";

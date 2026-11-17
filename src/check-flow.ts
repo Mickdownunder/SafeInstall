@@ -8,7 +8,7 @@ import { lockfileArtifactBindingReasons } from "./install-binding";
 import { formatCommand } from "./output";
 import { loadManifestDependencies } from "./project-state";
 import { resolveInvocationContext } from "./project-discovery";
-import { inferProjectInstallTargetsForCheck } from "./project-installs";
+import { directLockfileKeys, inferProjectInstallTargetsForCheck } from "./project-installs";
 import { RegistryClient } from "./registry";
 import { loadHeadSourceBaseline } from "./source-baseline";
 import { redactCliResult } from "./redaction";
@@ -188,7 +188,7 @@ async function runCheckFlowInternal(
     : [];
   const transitive = await evaluateTransitiveDependencies({
     lockfilePath: projectTargets?.lockfilePath,
-    directNames: new Set(requestedPackages.map((requested) => requested.name)),
+    directLockfileKeys: projectTargets ? directLockfileKeys(projectTargets) : new Set<string>(),
     config
   });
 
