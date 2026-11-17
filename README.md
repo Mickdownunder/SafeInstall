@@ -269,7 +269,7 @@ Install the supported CLI and MCP SDK into a dedicated local directory with
 exact versions and a retained lockfile:
 
 ```bash
-npm install --save-exact --ignore-scripts safeinstall-cli@0.15.0 @modelcontextprotocol/sdk@1.29.0
+npm install --save-exact --ignore-scripts safeinstall-cli@0.15.0 @modelcontextprotocol/sdk@1.32.2
 ```
 
 Before enabling the server, compare the `safeinstall-cli` SHA-512 integrity in
