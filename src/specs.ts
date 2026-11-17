@@ -1,22 +1,19 @@
 import npa from "npm-package-arg";
 
-import { containsSensitiveArgs, containsSensitiveCredentials } from "./redaction";
+import { containsSensitiveArgs } from "./redaction";
 import type { InstallPlan, PackageManagerName, RequestedPackage, SourceType } from "./types";
 
 export const CREDENTIAL_BEARING_SPEC_MESSAGE =
-  "Credential-bearing package specifications are not supported. Configure authentication with npmrc, environment variables, or a credential helper and retry.";
+  "Credential-bearing package specifications or flags on the command line are not supported. Configure registry and git credentials through .npmrc, environment variables, or a credential helper instead, and retry without credentials in the arguments.";
 
-function rejectCredentialBearingValue(value: string): void {
-  if (containsSensitiveCredentials(value)) {
+/**
+ * Reject credentials typed on the command line. Credentials already present in
+ * a project manifest are NOT rejected here; they are evaluated like any other
+ * git/url source and redacted wherever they are printed or persisted.
+ */
+export function assertNoCredentialBearingArgs(args: readonly string[]): void {
+  if (containsSensitiveArgs(args)) {
     throw new Error(CREDENTIAL_BEARING_SPEC_MESSAGE);
-  }
-}
-
-export function assertNoCredentialBearingPackages(packages: readonly RequestedPackage[]): void {
-  for (const requested of packages) {
-    rejectCredentialBearingValue(requested.name);
-    rejectCredentialBearingValue(requested.raw);
-    rejectCredentialBearingValue(requested.requested);
   }
 }
 
@@ -256,9 +253,7 @@ function splitManagerArgsAndCommand(argv: string[]): {
 }
 
 export function buildInstallPlan(argv: string[]): InstallPlan {
-  if (containsSensitiveArgs(argv)) {
-    throw new Error(CREDENTIAL_BEARING_SPEC_MESSAGE);
-  }
+  assertNoCredentialBearingArgs(argv);
   const { manager, managerArgs, command, forwardedArgs } = splitManagerArgsAndCommand(argv);
 
   const canonicalCommand = normalizeInstallCommand(manager, command);
@@ -280,8 +275,6 @@ export function buildInstallPlan(argv: string[]): InstallPlan {
 }
 
 export function parseManifestDependency(name: string, spec: string): RequestedPackage {
-  rejectCredentialBearingValue(name);
-  rejectCredentialBearingValue(spec);
   if (spec.startsWith("workspace:")) {
     return {
       name,

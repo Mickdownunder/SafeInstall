@@ -2,101 +2,145 @@ import type { CliReason, CliResult } from "./types";
 
 export const REDACTED_CREDENTIAL = "[REDACTED]";
 
-const URL_USERINFO_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)([^/?#\s]+)@/giu;
-const QUERY_PARAMETER_PATTERN = /([?&])([^=&#\s]+)=([^&#\s]*)/gu;
-const KEY_VALUE_PATTERN = /(^|\s)([^=\s]+)=("[^"]*"|'[^']*'|[^\s]*)/gu;
-const OPTION_VALUE_PATTERN = /(^|\s)(--?[^=\s]+)(\s+)("[^"]*"|'[^']*'|[^\s]+)/gu;
-const AUTHORIZATION_HEADER_PATTERN = /\b(authorization\s*:\s*)((?:basic|bearer)\s+)?([^\s,;]+)/giu;
+// Detection is structural. Only three shapes count as credentials:
+//   1. userinfo in the authority of a URL with a known scheme,
+//   2. a small set of exactly named parameters in a URL query string,
+//   3. npm-style credential flags (`--//host/:_authToken=...`, `--otp=...`).
+// Anything else (version ranges, package names, free text, `key=value`) is
+// never a credential for this module.
+const URL_PATTERN = /[a-z][a-z0-9+.-]*:\/\/[^\s'"<>`]+/giu;
+const URL_AUTHORITY_PATTERN = /^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*)/iu;
+const FLAG_ASSIGNMENT_PATTERN = /(^|[\s'"])(--[^\s=]+)=("[^"]*"|'[^']*'|[^\s'"]*)/gu;
+const FLAG_SPLIT_PATTERN = /(^|[\s'"])(--[^\s=]+)(\s+)("[^"]*"|'[^']*'|[^\s'"]+)/gu;
 
-function normalizeCredentialName(value: string): string {
-  let decoded = value;
+const USERINFO_SCHEMES = new Set(["http", "https", "git+http", "git+https", "git"]);
+const SSH_SCHEMES = new Set(["ssh", "git+ssh"]);
+const SENSITIVE_QUERY_PARAMETERS = new Set([
+  "token",
+  "access_token",
+  "auth",
+  "auth_token",
+  "authtoken",
+  "api_key",
+  "apikey",
+  "key",
+  "password",
+  "passwd",
+  "secret",
+  "signature",
+  "sig",
+  "x-amz-signature",
+  "x-amz-credential",
+  "x-amz-security-token",
+  "private_token",
+  "jwt"
+]);
+const SENSITIVE_FLAG_PATTERN =
+  /^--(?:\/\/\S*:(?:_authToken|_auth|_password|username)|_authToken|_auth|_password|password|otp)$/iu;
+
+function decodeName(value: string): string {
   try {
-    decoded = decodeURIComponent(value.replace(/\+/gu, " "));
+    return decodeURIComponent(value.replace(/\+/gu, " "));
   } catch {
-    // A malformed percent escape cannot make a credential name safe. Match
-    // against the original spelling so the caller still fails closed.
+    return value;
   }
-  return decoded.toLowerCase().replace(/[^a-z0-9]/gu, "");
 }
 
-function isSensitiveCredentialName(value: string): boolean {
-  const normalized = normalizeCredentialName(value);
-  return (
-    normalized === "auth" ||
-    normalized === "authorization" ||
-    normalized === "code" ||
-    normalized === "jwt" ||
-    normalized === "key" ||
-    normalized === "pwd" ||
-    normalized === "passwd" ||
-    normalized === "session" ||
-    normalized === "sessionid" ||
-    normalized === "sig" ||
-    normalized.endsWith("auth") ||
-    normalized.endsWith("accesskey") ||
-    normalized.endsWith("apikey") ||
-    normalized.endsWith("privatekey") ||
-    normalized.endsWith("secretkey") ||
-    normalized.endsWith("accesskeyid") ||
-    normalized.endsWith("token") ||
-    normalized.endsWith("password") ||
-    normalized.endsWith("secret") ||
-    normalized.endsWith("signature") ||
-    normalized.endsWith("credential")
-  );
+function isSensitiveQueryName(name: string): boolean {
+  return SENSITIVE_QUERY_PARAMETERS.has(decodeName(name).toLowerCase());
 }
 
-function redactSensitiveAssignment(argument: string): string {
-  const separator = argument.indexOf("=");
-  if (separator <= 0 || !isSensitiveCredentialName(argument.slice(0, separator))) {
-    return argument;
+function isSensitiveFlag(flag: string): boolean {
+  return SENSITIVE_FLAG_PATTERN.test(flag);
+}
+
+function isCredentialUserinfo(scheme: string, userinfo: string): boolean {
+  if (userinfo.length === 0) {
+    return false;
   }
-  return `${argument.slice(0, separator + 1)}${REDACTED_CREDENTIAL}`;
+  const normalized = scheme.replace(/:\/\/$/u, "").toLowerCase();
+  if (USERINFO_SCHEMES.has(normalized)) {
+    return true;
+  }
+  if (SSH_SCHEMES.has(normalized)) {
+    return userinfo.includes(":") || /%3a/iu.test(userinfo);
+  }
+  return false;
 }
 
-function isSensitiveValueOption(argument: string): boolean {
-  return argument.startsWith("-") && !argument.includes("=") && isSensitiveCredentialName(argument);
+interface Scan {
+  text: string;
+  found: boolean;
 }
 
-function shouldRedactUrlUserinfo(scheme: string, userinfo: string): boolean {
-  return !(
-    /^(?:git\+)?ssh:\/\/$/iu.test(scheme) &&
-    !userinfo.includes(":") &&
-    !/%3a/iu.test(userinfo)
+function scanUrl(url: string): Scan {
+  let found = false;
+  let result = url;
+
+  const authority = URL_AUTHORITY_PATTERN.exec(url);
+  if (authority) {
+    const scheme = authority[1] ?? "";
+    const authorityText = authority[2] ?? "";
+    const at = authorityText.lastIndexOf("@");
+    if (at > 0 && isCredentialUserinfo(scheme, authorityText.slice(0, at))) {
+      found = true;
+      result = `${scheme}${REDACTED_CREDENTIAL}${url.slice(scheme.length + at)}`;
+    }
+  }
+
+  const queryStart = result.indexOf("?");
+  if (queryStart !== -1) {
+    const fragmentStart = result.indexOf("#", queryStart);
+    const queryEnd = fragmentStart === -1 ? result.length : fragmentStart;
+    const query = result.slice(queryStart + 1, queryEnd);
+    const redactedQuery = query
+      .split("&")
+      .map((pair) => {
+        const equals = pair.indexOf("=");
+        if (equals <= 0 || !isSensitiveQueryName(pair.slice(0, equals))) {
+          return pair;
+        }
+        found = true;
+        return `${pair.slice(0, equals + 1)}${REDACTED_CREDENTIAL}`;
+      })
+      .join("&");
+    result = `${result.slice(0, queryStart + 1)}${redactedQuery}${result.slice(queryEnd)}`;
+  }
+
+  return { text: result, found };
+}
+
+function scanText(value: string): Scan {
+  let found = false;
+
+  let text = value.replace(URL_PATTERN, (url) => {
+    const scan = scanUrl(url);
+    found ||= scan.found;
+    return scan.text;
+  });
+  text = text.replace(FLAG_ASSIGNMENT_PATTERN, (match, prefix: string, flag: string) => {
+    if (!isSensitiveFlag(flag)) {
+      return match;
+    }
+    found = true;
+    return `${prefix}${flag}=${REDACTED_CREDENTIAL}`;
+  });
+  text = text.replace(
+    FLAG_SPLIT_PATTERN,
+    (match, prefix: string, flag: string, spacing: string) => {
+      if (!isSensitiveFlag(flag)) {
+        return match;
+      }
+      found = true;
+      return `${prefix}${flag}${spacing}${REDACTED_CREDENTIAL}`;
+    }
   );
+  return { text, found };
 }
 
 /** Redact credentials from text that may be copied into logs or records. */
 export function redactSensitiveText(value: string): string {
-  const withoutUserinfo = value.replace(
-    URL_USERINFO_PATTERN,
-    (match, scheme: string, userinfo: string) =>
-      shouldRedactUrlUserinfo(scheme, userinfo)
-        ? `${scheme}${REDACTED_CREDENTIAL}@`
-        : match
-  );
-  const withoutQuerySecrets = withoutUserinfo.replace(
-    QUERY_PARAMETER_PATTERN,
-    (match, separator: string, name: string) =>
-      isSensitiveCredentialName(name) ? `${separator}${name}=${REDACTED_CREDENTIAL}` : match
-  );
-  const withoutAssignments = withoutQuerySecrets.replace(
-    KEY_VALUE_PATTERN,
-    (match, prefix: string, name: string) =>
-      isSensitiveCredentialName(name) ? `${prefix}${name}=${REDACTED_CREDENTIAL}` : match
-  );
-  const withoutOptionValues = withoutAssignments.replace(
-    OPTION_VALUE_PATTERN,
-    (match, prefix: string, name: string, spacing: string) =>
-      isSensitiveCredentialName(name)
-        ? `${prefix}${name}${spacing}${REDACTED_CREDENTIAL}`
-        : match
-  );
-  return withoutOptionValues.replace(
-    AUTHORIZATION_HEADER_PATTERN,
-    (_match, prefix: string, scheme: string | undefined) =>
-      `${prefix}${scheme ?? ""}${REDACTED_CREDENTIAL}`
-  );
+  return scanText(value).text;
 }
 
 /** Redact both inline assignments and `--secret value` argument pairs. */
@@ -107,35 +151,13 @@ export function redactSensitiveArgs(args: readonly string[]): string[] {
       redactNext = false;
       return REDACTED_CREDENTIAL;
     }
-
-    const assignmentRedacted = redactSensitiveAssignment(argument);
-    redactNext = isSensitiveValueOption(argument);
-    return redactSensitiveText(assignmentRedacted);
+    redactNext = isSensitiveFlag(argument);
+    return redactSensitiveText(argument);
   });
 }
 
 export function containsSensitiveCredentials(value: string): boolean {
-  for (const match of value.matchAll(URL_USERINFO_PATTERN)) {
-    if (shouldRedactUrlUserinfo(match[1] ?? "", match[2] ?? "")) {
-      return true;
-    }
-  }
-  for (const match of value.matchAll(QUERY_PARAMETER_PATTERN)) {
-    if (isSensitiveCredentialName(match[2] ?? "")) {
-      return true;
-    }
-  }
-  for (const match of value.matchAll(KEY_VALUE_PATTERN)) {
-    if (isSensitiveCredentialName(match[2] ?? "")) {
-      return true;
-    }
-  }
-  for (const match of value.matchAll(OPTION_VALUE_PATTERN)) {
-    if (isSensitiveCredentialName(match[2] ?? "")) {
-      return true;
-    }
-  }
-  return [...value.matchAll(AUTHORIZATION_HEADER_PATTERN)].length > 0;
+  return scanText(value).found;
 }
 
 export function containsSensitiveArgs(args: readonly string[]): boolean {
@@ -144,7 +166,7 @@ export function containsSensitiveArgs(args: readonly string[]): boolean {
     if (sensitiveValueFollows || containsSensitiveCredentials(argument)) {
       return true;
     }
-    sensitiveValueFollows = isSensitiveValueOption(argument);
+    sensitiveValueFollows = isSensitiveFlag(argument);
   }
   return false;
 }

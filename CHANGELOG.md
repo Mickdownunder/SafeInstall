@@ -6,8 +6,11 @@
 
 - A config selected with `--config` can no longer replace the policy protected by a trust lock. `install` and `check` block with `trust-unbound-config` unless the effective config is the locked `safeinstall.config.json` at the trust root. The GitHub Action builds its command as an argument list and rejects `--config` in `args`.
 
+- Credentials in package specs are redacted in human and `--json` output, guard messages, MCP results, and `.safeinstall/decisions` records. Detection is structural: userinfo in `http`, `https`, `git`, and `git+http(s)` URLs (and `user:password@` in `ssh` URLs), a fixed list of credential query parameters such as `token` and `access_token`, and npm credential flags such as `--//host/:_authToken=`. Version ranges like `next-auth@>=4` and ordinary `key=value` text are not affected. The guard decides exactly as before; redaction applies only to text it prints. A credentialed dependency already in `package.json` is still evaluated under the source policy and shown redacted.
+
 ### Breaking changes
 
+- Credential-bearing package specs and flags on the command line of `safeinstall <pm> install/add` and `safeinstall check` are rejected. Configure registry and git credentials through `.npmrc` or environment variables instead.
 - `--config` must come before the command (`safeinstall --config <path> check`). After the command it is an error. Earlier versions of the GitHub Action passed it after `check`, so use this Action version or later when combining `config-path` with this CLI version.
 - In a project with a trust lock, a config in a subfolder or parent folder, or one passed with `--config` or the Action's `config-path`, is rejected unless it is the locked root config.
 

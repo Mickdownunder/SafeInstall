@@ -10,7 +10,7 @@ import { inferProjectInstallTargetsForCheck } from "./project-installs";
 import { RegistryClient } from "./registry";
 import { redactCliResult } from "./redaction";
 import { throwIfAborted } from "./signals";
-import { assertNoCredentialBearingPackages, parseManifestDependency } from "./specs";
+import { assertNoCredentialBearingArgs, parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
 import { trustSurfacePrecheck } from "./trust-surface-check";
 import type { CliReason, CliResult, PackageEvaluation } from "./types";
@@ -69,6 +69,7 @@ async function runCheckFlowInternal(
   options: { signal?: AbortSignal; configPath?: string | undefined } = {}
 ): Promise<CliResult> {
   throwIfAborted(options.signal);
+  assertNoCredentialBearingArgs(argv.slice(1));
 
   const invocation = await resolveInvocationContext(cwd, []);
   const { config, path } = await loadConfig(invocation.effectiveCwd, options.configPath);
@@ -147,7 +148,6 @@ async function runCheckFlowInternal(
     : Object.entries(await loadManifestDependencies(invocation.packageDir ?? invocation.effectiveCwd)).map(([name, spec]) =>
         parseManifestDependency(name, spec)
       );
-  assertNoCredentialBearingPackages(requestedPackages);
 
   if (requestedPackages.length === 0) {
     return {

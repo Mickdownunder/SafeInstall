@@ -10,11 +10,7 @@ import { loadProjectInstallTargetsForManager } from "./project-installs";
 import { RegistryClient } from "./registry";
 import { redactCliResult, redactSensitiveText } from "./redaction";
 import { throwIfAborted } from "./signals";
-import {
-  assertNoCredentialBearingPackages,
-  buildInstallPlan,
-  parseManifestDependency
-} from "./specs";
+import { buildInstallPlan, parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
 import { trustSurfacePrecheck } from "./trust-surface-check";
 import type { CliReason, CliResult, PackageEvaluation } from "./types";
@@ -228,7 +224,6 @@ async function runInstallFlowInternal(
     invocation.effectiveCwd,
     argv
   );
-  assertNoCredentialBearingPackages(plan.packages);
 
   if (issues.length > 0) {
     return {

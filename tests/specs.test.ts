@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { containsSensitiveCredentials } from "../src/redaction";
 import {
   buildInstallPlan,
   CREDENTIAL_BEARING_SPEC_MESSAGE,
@@ -48,6 +49,25 @@ describe("buildInstallPlan", () => {
 
     const ordinary = "https://example.test/pkg.tgz?download=1";
     expect(buildInstallPlan(["npm", "install", ordinary]).packages[0]?.raw).toBe(ordinary);
+  });
+
+  it("points users at .npmrc and does not reject keyword-like version ranges", () => {
+    expect(CREDENTIAL_BEARING_SPEC_MESSAGE).toContain(".npmrc");
+    for (const spec of ["next-auth@>=4", "oauth@>=0.9", "auth@>=1", "git@github.com:o/r.git"]) {
+      expect(() => buildInstallPlan(["npm", "install", spec])).not.toThrow();
+    }
+  });
+
+  it("rejects npm credential flags and registry URLs with userinfo", () => {
+    for (const flag of [
+      "--//registry.example.test/:_authToken=s3cr3tMARK",
+      "--registry=https://u:s3cr3tMARK@registry.example.test/",
+      "--otp=123456"
+    ]) {
+      expect(() => buildInstallPlan(["npm", "install", "axios", flag])).toThrow(
+        CREDENTIAL_BEARING_SPEC_MESSAGE
+      );
+    }
   });
 
   it("builds a plan for explicit pnpm add installs", () => {
@@ -139,10 +159,20 @@ describe("normalizeInstallCommand", () => {
 });
 
 describe("parseManifestDependency", () => {
-  it("rejects credentials embedded in manifest dependency URLs", () => {
-    expect(() =>
+  it("evaluates credentialed manifest URLs as ordinary url/git sources", () => {
+    expect(
       parseManifestDependency("private-pkg", "https://user:top-secret@example.test/pkg.tgz")
-    ).toThrow(CREDENTIAL_BEARING_SPEC_MESSAGE);
+    ).toMatchObject({ name: "private-pkg", sourceType: "tarball" });
+    expect(
+      parseManifestDependency("private-git", "git+https://user:top-secret@example.test/o/r.git")
+    ).toMatchObject({ sourceType: "git" });
+  });
+
+  it("does not treat auth-like version ranges as credentials", () => {
+    expect(containsSensitiveCredentials("next-auth@>=4.0.0")).toBe(false);
+    expect(parseManifestDependency("next-auth", ">=4.0.0")).toMatchObject({
+      sourceType: "registry"
+    });
   });
 
   it("classifies workspace specs", () => {

@@ -95,15 +95,28 @@ describe("parseGuardEvent", () => {
 });
 
 describe("decideGuard", () => {
-  it("denies credential-bearing commands without returning a reusable secret", async () => {
-    const secret = "top-secret";
+  it("routes credential-bearing installs but never prints the secret in messages", async () => {
+    const secret = "s3cr3tMARK";
     const command = `npm install git+https://user:${secret}@example.test/repo.git`;
     const decision = await decideGuard(command);
 
     expect(decision.action).toBe("deny");
-    expect(decision.updatedCommand).toBeUndefined();
-    expect(JSON.stringify(decision)).not.toContain(secret);
-    expect(decision.agentMessage).toContain("npmrc");
+    // The real command stays intact so the SafeInstall CLI can reject it.
+    expect(decision.updatedCommand).toContain(secret);
+    expect(decision.userMessage).not.toContain(secret);
+    expect(decision.agentMessage).not.toContain(secret);
+    expect(decision.agentMessage).toContain("[REDACTED]");
+  });
+
+  it.each([
+    'curl -H "Authorization: Bearer abc123" https://api.example.test/x',
+    "git clone https://user:token@github.com/o/r.git",
+    "export GITHUB_TOKEN=abc && ls",
+    "API_KEY=abc node script.js",
+    'git commit -m "fix: code=1 handling"',
+    "echo key=value"
+  ])("allows non-install commands that merely look credential-like: %s", async (command) => {
+    expect(await decideGuard(command)).toEqual({ action: "allow" });
   });
 
   it("allows non-install commands", async () => {
