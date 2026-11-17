@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A config selected with `--config` can no longer replace the policy protected by a trust lock. `install` and `check` block with `trust-unbound-config` unless the effective config is the locked `safeinstall.config.json` at the trust root. The GitHub Action builds its command as an argument list and rejects `--config` in `args`.
+
+### Breaking changes
+
+- `--config` must come before the command (`safeinstall --config <path> check`). After the command it is an error. Earlier versions of the GitHub Action passed it after `check`, so use this Action version or later when combining `config-path` with this CLI version.
+- In a project with a trust lock, a config in a subfolder or parent folder, or one passed with `--config` or the Action's `config-path`, is rejected unless it is the locked root config.
+
 ## 0.15.0 - 2026-10-01
 
 ### Fixed

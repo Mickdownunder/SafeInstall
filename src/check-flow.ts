@@ -79,13 +79,13 @@ export async function runCheckFlow(
   const versionWarning = cliVersionWarning(config.minimumCliVersion);
   const cliVersionWarnings = versionWarning ? [versionWarning] : [];
 
-  const trust = await trustSurfacePrecheck(invocation.effectiveCwd);
+  const trust = await trustSurfacePrecheck(invocation.effectiveCwd, path);
   if (trust.reasons.length > 0) {
     return {
       mode: "check",
       decision: "block",
       exitCode: 2,
-      exitCodeMeaning: "Check was blocked because the Agent Trust Surface has drifted.",
+      exitCodeMeaning: "Check was blocked by the Agent Trust Surface.",
       command: argv,
       commandString,
       configPath: path,
