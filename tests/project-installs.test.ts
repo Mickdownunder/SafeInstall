@@ -109,6 +109,7 @@ snapshots:
     expect(result.issues).toEqual([]);
     expect(present(result.targets[0])).toMatchObject({
       integrity: "sha512-approved",
+      lockfileKey: "vitest@4.1.11",
       requested: { name: "vitest", requested: "4.1.11", sourceType: "registry" }
     });
   });
@@ -307,6 +308,7 @@ describe("loadNpmProjectInstallTargets", () => {
     const result = await loadNpmProjectInstallTargets(cwd, cwd);
 
     expect(result.issues).toEqual([]);
+    expect(present(result.targets[0]).lockfileKey).toBe("node_modules/axios");
     expect(present(result.targets[0]).requested).toMatchObject({
       name: "axios",
       sourceType: "registry",

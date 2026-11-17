@@ -6,6 +6,7 @@ import { evaluateRequestedPackages } from "./evaluations";
 import { bindFileAsStaged, blobOidAtRef, resolveCommit, resolveGitRepo } from "./git-blob";
 import { lockfileArtifactBindingReasons } from "./install-binding";
 import {
+  directLockfileKeys,
   discoverProjectInstallScope,
   inferProjectInstallTargetsForCheck,
   loadProjectInstallScope,
@@ -334,7 +335,7 @@ export async function authorizeDecisions(
     );
     const transitive = await evaluateTransitiveDependencies({
       lockfilePath: projectTargets?.lockfilePath,
-      directNames: new Set(requestedPackages.map((requested) => requested.name)),
+      directLockfileKeys: projectTargets ? directLockfileKeys(projectTargets) : new Set<string>(),
       config
     });
     appendReasons([
@@ -371,10 +372,9 @@ export async function authorizeDecisions(
       ]);
       warnings.push(...evaluations.flatMap((evaluation) => evaluation.warnings));
     }
-    const directPackages = loaded.targets.targets.map((target) => target.requested);
     const transitive = await evaluateTransitiveDependencies({
       lockfilePath: loaded.lockfilePath,
-      directNames: new Set(directPackages.map((requested) => requested.name)),
+      directLockfileKeys: directLockfileKeys(loaded.targets),
       config
     });
     appendReasons(transitive.blockedReasons);

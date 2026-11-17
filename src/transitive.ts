@@ -110,7 +110,7 @@ function dedupe(packages: TransitivePackage[]): TransitivePackage[] {
 
 export function collectNpmTransitivePackages(
   lockfile: NpmLockfileTree,
-  directNames: ReadonlySet<string>,
+  directLockfileKeys: ReadonlySet<string>,
   registryUrl?: string
 ): TransitivePackage[] {
   const packages = lockfile.packages ?? {};
@@ -121,7 +121,9 @@ export function collectNpmTransitivePackages(
       continue;
     }
     const name = extractNpmName(key);
-    if (!name || directNames.has(name)) {
+    // A package name is not a node identity: only the selected direct key is
+    // exempt, while nested same-name instances remain subject to policy.
+    if (!name || directLockfileKeys.has(key)) {
       continue;
     }
     collected.push({
@@ -140,7 +142,7 @@ export function collectNpmTransitivePackages(
 
 export function collectPnpmTransitivePackages(
   lockfile: PnpmLockfileTree,
-  directNames: ReadonlySet<string>,
+  directLockfileKeys: ReadonlySet<string>,
   registryUrl?: string
 ): TransitivePackage[] {
   const packages = lockfile.packages ?? {};
@@ -148,7 +150,9 @@ export function collectPnpmTransitivePackages(
 
   for (const [key, entry] of Object.entries(packages)) {
     const parsed = parsePnpmPackageKey(key);
-    if (!parsed || directNames.has(parsed.name)) {
+    // A direct package exempts its resolved package record, not every record
+    // that parses to the same name.
+    if (!parsed || directLockfileKeys.has(key)) {
       continue;
     }
     const tarball = entry.resolution?.tarball;
@@ -245,19 +249,19 @@ export function evaluateTransitivePackages(
 function collectFromLockfile(
   lockfilePath: string,
   rawLockfile: string,
-  directNames: ReadonlySet<string>,
+  directLockfileKeys: ReadonlySet<string>,
   registryUrl?: string
 ): TransitivePackage[] {
   const basename = path.basename(lockfilePath);
 
   if (basename === "pnpm-lock.yaml") {
     const lockfile = parseYaml(rawLockfile) as PnpmLockfileTree;
-    return collectPnpmTransitivePackages(lockfile, directNames, registryUrl);
+    return collectPnpmTransitivePackages(lockfile, directLockfileKeys, registryUrl);
   }
 
   // package-lock.json or npm-shrinkwrap.json
   const lockfile = JSON.parse(rawLockfile) as NpmLockfileTree;
-  return collectNpmTransitivePackages(lockfile, directNames, registryUrl);
+  return collectNpmTransitivePackages(lockfile, directLockfileKeys, registryUrl);
 }
 
 /**
@@ -273,7 +277,7 @@ function collectFromLockfile(
  */
 export async function evaluateTransitiveDependencies(options: {
   lockfilePath: string | undefined;
-  directNames: ReadonlySet<string>;
+  directLockfileKeys: ReadonlySet<string>;
   config: SafeInstallConfig;
 }): Promise<TransitiveEvaluation> {
   const empty: TransitiveEvaluation = {
@@ -299,7 +303,7 @@ export async function evaluateTransitiveDependencies(options: {
     packages = collectFromLockfile(
       options.lockfilePath,
       rawLockfile,
-      options.directNames,
+      options.directLockfileKeys,
       options.config.registryUrl
     );
   } catch {

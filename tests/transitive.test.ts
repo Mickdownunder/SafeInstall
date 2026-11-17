@@ -65,6 +65,11 @@ describe("collectNpmTransitivePackages", () => {
         resolved: "https://registry.npmjs.org/axios/-/axios-1.14.0.tgz",
         integrity: "sha512-x"
       },
+      "node_modules/parent/node_modules/axios": {
+        version: "0.9.0",
+        resolved: "git+ssh://git@github.com/evil/axios.git#abc",
+        hasInstallScript: true
+      },
       "node_modules/sketchy": {
         version: "0.0.1",
         resolved: "https://registry.npmjs.org/sketchy/-/sketchy-0.0.1.tgz",
@@ -84,10 +89,27 @@ describe("collectNpmTransitivePackages", () => {
     }
   };
 
-  it("collects transitive packages excluding root, direct deps, and links", () => {
-    const packages = collectNpmTransitivePackages(lockfile, new Set(["axios"]));
+  it("excludes only the exact direct key and keeps a nested same-name package", () => {
+    const packages = collectNpmTransitivePackages(lockfile, new Set(["node_modules/axios"]));
     const names = packages.map((p) => p.name).sort();
-    expect(names).toEqual(["from-git", "integrity-pinned-tarball", "sketchy"]);
+    expect(names).toEqual(["axios", "from-git", "integrity-pinned-tarball", "sketchy"]);
+    expect(packages.some((p) => p.name === "axios" && p.version === "1.14.0")).toBe(false);
+    expect(packages.find((p) => p.name === "axios")).toMatchObject({
+      version: "0.9.0",
+      sourceType: "git",
+      hasInstallScript: true
+    });
+    const result = evaluateTransitivePackages(
+      packages,
+      createConfig({
+        transitive: { mode: "block", checks: ["install-script", "untrusted-source"] },
+        allowedSources: ["registry"]
+      })
+    );
+    expect(result.blockedReasons.map((reason) => reason.code)).toEqual([
+      "transitive-install-script",
+      "transitive-untrusted-source"
+    ]);
   });
 
   it("reads hasInstallScript from the lockfile entry", () => {
@@ -115,6 +137,9 @@ describe("collectPnpmTransitivePackages", () => {
   const lockfile = {
     packages: {
       "axios@1.14.0": { resolution: { integrity: "sha512-x" } },
+      "axios@0.9.0": {
+        resolution: { tarball: "https://evil.example.com/axios-0.9.0.tgz" }
+      },
       "lodash@4.17.21": { resolution: { integrity: "sha512-y" } },
       "from-tarball@1.0.0": {
         resolution: {
@@ -125,10 +150,25 @@ describe("collectPnpmTransitivePackages", () => {
     }
   };
 
-  it("collects transitive packages excluding direct deps", () => {
-    const packages = collectPnpmTransitivePackages(lockfile, new Set(["axios"]));
+  it("excludes only the exact direct key and keeps an alternate same-name version", () => {
+    const packages = collectPnpmTransitivePackages(lockfile, new Set(["axios@1.14.0"]));
     const names = packages.map((p) => p.name).sort();
-    expect(names).toEqual(["from-tarball", "lodash"]);
+    expect(names).toEqual(["axios", "from-tarball", "lodash"]);
+    expect(packages.some((p) => p.name === "axios" && p.version === "1.14.0")).toBe(false);
+    expect(packages.find((p) => p.name === "axios")).toMatchObject({
+      version: "0.9.0",
+      sourceType: "tarball"
+    });
+    const result = evaluateTransitivePackages(
+      packages,
+      createConfig({
+        transitive: { mode: "block", checks: ["untrusted-source"] },
+        allowedSources: ["registry"]
+      })
+    );
+    expect(result.blockedReasons.map((reason) => reason.code)).toEqual([
+      "transitive-untrusted-source"
+    ]);
   });
 
   it("classifies a tarball-resolved dependency as a tarball source", () => {
