@@ -1,11 +1,13 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  discoverProjectInstallScope,
   inferProjectInstallTargetsForCheck,
+  loadProjectInstallScope,
   loadProjectInstallTargetsForManager,
   loadNpmProjectInstallTargets,
   loadPnpmProjectInstallTargets
@@ -473,6 +475,39 @@ describe("loadNpmProjectInstallTargets", () => {
 });
 
 describe("inferProjectInstallTargetsForCheck", () => {
+  it("preserves pnpm workspaces without a root package.json", async () => {
+    const cwd = await mkdtemp(path.join(os.tmpdir(), "safeinstall-rootless-workspace-"));
+    tempDirs.push(cwd);
+    const appDir = path.join(cwd, "packages", "app");
+    await mkdir(appDir, { recursive: true });
+    await writeFile(
+      path.join(appDir, "package.json"),
+      JSON.stringify({ name: "app", version: "1.0.0", dependencies: { axios: "^1.14.0" } })
+    );
+    const lockfilePath = path.join(cwd, "pnpm-lock.yaml");
+    await writeFile(
+      lockfilePath,
+      `lockfileVersion: '9.0'
+importers:
+  packages/app:
+    dependencies:
+      axios:
+        specifier: ^1.14.0
+        version: 1.14.0
+packages:
+  axios@1.14.0:
+    resolution: {integrity: sha512-test}
+`
+    );
+
+    const paths = await discoverProjectInstallScope(lockfilePath, "pnpm");
+    const scope = await loadProjectInstallScope(paths, "pnpm");
+
+    expect(paths.manifestPaths).toEqual([path.join(appDir, "package.json")]);
+    expect(scope.targets.issues).toEqual([]);
+    expect(scope.targets.targets.map((target) => target.requested.name)).toEqual(["axios"]);
+  });
+
   it("blocks project installs when the invoked package manager disagrees with package.json", async () => {
     const cwd = await createTempProject({
       "package.json": JSON.stringify(
