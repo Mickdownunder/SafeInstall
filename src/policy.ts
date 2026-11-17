@@ -248,9 +248,10 @@ function deriveSourceRepository(input: EvaluatePackageInput): string | undefined
  *   - identity-discontinuity: the installed version is attested from a
  *     different source repository than the established baseline.
  *
- * "consistent" surfaces as an info line in warn mode. "no-baseline" and
- * "unevaluated" are silent — most packages never adopted provenance, and a
- * registry hiccup must not block.
+ * "consistent" surfaces as an info line in warn mode. "no-baseline" is
+ * silent — most packages never adopted provenance. "unevaluated" (verification
+ * tooling or registry unavailable) warns but never blocks: a hiccup must not
+ * block installs, and unverified data must not decide either way.
  */
 function applyContinuityDecision(evaluation: PackageEvaluation, input: EvaluatePackageInput): void {
   const config = input.config.continuity;
@@ -283,6 +284,15 @@ function applyContinuityDecision(evaluation: PackageEvaluation, input: EvaluateP
     } else {
       evaluation.warnings.push(`${message} ${suggestion}`);
     }
+    return;
+  }
+
+  if (result.status === "unevaluated" && result.error) {
+    // Never silent: continuity could not verify attestations (missing
+    // sigstore, offline trust root, registry error), so no decision was made.
+    evaluation.warnings.push(
+      `${name}: provenance continuity was not evaluated (${result.error}).`
+    );
     return;
   }
 
