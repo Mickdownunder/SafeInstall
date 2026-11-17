@@ -126,7 +126,10 @@ export function collectNpmTransitivePackages(
     collected.push({
       name,
       version: entry.version ?? "",
-      sourceType: classifyResolvedSource("registry", entry.resolved, Boolean(entry.integrity)),
+      // Lockfile integrity only binds bytes to the lockfile author's value;
+      // unlike direct targets, transitive entries are not compared with a
+      // freshly checked registry manifest here.
+      sourceType: classifyResolvedSource("registry", entry.resolved),
       hasInstallScript: entry.hasInstallScript === true
     });
   }
@@ -150,7 +153,7 @@ export function collectPnpmTransitivePackages(
     collected.push({
       name: parsed.name,
       version: entry.version ?? parsed.version,
-      sourceType: classifyResolvedSource("registry", tarball, Boolean(entry.resolution?.integrity)),
+      sourceType: classifyResolvedSource("registry", tarball),
       // pnpm lockfiles do not record install-script presence; left unknown.
       hasInstallScript: undefined
     });

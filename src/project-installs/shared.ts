@@ -1,7 +1,12 @@
 import type { RequestedPackage, SourceType } from "../types";
 
 export function isHttpUrl(value: string): boolean {
-  return value.startsWith("http://") || value.startsWith("https://");
+  try {
+    const protocol = new URL(value).protocol.toLowerCase();
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 export function isTarballLike(value: string): boolean {
@@ -77,6 +82,11 @@ export function classifyResolvedSource(
   }
 
   if (isHttpUrl(resolvedReference)) {
+    // Integrity alone is not registry provenance. Direct npm/pnpm targets
+    // may remain registry candidates here only because every production
+    // consumer binds their URL and SHA-512 to fresh registry metadata before
+    // check, authorization, or install can succeed. Transitive callers omit
+    // hasIntegrity because they have no equivalent artifact binding.
     if (
       declaredSourceType === "registry" &&
       (hasIntegrity || isPublicRegistryUrl(resolvedReference))

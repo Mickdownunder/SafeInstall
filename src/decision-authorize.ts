@@ -4,6 +4,7 @@ import { loadConfig } from "./config";
 import { verifyDecisions, type DecisionVerifyFinding } from "./decision-verify";
 import { evaluateRequestedPackages } from "./evaluations";
 import { bindFileAsStaged, blobOidAtRef, resolveCommit, resolveGitRepo } from "./git-blob";
+import { lockfileArtifactBindingReasons } from "./install-binding";
 import { inferProjectInstallTargetsForCheck } from "./project-installs";
 import { loadManifestDependencies } from "./project-state";
 import { RegistryClient } from "./registry";
@@ -132,6 +133,9 @@ export async function authorizeDecisions(
 
   const registryClient = new RegistryClient({ registryUrl: config.registryUrl });
   const evaluations = await evaluateRequestedPackages(repo.root, requestedPackages, registryClient, config);
+  const artifactBindingReasons = projectTargets
+    ? lockfileArtifactBindingReasons(projectTargets, evaluations)
+    : [];
   const transitive = await evaluateTransitiveDependencies({
     lockfilePath: projectTargets?.lockfilePath,
     directNames: new Set(requestedPackages.map((requested) => requested.name)),
@@ -140,6 +144,7 @@ export async function authorizeDecisions(
 
   const reasons = [
     ...evaluations.flatMap((evaluation) => evaluation.blockedReasons),
+    ...artifactBindingReasons,
     ...transitive.blockedReasons
   ].map((reason) => ({ code: reason.code, message: reason.message }));
   const warnings = [

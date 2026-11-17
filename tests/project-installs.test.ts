@@ -60,6 +60,18 @@ describe("classifyResolvedSource", () => {
         "https://attacker.example/registry.npmjs.org/axios-1.14.0.tgz"
       )
     ).toBe("tarball");
+    expect(
+      classifyResolvedSource(
+        "registry",
+        "HTTPS://attacker.example/axios-1.14.0.tgz"
+      )
+    ).toBe("tarball");
+    expect(
+      classifyResolvedSource(
+        "registry",
+        " https://attacker.example/axios-1.14.0.tgz "
+      )
+    ).toBe("url");
   });
 
   it("continues to recognize integrity-pinned custom registry tarballs", () => {
