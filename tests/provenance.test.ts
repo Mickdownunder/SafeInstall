@@ -2,11 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DiskCache } from "../src/disk-cache";
 import {
   attestationUrl,
+  encodeDerUtf8String,
   extractRepositorySlug,
   isProvenanceRequired,
   lookupGlobPattern,
@@ -311,8 +312,7 @@ describe("verifyProvenance", () => {
     expect(result.workflowPath).toBe(".github/workflows/release.yml");
     expect(signingIdentity).toEqual({
       certificateIssuer: "https://token.actions.githubusercontent.com",
-      certificateIdentityURI:
-        "https://github.com/axios/axios/.github/workflows/release.yml@refs/tags/v1.14.0"
+      sourceRepositoryUrl: "https://github.com/axios/axios"
     });
   });
 
@@ -388,10 +388,9 @@ describe("verifyProvenance", () => {
     expect(result.error).toContain("exactly one package subject");
   });
 
-  it("binds the claimed repository and workflow to the certificate identity", async () => {
+  it("binds the claimed repository to the certificate source repository", async () => {
     let signingIdentity: Parameters<ProvenanceDependencies["verifyBundle"]>[1] | undefined;
-    const actualSignerIdentity =
-      "https://github.com/axios/axios/.github/workflows/release.yml@refs/tags/v1.14.0";
+    const actualSourceRepository = "https://github.com/axios/axios";
     const result = await verifyStatement(
       {
         ...exampleStatement,
@@ -411,16 +410,16 @@ describe("verifyProvenance", () => {
       {
         verifyBundle: async (_bundle, expectedIdentity) => {
           signingIdentity = expectedIdentity;
-          if (expectedIdentity.certificateIdentityURI !== actualSignerIdentity) {
-            throw new Error("certificate identity mismatch");
+          if (expectedIdentity.sourceRepositoryUrl !== actualSourceRepository) {
+            throw new Error("certificate source repository mismatch");
           }
         }
       }
     );
 
-    expect(signingIdentity?.certificateIdentityURI).toContain("github.com/attacker/axios/");
+    expect(signingIdentity?.sourceRepositoryUrl).toBe("https://github.com/attacker/axios");
     expect(result.status).toBe("invalid");
-    expect(result.error).toContain("certificate identity mismatch");
+    expect(result.error).toContain("certificate source repository mismatch");
   });
 
   it("accepts the normalized npm PURL for a scoped package", async () => {
@@ -623,5 +622,100 @@ describe("verifyProvenance", () => {
     expect(result.status).toBe("invalid");
     expect(result.error).toContain("sigstore");
     expect(result.error).toContain("npm install");
+  });
+});
+
+describe("encodeDerUtf8String", () => {
+  it("uses the short length form below 128 bytes", () => {
+    const url = "https://github.com/axios/axios";
+    const der = encodeDerUtf8String(url);
+    expect([...der.subarray(0, 2)]).toEqual([0x0c, url.length]);
+    expect(der.subarray(2).toString("utf8")).toBe(url);
+    expect(der.length).toBe(url.length + 2);
+  });
+
+  it("uses the 0x81 long length form for 128 to 255 bytes", () => {
+    const url = "https://github.com/o/" + "r".repeat(200);
+    const der = encodeDerUtf8String(url);
+    expect([...der.subarray(0, 3)]).toEqual([0x0c, 0x81, url.length]);
+    expect(der.subarray(3).toString("utf8")).toBe(url);
+  });
+
+  it("uses the 0x82 long length form above 255 bytes", () => {
+    const url = "https://github.com/o/" + "r".repeat(300);
+    const der = encodeDerUtf8String(url);
+    expect([...der.subarray(0, 4)]).toEqual([0x0c, 0x82, url.length >> 8, url.length & 0xff]);
+    expect(der.length).toBe(url.length + 4);
+  });
+
+  it("encodes exactly 127 and 128 byte values at the form boundary", () => {
+    expect([...encodeDerUtf8String("a".repeat(127)).subarray(0, 2)]).toEqual([0x0c, 127]);
+    expect([...encodeDerUtf8String("a".repeat(128)).subarray(0, 3)]).toEqual([0x0c, 0x81, 128]);
+  });
+});
+
+describe("defaultVerifyBundle", () => {
+  afterEach(() => {
+    vi.doUnmock("sigstore");
+    vi.resetModules();
+  });
+
+  async function callWithMockedSigstore(sourceRepositoryUrl: string) {
+    const verify = vi.fn(async (..._args: unknown[]) => ({}));
+    vi.resetModules();
+    vi.doMock("sigstore", () => ({ verify }));
+    const { defaultVerifyBundle } = await import("../src/provenance");
+    const bundle = makeBundleWithStatement(exampleStatement);
+    await defaultVerifyBundle(bundle, {
+      certificateIssuer: "https://token.actions.githubusercontent.com",
+      sourceRepositoryUrl
+    });
+    return { verify, bundle };
+  }
+
+  it("passes the options as the second argument with the DER source repository", async () => {
+    const url = "https://github.com/axios/axios";
+    const { verify, bundle } = await callWithMockedSigstore(url);
+
+    expect(verify).toHaveBeenCalledTimes(1);
+    const args = verify.mock.calls[0]!;
+    expect(args).toHaveLength(2);
+    expect(args[0]).toBe(bundle);
+    const options = args[1] as {
+      certificateIssuer: string;
+      certificateOIDs: Record<string, string | Buffer>;
+    };
+    expect(options.certificateIssuer).toBe("https://token.actions.githubusercontent.com");
+    expect(Object.keys(options.certificateOIDs)).toEqual(["1.3.6.1.4.1.57264.1.12"]);
+    expect(Buffer.from(options.certificateOIDs["1.3.6.1.4.1.57264.1.12"]!)).toEqual(
+      encodeDerUtf8String(url)
+    );
+    expect(options).not.toHaveProperty("certificateIdentityURI");
+  });
+
+  it("survives sigstore's Buffer.from byte for byte for a long repository URL", async () => {
+    const url = "https://github.com/owner/" + "r".repeat(150);
+    const { verify } = await callWithMockedSigstore(url);
+    const value = (
+      verify.mock.calls[0]![1] as { certificateOIDs: Record<string, string | Buffer> }
+    ).certificateOIDs["1.3.6.1.4.1.57264.1.12"]!;
+    // sigstore's createVerificationPolicy does Buffer.from(value).
+    const received = Buffer.from(value);
+    expect([...received.subarray(0, 3)]).toEqual([0x0c, 0x81, url.length]);
+    expect(received).toEqual(encodeDerUtf8String(url));
+  });
+
+  it("reports missing tooling distinctly when sigstore cannot be imported", async () => {
+    vi.resetModules();
+    vi.doMock("sigstore", () => {
+      throw new Error("Cannot find module 'sigstore'");
+    });
+    const mod = await import("../src/provenance");
+    await expect(
+      mod.defaultVerifyBundle(makeBundleWithStatement(exampleStatement), {
+        certificateIssuer: "x",
+        sourceRepositoryUrl: "https://github.com/a/b"
+      })
+    ).rejects.toBeInstanceOf(mod.SigstoreToolingUnavailableError);
   });
 });

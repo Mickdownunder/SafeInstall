@@ -196,9 +196,41 @@ export interface ProvenanceDependencies {
   verifyBundle(bundle: Bundle, signingIdentity: ProvenanceSigningIdentity): Promise<void>;
 }
 
+/**
+ * The signer expectation enforced on the Sigstore certificate. The signer is
+ * bound through the Fulcio "Source Repository URI" extension rather than the
+ * workflow identity (SAN): packages published through reusable workflows have
+ * a SAN naming a different workflow, sometimes in another repository, while
+ * the source repository extension always names the repository being built.
+ */
 export interface ProvenanceSigningIdentity {
   certificateIssuer: string;
-  certificateIdentityURI: string;
+  /** Expected source repository URL, e.g. `https://github.com/owner/repo`. */
+  sourceRepositoryUrl: string;
+}
+
+/** Fulcio certificate extension OID: Source Repository URI. */
+export const FULCIO_SOURCE_REPOSITORY_URI_OID = "1.3.6.1.4.1.57264.1.12";
+
+/**
+ * DER-encode a UTF8String (tag 0x0c, DER length, bytes). Sigstore compares the
+ * expected OID value byte for byte with the raw extension value, which for
+ * Fulcio's Source Repository URI is a DER UTF8String.
+ */
+export function encodeDerUtf8String(value: string): Buffer {
+  const content = Buffer.from(value, "utf8");
+  const length = content.length;
+  let lengthBytes: Buffer;
+  if (length < 0x80) {
+    lengthBytes = Buffer.from([length]);
+  } else {
+    const octets: number[] = [];
+    for (let remaining = length; remaining > 0; remaining = Math.floor(remaining / 256)) {
+      octets.unshift(remaining % 256);
+    }
+    lengthBytes = Buffer.from([0x80 | octets.length, ...octets]);
+  }
+  return Buffer.concat([Buffer.from([0x0c]), lengthBytes, content]);
 }
 
 async function defaultFetchAttestations(
@@ -235,15 +267,19 @@ export class SigstoreToolingUnavailableError extends Error {
   }
 }
 
-async function defaultVerifyBundle(
+interface SigstoreVerifyOptions {
+  certificateIssuer: string;
+  // sigstore runs Buffer.from(value) on each value. Its typings say string,
+  // but a string would be UTF-8 encoded, expanding the DER long-form length
+  // bytes (>= 0x80). A Buffer is copied byte for byte, so we pass one.
+  certificateOIDs: Record<string, string>;
+}
+
+export async function defaultVerifyBundle(
   bundle: Bundle,
   signingIdentity: ProvenanceSigningIdentity
 ): Promise<void> {
-  let verify: (
-    b: unknown,
-    payload: Buffer | undefined,
-    options: ProvenanceSigningIdentity
-  ) => Promise<unknown>;
+  let verify: (b: unknown, options: SigstoreVerifyOptions) => Promise<unknown>;
   try {
     const sigstore = await import("sigstore");
     verify = sigstore.verify as typeof verify;
@@ -251,7 +287,17 @@ async function defaultVerifyBundle(
     // The tool is not installed — distinct from a bundle that fails to verify.
     throw new SigstoreToolingUnavailableError();
   }
-  await verify(bundle, undefined, signingIdentity);
+  // sigstore's verify(bundle, dataOrOptions, options) treats a non-Buffer
+  // second argument as the options, so the options MUST be passed second.
+  // Passing them third silently discards them and enforces nothing.
+  await verify(bundle, {
+    certificateIssuer: signingIdentity.certificateIssuer,
+    certificateOIDs: {
+      [FULCIO_SOURCE_REPOSITORY_URI_OID]: encodeDerUtf8String(
+        signingIdentity.sourceRepositoryUrl
+      ) as unknown as string
+    }
+  });
 }
 
 export function createDefaultProvenanceDependencies(): ProvenanceDependencies {
@@ -506,7 +552,7 @@ function validateProvenanceStatement(
     builderId: statement.predicate?.runDetails?.builder?.id,
     signingIdentity: {
       certificateIssuer: GITHUB_ACTIONS_OIDC_ISSUER,
-      certificateIdentityURI: `${canonicalRepositoryUrl}/${workflowPath}@${sourceRef}`
+      sourceRepositoryUrl: canonicalRepositoryUrl
     }
   };
 }
