@@ -260,12 +260,30 @@ The CLI reaches humans who type `safeinstall`. The **MCP server reaches AI codin
 
 ### Wire it into your agent
 
+Install the supported CLI and MCP SDK into a dedicated local directory with
+exact versions and a retained lockfile:
+
+```bash
+npm install --save-exact --ignore-scripts safeinstall-cli@0.15.0 @modelcontextprotocol/sdk@1.29.0
+```
+
+Before enabling the server, compare the `safeinstall-cli` SHA-512 integrity in
+`package-lock.json` with the release's signed npm provenance, review the lockfile,
+and retain it. Recreate the installation with `npm ci --ignore-scripts`; do not
+let an MCP client fetch executable code on startup.
+
 **Claude Code / Claude Desktop** — add to your MCP config (`claude_desktop_config.json` or `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
-    "safeinstall": { "command": "npx", "args": ["safeinstall-cli", "mcp"] }
+    "safeinstall": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/safeinstall-mcp/node_modules/safeinstall-cli/dist/cli.js",
+        "mcp"
+      ]
+    }
   }
 }
 ```
@@ -379,7 +397,7 @@ Instruction content drift only warns by default because Claude Code writes to `C
 
 ### How it defends itself
 
-- **The verifier comes from the protected base branch; human review still owns intentional re-baselines.** Run `safeinstall trust lock --ci github` to scaffold a workflow that re-hashes the candidate trust surface against its committed lock on every pull request, on a machine the agent does not control, with the CLI pinned to an exact version and its sha512 content hash. `pull_request_target` keeps the verifier definition outside the PR's control, while the candidate checkout is inert data with no credentials. This blocks a PR from editing the workflow to waive its own failure. Honest boundary: a PR can still rewrite policy and baseline *consistently*, so require independent review of those diffs. (Wiring the Action directly also works — but pin its `version:` input; the default `latest` floats.)
+- **The verifier comes from the protected base branch; human review still owns intentional re-baselines.** Run `safeinstall trust lock --ci github` to scaffold a workflow that re-hashes the candidate trust surface against its committed lock on every pull request, on a machine the agent does not control, with the CLI pinned to an exact version and its sha512 content hash. `pull_request_target` keeps the verifier definition outside the PR's control, while the candidate checkout is inert data with no credentials. This blocks a PR from editing the workflow to waive its own failure. Honest boundary: a PR can still rewrite policy and baseline *consistently*, so require independent review of those diffs. (Wiring the Action directly also works — pin the Action commit and provide its exact CLI `version` and independently verified `integrity` inputs.)
 - **Reconciliation on top of interception.** The guard is the fast layer; every `safeinstall` install/check also reconciles against the baseline. Deleting the hook to silence the guard, or editing a protected file, shows up as drift on the next SafeInstall run locally — and, regardless, fails CI re-verification.
 - **Human-gated changes.** Both commands that relax enforcement require a human: `safeinstall trust approve` reads its confirmation from the controlling terminal (`/dev/tty`), never from stdin, and `trust unlock` likewise requires a controlling terminal — both refuse to run in CI or known agent-hook contexts, so an agent cannot silently re-baseline or remove the surface. `trust status` is read-only (safe in CI, never mutates the repo).
 - **Hash-chained ledger.** Baseline decisions are chained in `.safeinstall/ledger.jsonl`; the lock binds to a ledger entry (including its enforcement `mode`), so editing the committed lock to drop a file or downgrade strict→warn breaks the binding. A local head mirror under `~/.safeinstall/` catches naive/accidental history rewrites; a vanished mirror is self-healed from the verified head on the next clean run, so a fresh clone establishes it automatically without noise.
@@ -587,7 +605,10 @@ Install blocked.
 
 ## GitHub Action
 
-Run SafeInstall policy checks automatically on every pull request. Five lines of YAML, no configuration required — defaults apply immediately.
+Run SafeInstall policy checks automatically on every pull request. Pin the
+Action to a reviewed full commit SHA, and bind the CLI release to its
+independently verified SHA-512 SRI. Replace both placeholders below from the
+same reviewed Action release before enabling the workflow.
 
 ```yaml
 # .github/workflows/safeinstall.yml
@@ -597,11 +618,14 @@ jobs:
   policy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
-      - uses: Mickdownunder/SafeInstall@v1
+      - uses: Mickdownunder/SafeInstall@<full-40-character-commit-sha>
+        with:
+          version: 0.15.0
+          integrity: sha512-<verified-release-integrity>
 ```
 
 The action runs `safeinstall check` against your direct dependencies and sets the job status to pass or fail. Blocked dependencies appear in the GitHub Actions job summary with the exact block reason and suggestion.
@@ -611,8 +635,10 @@ The action runs `safeinstall check` against your direct dependencies and sets th
 To enforce policy during the actual install step (not just a check):
 
 ```yaml
-      - uses: Mickdownunder/SafeInstall@v1
+      - uses: Mickdownunder/SafeInstall@<full-40-character-commit-sha>
         with:
+          version: 0.15.0
+          integrity: sha512-<verified-release-integrity>
           mode: install
           package-manager: pnpm
           args: "--frozen-lockfile"
@@ -626,7 +652,8 @@ To enforce policy during the actual install step (not just a check):
 | `package-manager` | `pnpm` | `npm` or `pnpm` for installation; `bun` fails closed |
 | `args` | | Additional arguments forwarded to the package manager |
 | `config-path` | | Explicit path to `safeinstall.config.json` (auto-discovered if omitted) |
-| `version` | `latest` | SafeInstall CLI version to install |
+| `version` | `0.15.0` | Exact SafeInstall CLI version to install; dist-tags and ranges are rejected |
+| `integrity` | required | Independently verified SHA-512 SRI for the selected CLI tarball |
 
 ### Outputs
 
