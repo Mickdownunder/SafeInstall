@@ -1,3 +1,6 @@
+import path from "node:path";
+
+import { CONFIG_FILE_NAME } from "./config";
 import {
   checkLedgerMirror,
   verifyLedgerChain,
@@ -266,12 +269,14 @@ export function partitionTrustFindings(findings: TrustFinding[]): {
  * Trust-surface precheck for the install and check flows: every CLI
  * invocation reconciles, so a deleted guard hook (which silences the guard
  * itself) is still caught the next time SafeInstall runs. Returns block
- * reasons when the surface has drifted, plus non-blocking warnings (warn-mode
- * instruction drift, unpinned MCP servers) so they are surfaced rather than
- * silently dropped. Empty when clean or not locked.
+ * reasons when the surface has drifted or the invocation selects a policy
+ * outside the baseline, plus non-blocking warnings (warn-mode instruction
+ * drift, unpinned MCP servers) so they are surfaced rather than silently
+ * dropped. Empty when clean or not locked.
  */
 export async function trustSurfacePrecheck(
-  cwd: string
+  cwd: string,
+  configPath?: string
 ): Promise<{ reasons: CliReason[]; warnings: string[] }> {
   let status: TrustSurfaceStatus;
   try {
@@ -295,13 +300,29 @@ export async function trustSurfacePrecheck(
   if (!status.active) {
     return { reasons: [], warnings: [] };
   }
+
+  const reasons = status.findings.map((finding) => ({
+    code: `trust-${finding.kind}`,
+    message: finding.message,
+    suggestion:
+      "Review the drift with `safeinstall trust status`. If the change is intentional, approve it with `safeinstall trust approve` in your terminal."
+  }));
+
+  if (status.root && configPath) {
+    const lockedConfigPath = path.join(status.root, CONFIG_FILE_NAME);
+    if (path.resolve(configPath) !== lockedConfigPath) {
+      reasons.push({
+        code: "trust-unbound-config",
+        message:
+          `The selected config at ${configPath} is not the policy protected by the active Agent Trust Surface ` +
+          `(${lockedConfigPath}).`,
+        suggestion: `Remove --config or select ${lockedConfigPath}.`
+      });
+    }
+  }
+
   return {
-    reasons: status.findings.map((finding) => ({
-      code: `trust-${finding.kind}`,
-      message: finding.message,
-      suggestion:
-        "Review the drift with `safeinstall trust status`. If the change is intentional, approve it with `safeinstall trust approve` in your terminal."
-    })),
+    reasons,
     warnings: status.instructionWarnings
   };
 }

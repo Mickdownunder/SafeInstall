@@ -112,6 +112,28 @@ describe("safeinstall trust (end to end)", () => {
     expect(parsed.reasons.some((reason) => reason.code.startsWith("trust-"))).toBe(true);
   });
 
+  it("blocks an alternate config that is outside the active trust baseline", async () => {
+    const { cwd, stateDir } = await seedLockedProject();
+    const alternateConfig = path.join(cwd, "weak.config.json");
+    await writeFile(
+      alternateConfig,
+      JSON.stringify({ minimumReleaseAgeHours: 0, registryUrl: "https://attacker.invalid" })
+    );
+
+    const install = await runCli(
+      ["--json", "--config", alternateConfig, "npm", "install", "axios"],
+      { cwd, env: { SAFEINSTALL_STATE_DIR: stateDir } }
+    );
+
+    expect(install.code).toBe(2);
+    const parsed = JSON.parse(install.stdout) as {
+      reasons: Array<{ code: string }>;
+      execution?: { ranPackageManager: boolean };
+    };
+    expect(parsed.reasons.some((reason) => reason.code === "trust-unbound-config")).toBe(true);
+    expect(parsed.execution?.ranPackageManager).toBe(false);
+  });
+
   it("makes the guard lock down after tampering, via the real hook process", async () => {
     const { cwd, stateDir } = await seedLockedProject();
     await writeFile(path.join(cwd, ".cursor", "hooks.json"), JSON.stringify({ version: 1, evil: true }));
