@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- A lockfile line that points a transitive dependency at another host or a git repository is now blocked with the default configuration. Every entry of an npm or pnpm lockfile is checked against `allowedSources` in `check`, project installs and `decisions authorize`, independent of `transitive.mode`; before, this was only checked when the transitive mode was enabled, and a project install ran the package manager on the edited lockfile.
 - The agent guard no longer lets installs through behind shell reserved words, line continuations, brace expansion, ANSI-C quoting, a variable command name, or wrappers such as `timeout`, `xargs` and `eval`. `update` and `install-test` subcommands are denied because the CLI cannot route them.
 - `npx`-style runner commands are only passed through when the guard can show that they resolve to a local binary; compound, environment-prefixed and piped runner commands need approval.
 - A provenance attestation is accepted only if its signed subject names the requested package, version and SHA-512, and the signing certificate's source repository matches the repository the statement claims. A malformed statement is reported as invalid instead of crashing.
@@ -28,6 +29,7 @@
 
 ### Breaking changes
 
+- Lockfile entries from a source outside `allowedSources` now block in every `transitive.mode`, including `off` (the default) and `warn`, where they used to pass or only warn. Projects with a legitimate transitive git or URL dependency must add that source type to `allowedSources`. `transitive.checks: ["untrusted-source"]` is accepted but no longer selects anything.
 - A `registryUrl` containing credentials, a query string, or a fragment is rejected when the config is loaded (`install`, `check`, `decisions`, MCP). Use an `.npmrc` entry for private-registry authentication.
 - Outside a git repository (or with an unborn `HEAD` or an untracked manifest), projects that allow `git`, `url`, or `tarball` in `allowedSources` are blocked with `trust-level-dropped` for each such dependency until it is listed in `sourceBaselines`. Projects in git repositories with a committed manifest are unaffected.
 - Credential-bearing package specs and flags on the command line of `safeinstall <pm> install/add` and `safeinstall check` are rejected. Configure registry and git credentials through `.npmrc` or environment variables instead.

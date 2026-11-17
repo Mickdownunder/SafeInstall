@@ -125,7 +125,8 @@ No registry proxy. No tarball rewriting. No cloud dependency.
 | **Trust downgrade** | Flags a dependency that was `registry` in the committed manifest and is now git/url/tarball or any local source (`file:`, `link:`, directory, `workspace:`). A dependency that was already local at the baseline is not flagged. `decisions authorize` compares against the base commit's manifest (never the config); `check` and installs compare against the manifest at git `HEAD`. `sourceBaselines` applies only when there is no `HEAD` manifest (no git, unborn `HEAD`, untracked manifest), and then missing history fails closed | `Blocked: trust level dropped` |
 | **Typo-squat detection** | Off by default; opt in via `typoSquat.mode` | `Blocked: suspected typo-squat` |
 | **Provenance verification** | Off by default; opt in via `provenance.mode` | `Blocked: attestation missing/invalid/publisher mismatch` |
-| **Transitive dependencies** | Off by default; opt in via `transitive.mode` | `Blocked: transitive install script / untrusted source` |
+| **Lockfile sources** | Every entry of an npm or pnpm lockfile, direct or transitive, must come from a source in `allowedSources` | `Blocked: transitive dependency resolves from an untrusted source` |
+| **Transitive install scripts** | Off by default; opt in via `transitive.mode` | `Blocked: transitive install script` |
 | **Provenance continuity** | Off by default; opt in via `continuity.mode` | `Blocked: provenance downgrade / identity discontinuity` |
 
 All rules are configurable. Ambiguous or incomplete metadata **blocks instead of allowing**.
@@ -147,16 +148,18 @@ Continuity verifies the attestation of the target version and of each baseline v
 
 ### Transitive dependencies
 
-By default SafeInstall evaluates **direct** dependencies. Most supply-chain attacks, though, reach you through a *transitive* dependency — a package you never chose, pulled in several levels deep. Enable `transitive` mode to walk the full lockfile tree.
+Most supply-chain attacks reach you through a *transitive* dependency — a package you never chose, pulled in several levels deep. Two checks read the full lockfile tree, with **zero extra registry calls**.
 
-Two checks run transitively, both read directly from the lockfile with **zero extra registry calls**:
+**Lockfile sources, always on.** Every entry of an npm or pnpm lockfile must resolve from a source in `allowedSources`. An entry whose download address points at another host or a git repository blocks `check`, project installs and `decisions authorize` with `transitive-untrusted-source`, whatever `transitive.mode` says: a single edited lockfile line is enough to change what gets installed, so this is not opt-in and never degrades to a warning. The public npm registry and the configured `registryUrl` count as `registry`. Workspace links are not flagged. If a transitive dependency legitimately comes from git or a URL, add that source type to `allowedSources`.
+
+**Transitive checks, opt-in via `transitive.mode`:**
 
 - **`install-script`** — flags transitive packages that declare a lifecycle script (the `ua-parser-js` attack class: a deeply nested dependency running code at install time). npm records this in the lockfile; pnpm lockfiles do not, so this check is npm-only for now.
-- **`untrusted-source`** — flags transitive packages resolving from git, url, or tarball sources instead of the registry. Works for both npm and pnpm.
+- **`untrusted-source`** — accepted for compatibility. The source check above runs regardless of this entry and of the mode.
 
 Release-age, typo-squat, and provenance are deliberately **not** run transitively — they would either flood you with noise or require a registry round-trip per package. Transitive evaluation applies to `safeinstall check`, project installs, and the prepared lockfile for explicit npm/pnpm additions.
 
-An enabled transitive policy never treats unavailable lockfile evidence as a clean result. `block` mode blocks when an npm/pnpm lockfile is missing, unreadable, unsupported, or invalid; `warn` mode emits an explicit warning instead. Bun lockfiles are not currently supported for transitive evaluation, so Bun checks follow the same fail-closed or warning behavior according to the configured mode.
+With `transitive.mode` off, a project without a readable npm or pnpm lockfile is not an error: there are no lockfile sources to check. An enabled transitive policy never treats unavailable lockfile evidence as a clean result. `block` mode blocks when an npm/pnpm lockfile is missing, unreadable, unsupported, or invalid; `warn` mode emits an explicit warning instead. Bun lockfiles are not currently supported for transitive evaluation, so Bun checks follow the same fail-closed or warning behavior according to the configured mode.
 
 ```json
 {
@@ -475,8 +478,8 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `provenance.trustedPublishers` | Map of package name pattern → expected `owner/repo` slug; mismatches always block |
 | `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cryptographically verified cached attestation whose signed subject matches the exact package and version |
 | `provenance.toolingUnavailable` | `"warn"` (default) proceeds with a loud warning when the `sigstore` verifier is not installed; `"fail-closed"` treats a missing verifier as suspicious and blocks every install until it is present (installing `sigstore` itself stays exempt, so it can never deadlock) |
-| `transitive.mode` | `"off"` / `"warn"` / `"block"` — evaluate the full lockfile tree, not just direct deps |
-| `transitive.checks` | Which checks run transitively: `"install-script"` and/or `"untrusted-source"` |
+| `transitive.mode` | `"off"` / `"warn"` / `"block"` — transitive install-script check, and whether a missing or unreadable lockfile warns or blocks. Lockfile sources are checked against `allowedSources` in every mode |
+| `transitive.checks` | `"install-script"` enables the install-script check. `"untrusted-source"` is accepted but has no effect: that check always runs |
 | `continuity.mode` | `"off"` / `"warn"` / `"block"` — detect provenance downgrades and source-repo changes against a learned per-package baseline |
 | `continuity.baselineSize` | How many recent versions to sample when learning the baseline (default 5) |
 
@@ -690,7 +693,7 @@ To enforce policy during the actual install step (not just a check):
 ## Limitations
 
 - **Not a CVE scanner** — pair with `npm audit` or Snyk for vulnerability data
-- **Transitive dependencies** are evaluated for install scripts and untrusted sources when `transitive.mode` is enabled. Release-age, typo-squat, and provenance still apply to direct dependencies only.
+- **Transitive dependencies** are always checked for their lockfile source, and for install scripts when `transitive.mode` is enabled. Release-age, typo-squat, and provenance still apply to direct dependencies only. A transitive entry that names the right registry address with a different digest is not compared with the registry here; the frozen install then fails on the digest mismatch.
 - **Transitive install-script detection** is npm-only — pnpm lockfiles do not record install-script presence. Transitive untrusted-source detection works for both.
 - **Native builds (`binding.gyp`)** are caught via the install-script check: npm normalizes `binding.gyp` into a `node-gyp rebuild` install script at publish time, so it is present in the registry metadata SafeInstall already reads — no tarball download required. The residual edge is a package published through a non-standard client that omits this normalization while still shipping a `binding.gyp`; detecting that would require tarball content inspection, which is out of scope (see *What it does not do*).
 - **`peerDependencies`** not evaluated unless also declared as direct dependencies
