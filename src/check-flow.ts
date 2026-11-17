@@ -1,3 +1,5 @@
+import nodePath from "node:path";
+
 import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
 import { captureDecisionState, emitDecisionRecord } from "./decision-emit";
@@ -8,6 +10,7 @@ import { loadManifestDependencies } from "./project-state";
 import { resolveInvocationContext } from "./project-discovery";
 import { inferProjectInstallTargetsForCheck } from "./project-installs";
 import { RegistryClient } from "./registry";
+import { loadHeadSourceBaseline } from "./source-baseline";
 import { throwIfAborted } from "./signals";
 import { parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
@@ -169,12 +172,14 @@ export async function runCheckFlow(
     registryUrl: config.registryUrl,
     signal: options.signal
   });
+  const packageDir = invocation.packageDir ?? invocation.effectiveCwd;
   const evaluations = await evaluateRequestedPackages(
-    invocation.packageDir ?? invocation.effectiveCwd,
+    packageDir,
     requestedPackages,
     registryClient,
     config,
-    options.signal
+    options.signal,
+    await loadHeadSourceBaseline([nodePath.join(packageDir, "package.json")], config)
   );
   const artifactBindingReasons = projectTargets
     ? lockfileArtifactBindingReasons(projectTargets, evaluations)

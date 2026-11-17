@@ -6,8 +6,11 @@
 
 - A config selected with `--config` can no longer replace the policy protected by a trust lock. `install` and `check` block with `trust-unbound-config` unless the effective config is the locked `safeinstall.config.json` at the trust root. The GitHub Action builds its command as an argument list and rejects `--config` in `args`.
 
+- A dependency that moves from the registry to a git, URL, or tarball source is now caught even when `allowedSources` permits that source and the attacker edited `package.json`. The prior source is read from a committed manifest: the base commit in `decisions authorize` (root project and every lockfile importer; a moved importer is matched to the base package with the same `name`) and git `HEAD` in project-level `check` and installs. The new `sourceBaselines` config key is only a fallback when no `HEAD` manifest exists, and `decisions authorize` ignores it.
+
 ### Breaking changes
 
+- Outside a git repository (or with an unborn `HEAD` or an untracked manifest), projects that allow `git`, `url`, or `tarball` in `allowedSources` are blocked with `trust-level-dropped` for each such dependency until it is listed in `sourceBaselines`. Projects in git repositories with a committed manifest are unaffected.
 - `--config` must come before the command (`safeinstall --config <path> check`). After the command it is an error. Earlier versions of the GitHub Action passed it after `check`, so use this Action version or later when combining `config-path` with this CLI version.
 - In a project with a trust lock, a config in a subfolder or parent folder, or one passed with `--config` or the Action's `config-path`, is rejected unless it is the locked root config.
 
