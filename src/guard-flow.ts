@@ -5,8 +5,8 @@ import { loadConfig } from "./config";
 import { analyzeShellCommand } from "./guard-commands";
 import type { GuardRunnerMatch } from "./guard-commands";
 import { findNearestUpward } from "./project-discovery";
+import { findProtectedWrite } from "./guard-write-match";
 import { redactSensitiveText } from "./redaction";
-import { isTrustSurfacePath } from "./trust-surface";
 import type { TrustSurfaceStatus } from "./trust-surface";
 import { checkTrustSurface, partitionTrustFindings } from "./trust-surface-check";
 
@@ -126,7 +126,6 @@ const TRUST_APPROVE_INSTRUCTION =
  * - shell writes targeting protected files are denied outright.
  */
 async function decideTrustSurface(
-  command: string,
   cwd: string,
   analysis: ReturnType<typeof analyzeShellCommand>
 ): Promise<GuardDecision | undefined> {
@@ -160,15 +159,29 @@ async function decideTrustSurface(
     };
   }
 
-  const protectedWrite = analysis.writeTargets.find((target) =>
-    isTrustSurfacePath(status.root as string, path.resolve(cwd, target))
-  );
-  if (protectedWrite) {
+  const protectedWrite = await findProtectedWrite(analysis.writeOperations, {
+    root: status.root,
+    cwd
+  });
+  if (protectedWrite?.exact === false) {
+    const target = protectedWrite.operation.target;
     return {
       action: "deny",
-      userMessage: `SafeInstall blocked a write to the protected file ${protectedWrite}.`,
+      userMessage: `SafeInstall blocked a write whose target could not be resolved safely: ${target}.`,
       agentMessage:
-        `SafeInstall guard: ${JSON.stringify(protectedWrite)} is part of the Agent Trust Surface ` +
+        `SafeInstall guard: ${JSON.stringify(target)} could land on the Agent Trust Surface (SafeInstall policy, ` +
+        "agent hooks, rules files, MCP configs): its path depends on a glob, a shell expansion, or a " +
+        "working-directory change the guard cannot follow. Agents must not modify the surface. Spell the " +
+        "destination out literally, or ask the user to make the change and approve it with `safeinstall trust approve`."
+    };
+  }
+  if (protectedWrite) {
+    const target = protectedWrite.operation.target;
+    return {
+      action: "deny",
+      userMessage: `SafeInstall blocked a write to the protected file ${target}.`,
+      agentMessage:
+        `SafeInstall guard: ${JSON.stringify(target)} is part of the Agent Trust Surface ` +
         "(SafeInstall policy, agent hooks, rules files, MCP configs). Agents must not modify it. " +
         "If the user wants this change, they can make it themselves and approve it with `safeinstall trust approve`."
     };
@@ -241,7 +254,7 @@ export async function decideGuard(command: string, cwd: string = process.cwd()):
 async function decideGuardCommand(command: string, cwd: string): Promise<GuardDecision> {
   const analysis = analyzeShellCommand(command);
 
-  const trustDecision = await decideTrustSurface(command, cwd, analysis);
+  const trustDecision = await decideTrustSurface(cwd, analysis);
   if (trustDecision) {
     return trustDecision;
   }

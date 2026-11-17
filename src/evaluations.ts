@@ -7,7 +7,9 @@ import { verifyProvenance } from "./provenance";
 import { RegistryClient } from "./registry";
 import type {
   ContinuityResult,
+  DependencySourceBaseline,
   PackageEvaluation,
+  PriorSourceEvidence,
   ProvenanceVerificationResult,
   RequestedPackage,
   SafeInstallConfig
@@ -23,12 +25,29 @@ export interface EvaluateRequestedPackagesOptions {
   signal?: AbortSignal;
 }
 
+function configuredSourceBaseline(config: SafeInstallConfig): DependencySourceBaseline {
+  return { complete: false, sourceTypes: config.sourceBaselines ?? {} };
+}
+
+function priorSourceEvidence(
+  packageName: string,
+  baseline: DependencySourceBaseline
+): PriorSourceEvidence {
+  const normalizedName = packageName.toLowerCase();
+  if (Object.hasOwn(baseline.sourceTypes, normalizedName)) {
+    return { status: "known", sourceType: baseline.sourceTypes[normalizedName] };
+  }
+
+  return baseline.complete ? { status: "known" } : { status: "unavailable" };
+}
+
 export async function evaluateRequestedPackages(
   projectDir: string,
   requestedPackages: RequestedPackage[],
   registryClient: RegistryClient,
   config: SafeInstallConfig,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  sourceBaseline: DependencySourceBaseline = configuredSourceBaseline(config)
 ): Promise<PackageEvaluation[]> {
   const now = new Date();
   const provenanceCache = new DiskCache({ ttlMs: 60 * 60 * 1000 });
@@ -97,6 +116,7 @@ export async function evaluateRequestedPackages(
         requested,
         now,
         priorState,
+        priorSource: priorSourceEvidence(requested.name, sourceBaseline),
         resolvedRegistryPackage,
         priorLifecycleScripts,
         provenanceResult,

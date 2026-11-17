@@ -8,6 +8,7 @@ import type {
   ContinuityResult,
   InstallLifecycleScriptName,
   PackageEvaluation,
+  PriorSourceEvidence,
   ProjectDependencyState,
   ProvenanceVerificationResult,
   RequestedPackage,
@@ -52,6 +53,7 @@ export interface EvaluatePackageInput {
   requested: RequestedPackage;
   now: Date;
   priorState?: ProjectDependencyState | undefined;
+  priorSource?: PriorSourceEvidence | undefined;
   resolvedRegistryPackage?: ResolvedRegistryPackage | undefined;
   priorLifecycleScripts?: InstallLifecycleScriptName[];
   provenanceResult?: ProvenanceVerificationResult | undefined;
@@ -117,12 +119,26 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
     });
   }
 
-  const priorSourceType = input.priorState?.declaredSourceType;
+  const priorSource: PriorSourceEvidence = input.priorSource ?? { status: "unavailable" };
+  const dropsRegistryTrust =
+    input.requested.sourceType === "git" ||
+    input.requested.sourceType === "url" ||
+    input.requested.sourceType === "tarball";
   if (
-    priorSourceType === "registry" &&
-    (input.requested.sourceType === "git" ||
-      input.requested.sourceType === "url" ||
-      input.requested.sourceType === "tarball")
+    dropsRegistryTrust &&
+    priorSource.status === "unavailable" &&
+    input.config.allowedSources.includes(input.requested.sourceType)
+  ) {
+    evaluation.blockedReasons.push({
+      code: "trust-level-dropped",
+      message: `Blocked: trust level could not be evaluated (no independent source baseline exists for ${input.requested.name} before ${input.requested.sourceType}).`,
+      suggestion:
+        "Record the established package source in sourceBaselines or evaluate the change against a trusted base commit."
+    });
+  } else if (
+    dropsRegistryTrust &&
+    priorSource.status === "known" &&
+    priorSource.sourceType === "registry"
   ) {
     evaluation.blockedReasons.push({
       code: "trust-level-dropped",

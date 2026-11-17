@@ -113,6 +113,16 @@ export async function loadProjectDependencyState(
 export async function loadManifestDependencies(cwd: string): Promise<Record<string, string>> {
   const packageJson = await loadPackageJson(cwd);
 
+  return collectManifestDependencies(packageJson);
+}
+
+export function parseManifestDependencies(raw: string): Record<string, string> {
+  return collectManifestDependencies(JSON.parse(raw) as PackageJsonShape);
+}
+
+function collectManifestDependencies(
+  packageJson: PackageJsonShape | undefined
+): Record<string, string> {
   return {
     ...(packageJson?.dependencies ?? {}),
     ...(packageJson?.devDependencies ?? {}),
