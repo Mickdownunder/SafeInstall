@@ -136,6 +136,104 @@ describe("decision record emission (e2e)", () => {
     expect(record.lockfile.after).toBeNull();
   });
 
+  it("never leaks a credentialed manifest dependency into output or decision records", async () => {
+    const marker = "s3cr3tMARK";
+    const project = await createGitProject();
+    await writeJson(path.join(project, "package.json"), {
+      name: "emit-fixture",
+      version: "1.0.0",
+      dependencies: {
+        "private-git": `git+https://deploy:${marker}@git.example.test/o/r.git`
+      }
+    });
+    const gitUrl = `git+https://deploy:${marker}@git.example.test/o/r.git`;
+    await writeJson(path.join(project, "package-lock.json"), {
+      name: "emit-fixture",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      packages: {
+        "": {
+          name: "emit-fixture",
+          version: "1.0.0",
+          dependencies: { "private-git": gitUrl }
+        },
+        "node_modules/private-git": { version: "1.0.0", resolved: `${gitUrl}#abc123` }
+      }
+    });
+    const stub = await createStubPackageManager("npm");
+    commitAll(project, "base");
+    const env = {
+      ...process.env,
+      PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+    };
+
+    const outputs: string[] = [];
+    for (const args of [
+      ["check", "--record", "--json"],
+      ["check"],
+      ["npm", "install", "--json"],
+      ["npm", "install"]
+    ]) {
+      const result = await runCli(args, { cwd: project, env });
+      // Evaluated like any git source (blocked by the default registry-only
+      // policy), not rejected as a credential-bearing command line.
+      expect(result.code).toBe(2);
+      expect(result.stdout + result.stderr).toContain("[REDACTED]");
+      outputs.push(result.stdout, result.stderr);
+    }
+    expect(outputs.join("\n")).not.toContain(marker);
+
+    const safeinstallDir = path.join(project, ".safeinstall");
+    const files = (await readdir(safeinstallDir, { recursive: true, withFileTypes: true })).filter(
+      (entry) => entry.isFile()
+    );
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const contents = await readFile(path.join(file.parentPath, file.name), "utf8");
+      expect(contents).not.toContain(marker);
+    }
+
+    const chain = await readDecisionChain(project, "package-lock.json");
+    expect(chain.length).toBeGreaterThan(0);
+    expect(JSON.stringify(chain)).not.toContain(marker);
+
+    // Records written with redacted fields still pass the committed-state verifier.
+    const base = git(project, "rev-parse", "HEAD");
+    const head = commitAll(project, "records");
+    const verified = await verifyDecisions(project, {
+      baseRef: base,
+      headRef: head,
+      allowedRegistryUrls: [registry.url]
+    });
+    expect(verified.findings).toEqual([]);
+    expect(verified.ok).toBe(true);
+  });
+
+  it("rejects credential-bearing command-line specs without echoing the secret", async () => {
+    const marker = "s3cr3tMARK";
+    const project = await createGitProject();
+    const stub = await createStubPackageManager("npm");
+    commitAll(project, "base");
+    const env = {
+      ...process.env,
+      PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+    };
+
+    for (const args of [
+      ["npm", "install", `https://user:${marker}@example.test/x.tgz`],
+      ["npm", "install", `foo@https://${marker}@example.test/x.tgz`],
+      ["npm", "install", "left-pad", `--//example.test/:_authToken=${marker}`],
+      ["check", `https://example.test/x.tgz?access_token=${marker}`]
+    ]) {
+      for (const json of [false, true]) {
+        const result = await runCli(json ? [...args, "--json"] : args, { cwd: project, env });
+        expect(result.code).not.toBe(0);
+        expect(result.stdout + result.stderr).not.toContain(marker);
+        expect(result.stdout + result.stderr).toContain(".npmrc");
+      }
+    }
+  });
+
   it("marks file: sources with explicit non-registry findings that never read clean (D4)", async () => {
     const project = await createGitProject();
     await writeDefaultConfig(project, { allowedSources: ["registry", "file", "directory"] });

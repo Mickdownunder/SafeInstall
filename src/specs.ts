@@ -1,6 +1,21 @@
 import npa from "npm-package-arg";
 
+import { containsSensitiveArgs } from "./redaction";
 import type { InstallPlan, PackageManagerName, RequestedPackage, SourceType } from "./types";
+
+export const CREDENTIAL_BEARING_SPEC_MESSAGE =
+  "Credential-bearing package specifications or flags on the command line are not supported. Configure registry and git credentials through .npmrc, environment variables, or a credential helper instead, and retry without credentials in the arguments.";
+
+/**
+ * Reject credentials typed on the command line. Credentials already present in
+ * a project manifest are NOT rejected here; they are evaluated like any other
+ * git/url source and redacted wherever they are printed or persisted.
+ */
+export function assertNoCredentialBearingArgs(args: readonly string[]): void {
+  if (containsSensitiveArgs(args)) {
+    throw new Error(CREDENTIAL_BEARING_SPEC_MESSAGE);
+  }
+}
 
 export const FLAGS_WITH_VALUES = new Set([
   "-C",
@@ -238,6 +253,7 @@ function splitManagerArgsAndCommand(argv: string[]): {
 }
 
 export function buildInstallPlan(argv: string[]): InstallPlan {
+  assertNoCredentialBearingArgs(argv);
   const { manager, managerArgs, command, forwardedArgs } = splitManagerArgsAndCommand(argv);
 
   const canonicalCommand = normalizeInstallCommand(manager, command);

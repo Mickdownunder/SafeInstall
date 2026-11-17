@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { containsSensitiveCredentials } from "../src/redaction";
 import {
   buildInstallPlan,
+  CREDENTIAL_BEARING_SPEC_MESSAGE,
   extractRequestedSpecs,
   normalizeInstallCommand,
   parseManifestDependency
@@ -29,6 +31,45 @@ describe("extractRequestedSpecs", () => {
 });
 
 describe("buildInstallPlan", () => {
+  it.each([
+    "https://user:top-secret@example.test/pkg.tgz",
+    "git+https://top-secret@example.test/repo.git",
+    "https://example.test/pkg.tgz?access_token=top-secret"
+  ])("rejects credential-bearing package specs without reflecting the secret", (spec) => {
+    expect(() => buildInstallPlan(["npm", "install", spec])).toThrow(
+      CREDENTIAL_BEARING_SPEC_MESSAGE
+    );
+    expect(CREDENTIAL_BEARING_SPEC_MESSAGE).not.toContain("top-secret");
+  });
+
+  it("rejects credential options while preserving ordinary URL installs", () => {
+    expect(() =>
+      buildInstallPlan(["npm", "install", "axios", "--_authToken", "top-secret"])
+    ).toThrow(CREDENTIAL_BEARING_SPEC_MESSAGE);
+
+    const ordinary = "https://example.test/pkg.tgz?download=1";
+    expect(buildInstallPlan(["npm", "install", ordinary]).packages[0]?.raw).toBe(ordinary);
+  });
+
+  it("points users at .npmrc and does not reject keyword-like version ranges", () => {
+    expect(CREDENTIAL_BEARING_SPEC_MESSAGE).toContain(".npmrc");
+    for (const spec of ["next-auth@>=4", "oauth@>=0.9", "auth@>=1", "git@github.com:o/r.git"]) {
+      expect(() => buildInstallPlan(["npm", "install", spec])).not.toThrow();
+    }
+  });
+
+  it("rejects npm credential flags and registry URLs with userinfo", () => {
+    for (const flag of [
+      "--//registry.example.test/:_authToken=s3cr3tMARK",
+      "--registry=https://u:s3cr3tMARK@registry.example.test/",
+      "--otp=123456"
+    ]) {
+      expect(() => buildInstallPlan(["npm", "install", "axios", flag])).toThrow(
+        CREDENTIAL_BEARING_SPEC_MESSAGE
+      );
+    }
+  });
+
   it("builds a plan for explicit pnpm add installs", () => {
     const plan = buildInstallPlan(["pnpm", "add", "axios@1.14.0", "-D"]);
 
@@ -118,6 +159,22 @@ describe("normalizeInstallCommand", () => {
 });
 
 describe("parseManifestDependency", () => {
+  it("evaluates credentialed manifest URLs as ordinary url/git sources", () => {
+    expect(
+      parseManifestDependency("private-pkg", "https://user:top-secret@example.test/pkg.tgz")
+    ).toMatchObject({ name: "private-pkg", sourceType: "tarball" });
+    expect(
+      parseManifestDependency("private-git", "git+https://user:top-secret@example.test/o/r.git")
+    ).toMatchObject({ sourceType: "git" });
+  });
+
+  it("does not treat auth-like version ranges as credentials", () => {
+    expect(containsSensitiveCredentials("next-auth@>=4.0.0")).toBe(false);
+    expect(parseManifestDependency("next-auth", ">=4.0.0")).toMatchObject({
+      sourceType: "registry"
+    });
+  });
+
   it("classifies workspace specs", () => {
     expect(parseManifestDependency("pkg-a", "workspace:*")).toMatchObject({
       name: "pkg-a",

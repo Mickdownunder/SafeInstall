@@ -122,7 +122,7 @@ No registry proxy. No tarball rewriting. No cloud dependency.
 | **Release age** | 72 hours minimum | `Blocked: release too new` |
 | **Lifecycle scripts** | preinstall, install, postinstall blocked | `Blocked: install script present` |
 | **Source types** | registry, workspace, file, directory allowed | `Blocked: untrusted source` |
-| **Trust downgrade** | Detects registry→git/url or new scripts on update | `Blocked: trust level dropped` |
+| **Trust downgrade** | Flags a dependency that was `registry` in the committed manifest and is now git/url/tarball. `decisions authorize` compares against the base commit's manifest (never the config); `check` and installs compare against the manifest at git `HEAD`. `sourceBaselines` applies only when there is no `HEAD` manifest (no git, unborn `HEAD`, untracked manifest), and then missing history fails closed | `Blocked: trust level dropped` |
 | **Typo-squat detection** | Off by default; opt in via `typoSquat.mode` | `Blocked: suspected typo-squat` |
 | **Provenance verification** | Off by default; opt in via `provenance.mode` | `Blocked: attestation missing/invalid/publisher mismatch` |
 | **Transitive dependencies** | Off by default; opt in via `transitive.mode` | `Blocked: transitive install script / untrusted source` |
@@ -247,7 +247,7 @@ Installation requires one canonical SHA-512 digest in the checked registry manif
 
 Explicit additions resolve into a lockfile with the evaluated exact version before installation. Preparation can update `package.json` and the lockfile, and can populate the manager's cache, even if the later binding/policy check blocks. Those files are left for inspection, not automatically rolled back. npm's frozen phase uses `ci`, which replaces `node_modules`. Shared workspace lockfiles cause all recorded importers' direct dependencies to be reviewed under the selected policy, not just the selected package.
 
-Lifecycle scripts are always disabled, including when legacy `packageManagerDefaults.*.ignoreScripts` is `false`. `allowedScripts` permits a policy exception, not script execution. pnpm's executable `.pnpmfile.cjs` hooks are disabled too. Explicit non-registry additions currently block; existing local/workspace dependencies remain governed by `allowedSources` and are not claimed to have registry-artifact binding.
+Lifecycle scripts are always disabled, including when legacy `packageManagerDefaults.*.ignoreScripts` is `false`. `allowedScripts` permits a policy exception, not script execution. pnpm's executable `.pnpmfile.cjs` hooks are disabled too. Explicit non-registry additions currently block; existing local/workspace dependencies remain governed by `allowedSources` and are not claimed to have registry-artifact binding. The previous source of a dependency comes from a committed manifest, not from the working-tree manifest being checked: the base commit's manifest in `decisions authorize` (for the root project and every importer; a moved importer is matched to the base package with the same `name`), and the manifest at git `HEAD` in project-level `check` and installs. Only when no `HEAD` manifest exists (not a git repository, unborn `HEAD`, or an untracked manifest) do git, URL, and tarball dependencies need a reviewed `sourceBaselines` entry; category-wide `allowedSources` alone cannot prove that a registry dependency was not replaced.
 
 ---
 
@@ -407,6 +407,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
     "esbuild": ["postinstall"]
   },
   "allowedSources": ["registry", "workspace", "file", "directory"],
+  "sourceBaselines": {},
   "allowedPackages": [],
   "packageManagerDefaults": {
     "npm": { "ignoreScripts": true },
@@ -445,6 +446,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `registryUrl` | npm-compatible registry URL for metadata and installation (mirrors, Artifactory, Verdaccio) |
 | `allowedScripts` | Per-package lifecycle script exceptions |
 | `allowedSources` | Permitted source types |
+| `sourceBaselines` | Reviewed package-to-source identities (`registry`, `git`, `url`, or `tarball`). Fallback only when there is no git `HEAD` manifest for the project; never consulted by `decisions authorize` and ignored whenever `HEAD` has the manifest |
 | `allowedPackages` | Names that skip release-age, install-script, and typo-squat checks (with warning). Source, trust-downgrade, and provenance checks still apply. |
 | `packageManagerDefaults` | Legacy configuration; lifecycle scripts remain disabled even when `ignoreScripts` is `false` |
 | `typoSquat.mode` | `"off"` / `"warn"` / `"block"` — how to handle suspected typo-squats |
@@ -648,7 +650,7 @@ To enforce policy during the actual install step (not just a check):
 - **Transitive install-script detection** is npm-only — pnpm lockfiles do not record install-script presence. Transitive untrusted-source detection works for both.
 - **Native builds (`binding.gyp`)** are caught via the install-script check: npm normalizes `binding.gyp` into a `node-gyp rebuild` install script at publish time, so it is present in the registry metadata SafeInstall already reads — no tarball download required. The residual edge is a package published through a non-standard client that omits this normalization while still shipping a `binding.gyp`; detecting that would require tarball content inspection, which is out of scope (see *What it does not do*).
 - **`peerDependencies`** not evaluated unless also declared as direct dependencies
-- **Trust downgrade detection** requires prior install state in `node_modules`
+- **Trust downgrade detection** compares a direct dependency's declared source with the committed manifest (see *Trust downgrade* above). It covers swaps from `registry` to `git`, `url`, or `tarball` only; swaps to `file:`, `link:`, or `workspace:` sources, lockfile-only changes, and moves to a different registry are not detected by this check
 - **Bun installation** fails closed; an artifact-binding adapter is not implemented
 - **Trusted execution boundary** — this is not an OS sandbox. It relies on a trusted npm/pnpm binary enforcing frozen-lockfile integrity, the selected registry metadata, and the local filesystem not being controlled by a concurrent attacker. It does not prove package code benign, inspect every transitive artifact against registry policy, or isolate runtime execution
 - **Typo-squat target list** is curated and refreshed manually between releases; brand new packages published in the last day may not yet appear

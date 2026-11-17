@@ -1,6 +1,7 @@
 import { createDefaultConfig, loadConfig } from "./config";
 import { evaluateRequestedPackages } from "./evaluations";
 import { RegistryClient } from "./registry";
+import { redactSensitiveText } from "./redaction";
 import { parseManifestDependency } from "./specs";
 import type { PackageEvaluation, SafeInstallConfig } from "./types";
 
@@ -53,16 +54,18 @@ export function evaluationToVerdict(
 
   return {
     verdict: evaluation.blockedReasons.length > 0 ? "block" : "allow",
-    name: evaluation.requested.name,
+    name: redactSensitiveText(evaluation.requested.name),
     version: resolved?.resolvedVersion ?? null,
     reasons: evaluation.blockedReasons.map((reason) => ({
       code: reason.code,
-      message: reason.message,
-      ...(reason.suggestion ? { suggestion: reason.suggestion } : {})
+      message: redactSensitiveText(reason.message),
+      ...(reason.suggestion ? { suggestion: redactSensitiveText(reason.suggestion) } : {})
     })),
-    warnings: [...evaluation.warnings],
-    infos: [...evaluation.infos],
-    sourceRepository: evaluation.sourceRepository ?? null,
+    warnings: evaluation.warnings.map(redactSensitiveText),
+    infos: evaluation.infos.map(redactSensitiveText),
+    sourceRepository: evaluation.sourceRepository
+      ? redactSensitiveText(evaluation.sourceRepository)
+      : null,
     ageHours
   };
 }
@@ -240,9 +243,11 @@ async function handleCheckPackage(request: McpRequest): Promise<McpToolResult> {
     return { content: [{ type: "text", text: JSON.stringify(verdict, null, 2) }] };
   } catch (error) {
     return toolError(
-      `SafeInstall could not evaluate ${name}: ${
-        error instanceof Error ? error.message : String(error)
-      }`
+      redactSensitiveText(
+        `SafeInstall could not evaluate ${name}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
     );
   }
 }

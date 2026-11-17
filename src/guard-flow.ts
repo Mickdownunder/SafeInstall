@@ -5,7 +5,8 @@ import { loadConfig } from "./config";
 import { analyzeShellCommand } from "./guard-commands";
 import type { GuardRunnerMatch } from "./guard-commands";
 import { findNearestUpward } from "./project-discovery";
-import { isTrustSurfacePath } from "./trust-surface";
+import { findProtectedWrite } from "./guard-write-match";
+import { redactSensitiveText } from "./redaction";
 import type { TrustSurfaceStatus } from "./trust-surface";
 import { checkTrustSurface, partitionTrustFindings } from "./trust-surface-check";
 
@@ -125,7 +126,6 @@ const TRUST_APPROVE_INSTRUCTION =
  * - shell writes targeting protected files are denied outright.
  */
 async function decideTrustSurface(
-  command: string,
   cwd: string,
   analysis: ReturnType<typeof analyzeShellCommand>
 ): Promise<GuardDecision | undefined> {
@@ -159,15 +159,29 @@ async function decideTrustSurface(
     };
   }
 
-  const protectedWrite = analysis.writeTargets.find((target) =>
-    isTrustSurfacePath(status.root as string, path.resolve(cwd, target))
-  );
-  if (protectedWrite) {
+  const protectedWrite = await findProtectedWrite(analysis.writeOperations, {
+    root: status.root,
+    cwd
+  });
+  if (protectedWrite?.exact === false) {
+    const target = protectedWrite.operation.target;
     return {
       action: "deny",
-      userMessage: `SafeInstall blocked a write to the protected file ${protectedWrite}.`,
+      userMessage: `SafeInstall blocked a write whose target could not be resolved safely: ${target}.`,
       agentMessage:
-        `SafeInstall guard: ${JSON.stringify(protectedWrite)} is part of the Agent Trust Surface ` +
+        `SafeInstall guard: ${JSON.stringify(target)} could land on the Agent Trust Surface (SafeInstall policy, ` +
+        "agent hooks, rules files, MCP configs): its path depends on a glob, a shell expansion, or a " +
+        "working-directory change the guard cannot follow. Agents must not modify the surface. Spell the " +
+        "destination out literally, or ask the user to make the change and approve it with `safeinstall trust approve`."
+    };
+  }
+  if (protectedWrite) {
+    const target = protectedWrite.operation.target;
+    return {
+      action: "deny",
+      userMessage: `SafeInstall blocked a write to the protected file ${target}.`,
+      agentMessage:
+        `SafeInstall guard: ${JSON.stringify(target)} is part of the Agent Trust Surface ` +
         "(SafeInstall policy, agent hooks, rules files, MCP configs). Agents must not modify it. " +
         "If the user wants this change, they can make it themselves and approve it with `safeinstall trust approve`."
     };
@@ -240,14 +254,14 @@ export async function decideGuard(command: string, cwd: string = process.cwd()):
 async function decideGuardCommand(command: string, cwd: string): Promise<GuardDecision> {
   const analysis = analyzeShellCommand(command);
 
-  const trustDecision = await decideTrustSurface(command, cwd, analysis);
+  const trustDecision = await decideTrustSurface(cwd, analysis);
   if (trustDecision) {
     return trustDecision;
   }
 
   if (analysis.unanalyzable.length > 0) {
     const reasons = analysis.unanalyzable
-      .map((segment) => `- ${JSON.stringify(segment.segmentText)}: ${segment.reason}`)
+      .map((segment) => `- ${JSON.stringify(redactSensitiveText(segment.segmentText))}:${segment.reason}`)
       .join("\n");
     return {
       action: "deny",
@@ -279,7 +293,7 @@ async function decideGuardCommand(command: string, cwd: string): Promise<GuardDe
         : "SafeInstall guard: package installs must run through the SafeInstall CLI so supply-chain policy " +
           "(release age, install scripts, untrusted sources, provenance) is enforced and lifecycle scripts stay disabled. " +
           "Run this command instead:\n\n" +
-          `${rewritten}\n\n` +
+          `${redactSensitiveText(rewritten)}\n\n` +
           "If SafeInstall blocks it, report the block reasons to the user instead of working around them."
     };
   }
@@ -293,7 +307,7 @@ async function decideGuardCommand(command: string, cwd: string): Promise<GuardDe
 
   if (remoteRunners.length > 0) {
     const targets = remoteRunners
-      .map((runner) => `${runner.tool} would fetch and execute ${runner.packageHint ? JSON.stringify(runner.packageHint) : "a package"} from the registry`)
+      .map((runner) => `${runner.tool} would fetch and execute ${runner.packageHint ? JSON.stringify(redactSensitiveText(runner.packageHint)) : "a package"} from the registry`)
       .join("; ");
     return {
       action: "ask",
