@@ -50,6 +50,15 @@ exec "${portable(process.execPath)}" "${portable(path.join(dir, `${name}-stub.js
   }
 }
 
+/**
+ * Git for Windows puts its own tool directory ahead of the inherited PATH, so
+ * the system curl would win over a stub. Put the stub directory first again
+ * from inside the script.
+ */
+function stubsFirst(dir: string): string {
+  return process.platform === "win32" ? `PATH="$(cygpath -u '${dir}'):$PATH"\n` : "";
+}
+
 async function actionSafeInstallStub() {
   const dir = await createTempDir("safeinstall-action-cli-");
   const logPath = path.join(dir, "safeinstall.args.log");
@@ -168,7 +177,7 @@ describe("GitHub Action install input boundary", () => {
     const step = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!;
     const stub = await actionNpmStub();
     const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
-    await expect(exec(bash, ["-c", step.run!], { env: {
+    await expect(exec(bash, ["-c", stubsFirst(stub.dir) + step.run!], { env: {
       ...process.env,
       SAFEINSTALL_CLI_VERSION: version,
       SAFEINSTALL_CLI_INTEGRITY: `sha512-${Buffer.alloc(64).toString("base64")}`,
@@ -185,7 +194,7 @@ describe("GitHub Action install input boundary", () => {
     const step = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!;
     const stub = await actionNpmStub();
     const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
-    await expect(exec(bash, ["-c", step.run!], { env: {
+    await expect(exec(bash, ["-c", stubsFirst(stub.dir) + step.run!], { env: {
       ...process.env,
       SAFEINSTALL_CLI_VERSION: "999.0.0",
       SAFEINSTALL_CLI_INTEGRITY: "",
@@ -208,7 +217,7 @@ const args = process.argv.slice(2);
 require("node:fs").writeFileSync(args[args.indexOf("--output") + 1], "substituted release");
 `);
     const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
-    await expect(exec(bash, ["-c", step.run!], { env: {
+    await expect(exec(bash, ["-c", stubsFirst(stub.dir) + step.run!], { env: {
       ...process.env,
       SAFEINSTALL_CLI_VERSION: action.inputs.version?.default ?? "",
       SAFEINSTALL_CLI_INTEGRITY: "",
@@ -229,7 +238,7 @@ require("node:fs").writeFileSync(args[args.indexOf("--output") + 1], "substitute
     const step = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!;
     const stub = await actionNpmStub();
     const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
-    await expect(exec(bash, ["-c", step.run!], { env: {
+    await expect(exec(bash, ["-c", stubsFirst(stub.dir) + step.run!], { env: {
       ...process.env,
       SAFEINSTALL_CLI_VERSION: packageVersion,
       SAFEINSTALL_CLI_INTEGRITY: integrity,
@@ -254,7 +263,7 @@ require("node:fs").writeFileSync(output, Buffer.from(${JSON.stringify(archive.to
 `);
     const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
 
-    await exec(bash, ["-c", step.run!], { env: {
+    await exec(bash, ["-c", stubsFirst(stub.dir) + step.run!], { env: {
       ...process.env,
       SAFEINSTALL_CLI_VERSION: packageVersion,
       SAFEINSTALL_CLI_INTEGRITY: integrity,
@@ -285,7 +294,7 @@ require("node:fs").writeFileSync(output, "attacker bytes");
 `);
     const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
 
-    await expect(exec(bash, ["-c", step.run!], { env: {
+    await expect(exec(bash, ["-c", stubsFirst(stub.dir) + step.run!], { env: {
       ...process.env,
       SAFEINSTALL_CLI_VERSION: packageVersion,
       SAFEINSTALL_CLI_INTEGRITY: `sha512-${Buffer.alloc(64).toString("base64")}`,
