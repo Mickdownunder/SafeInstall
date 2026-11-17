@@ -114,7 +114,7 @@ export class RegistryClient {
         (versionDoc.version !== undefined && versionDoc.version !== resolvedVersion)) {
       throw new Error(`Registry error: manifest identity does not match ${requested.name}@${resolvedVersion}.`);
     }
-    const publishTime = await this.fetchPublishedAt(requested.name, resolvedVersion, versionDoc);
+    const publishTime = await this.fetchPublishedAt(requested.name, resolvedVersion);
     const lifecycleScripts = this.collectLifecycleScripts(versionDoc.scripts);
 
     return {
@@ -198,8 +198,7 @@ export class RegistryClient {
 
   private async fetchPublishedAt(
     packageName: string,
-    version: string,
-    versionDoc: RegistryVersionManifest
+    version: string
   ): Promise<PublishTimeRecord> {
     throwIfAborted(this.signal);
 
@@ -224,25 +223,11 @@ export class RegistryClient {
     }
 
     // The registry time map is the authoritative publish record (RFC-001 §14
-    // D7). The tarball last-modified header is a mutable CDN artifact; it
-    // stays available as a fallback, and which source answered is recorded so
-    // a release-age decision resting on the fallback can say so.
+    // D7). Do not fall back to dist.tarball: that URL is registry-controlled
+    // metadata and may point outside the configured registry's trust boundary.
     const fromTimeMap = await this.fetchPublishedAtFromTimeMap(packageName, version);
     if (fromTimeMap) {
       return this.rememberPublishedAt(versionKey, persistentKey, fromTimeMap, "registry-time");
-    }
-
-    const tarballUrl = versionDoc.dist?.tarball;
-    if (tarballUrl) {
-      const lastModified = await this.fetchTarballLastModified(packageName, version, tarballUrl);
-      if (lastModified) {
-        return this.rememberPublishedAt(
-          versionKey,
-          persistentKey,
-          parsePublishedAt(packageName, version, lastModified),
-          "tarball-last-modified"
-        );
-      }
     }
 
     throw new Error(`Registry error: missing publish time for ${packageName}@${version}.`);
@@ -263,44 +248,11 @@ export class RegistryClient {
     return record;
   }
 
-  private async fetchTarballLastModified(
-    packageName: string,
-    version: string,
-    tarballUrl: string
-  ): Promise<string | undefined> {
-    try {
-      const response = await fetch(tarballUrl, {
-        method: "HEAD",
-        signal: this.fetchSignal()
-      });
-
-      if (!response.ok) {
-        return undefined;
-      }
-
-      return response.headers.get("last-modified") ?? undefined;
-    } catch (error) {
-      const shutdownError = getShutdownSignalError(this.signal);
-      if (shutdownError) {
-        throw shutdownError;
-      }
-
-      if (isTimeoutError(error)) {
-        throw new Error(
-          `Registry error: timed out while fetching tarball metadata for ${packageName}@${version}.`
-        );
-      }
-
-      return undefined;
-    }
-  }
-
   /**
    * Publish time from the full packument's `time` map, or undefined so the
-   * caller can fall back to the tarball header. Timeouts and shutdowns stay
-   * fatal (they are environment failures, not evidence the map is absent);
-   * other fetch errors degrade to the fallback rather than failing a
-   * resolution the fallback could still serve.
+   * caller can fail closed. Timeouts and shutdowns stay fatal (they are
+   * environment failures, not evidence the map is absent); other fetch
+   * errors are reported as missing authoritative publish-time evidence.
    */
   private async fetchPublishedAtFromTimeMap(packageName: string, version: string): Promise<Date | undefined> {
     let document: RegistryPackageDocument;
