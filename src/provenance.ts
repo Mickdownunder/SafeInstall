@@ -630,7 +630,15 @@ export async function verifyProvenance(
     };
   }
 
-  const validatedStatement = validateProvenanceStatement(slsa.bundle, statement, input);
+  // The statement is parsed registry JSON, so its fields can have any shape.
+  // A malformed one must yield a package-specific `invalid` result, not an
+  // exception that aborts the evaluation of every other package.
+  let validatedStatement: ValidatedProvenanceStatement | string;
+  try {
+    validatedStatement = validateProvenanceStatement(slsa.bundle, statement, input);
+  } catch {
+    validatedStatement = "SLSA statement is malformed";
+  }
   if (typeof validatedStatement === "string") {
     return { status: "invalid", error: validatedStatement };
   }

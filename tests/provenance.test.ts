@@ -388,6 +388,17 @@ describe("verifyProvenance", () => {
     expect(result.error).toContain("exactly one package subject");
   });
 
+  it.each([
+    ["a null subject", { subject: [null] }],
+    ["a non-string subject name", { subject: [{ name: 42, digest: { sha512: EXAMPLE_SHA512 } }] }],
+    ["a non-object workflow", { predicate: { buildDefinition: { externalParameters: { workflow: 7 } } } }],
+    ["a null predicate", { predicate: null }]
+  ])("returns invalid instead of throwing for %s", async (_label, override) => {
+    const result = await verifyStatement({ ...exampleStatement, ...override } as unknown as typeof exampleStatement);
+
+    expect(result.status).toBe("invalid");
+  });
+
   it("binds the claimed repository to the certificate source repository", async () => {
     let signingIdentity: Parameters<ProvenanceDependencies["verifyBundle"]>[1] | undefined;
     const actualSourceRepository = "https://github.com/axios/axios";
