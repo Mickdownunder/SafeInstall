@@ -78,6 +78,22 @@ describe("analyzeShellCommand", () => {
       });
     });
 
+    it("limits local resolution to direct standalone runner targets", () => {
+      expect(analyzeShellCommand("npx tsc --noEmit").localRunnerResolutionSafe).toBe(true);
+      expect(analyzeShellCommand("npm exec -- prettier --write .").localRunnerResolutionSafe).toBe(true);
+
+      for (const command of [
+        "cd packages/app && npx tsc --noEmit",
+        "rm node_modules/.bin/tsc && npx tsc --noEmit",
+        "npx tsc $(rm node_modules/.bin/tsc)",
+        "env -C packages/app npx tsc --noEmit",
+        "npx --cwd packages/app tsc --noEmit",
+        "npm --prefix packages/app exec tsc --noEmit"
+      ]) {
+        expect(analyzeShellCommand(command).localRunnerResolutionSafe, command).toBe(false);
+      }
+    });
+
     it("treats pnpm exec as local-only (no runner)", () => {
       const analysis = analyzeShellCommand("pnpm exec prettier --write .");
       expect(analysis.runners).toEqual([]);
