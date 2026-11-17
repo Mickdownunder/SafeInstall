@@ -210,8 +210,12 @@ export async function inferProjectInstallTargetsForCheck(
   const npmLockPath =
     (await findNearestUpward(effectiveCwd, "package-lock.json")) ??
     (await findNearestUpward(effectiveCwd, "npm-shrinkwrap.json"));
+  const bunLockPath =
+    (await findNearestUpward(effectiveCwd, "bun.lock")) ??
+    (await findNearestUpward(effectiveCwd, "bun.lockb"));
   const hasPnpmLock = Boolean(pnpmLockPath);
   const hasNpmLock = Boolean(npmLockPath);
+  const hasBunLock = Boolean(bunLockPath);
 
   if (packageManager === "pnpm") {
     return loadPnpmProjectInstallTargets(effectiveCwd, packageDir);
@@ -219,6 +223,13 @@ export async function inferProjectInstallTargetsForCheck(
 
   if (packageManager === "npm") {
     return loadNpmProjectInstallTargets(effectiveCwd, packageDir);
+  }
+
+  // Bun lockfiles cannot currently provide transitive targets. Do not select
+  // a stale npm/pnpm lockfile as substitute evidence for a declared Bun
+  // project, or for an otherwise undeclared project containing a Bun lock.
+  if (packageManager === "bun" || (!packageManager && hasBunLock)) {
+    return undefined;
   }
 
   if (hasPnpmLock && hasNpmLock) {

@@ -156,6 +156,8 @@ Two checks run transitively, both read directly from the lockfile with **zero ex
 
 Release-age, typo-squat, and provenance are deliberately **not** run transitively — they would either flood you with noise or require a registry round-trip per package. Transitive evaluation applies to `safeinstall check`, project installs, and the prepared lockfile for explicit npm/pnpm additions.
 
+An enabled transitive policy never treats unavailable lockfile evidence as a clean result. `block` mode blocks when an npm/pnpm lockfile is missing, unreadable, unsupported, or invalid; `warn` mode emits an explicit warning instead. Bun lockfiles are not currently supported for transitive evaluation, so Bun checks follow the same fail-closed or warning behavior according to the configured mode.
+
 ```json
 {
   "transitive": {
@@ -451,7 +453,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `provenance.mode` | `"off"` / `"warn"` / `"require"` — whether to verify Sigstore attestations |
 | `provenance.requireFor` | Package names (glob supported) for which provenance is required even in `"warn"` mode |
 | `provenance.trustedPublishers` | Map of package name pattern → expected `owner/repo` slug; mismatches always block |
-| `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cached attestation |
+| `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cryptographically verified cached attestation whose signed subject matches the exact package and version |
 | `provenance.toolingUnavailable` | `"warn"` (default) proceeds with a loud warning when the `sigstore` verifier is not installed; `"fail-closed"` treats a missing verifier as suspicious and blocks every install until it is present (installing `sigstore` itself stays exempt, so it can never deadlock) |
 | `transitive.mode` | `"off"` / `"warn"` / `"block"` — evaluate the full lockfile tree, not just direct deps |
 | `transitive.checks` | Which checks run transitively: `"install-script"` and/or `"untrusted-source"` |
