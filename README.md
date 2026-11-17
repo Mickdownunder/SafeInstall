@@ -156,6 +156,8 @@ Two checks run transitively, both read directly from the lockfile with **zero ex
 
 Release-age, typo-squat, and provenance are deliberately **not** run transitively — they would either flood you with noise or require a registry round-trip per package. Transitive evaluation applies to `safeinstall check`, project installs, and the prepared lockfile for explicit npm/pnpm additions.
 
+An enabled transitive policy never treats unavailable lockfile evidence as a clean result. `block` mode blocks when an npm/pnpm lockfile is missing, unreadable, unsupported, or invalid; `warn` mode emits an explicit warning instead. Bun lockfiles are not currently supported for transitive evaluation, so Bun checks follow the same fail-closed or warning behavior according to the configured mode.
+
 ```json
 {
   "transitive": {
@@ -399,7 +401,7 @@ Instruction content drift only warns by default because Claude Code writes to `C
 
 - **The verifier comes from the protected base branch; human review still owns intentional re-baselines.** Run `safeinstall trust lock --ci github` to scaffold a workflow that re-hashes the candidate trust surface against its committed lock on every pull request, on a machine the agent does not control, with the CLI pinned to an exact version and its sha512 content hash. `pull_request_target` keeps the verifier definition outside the PR's control, while the candidate checkout is inert data with no credentials. This blocks a PR from editing the workflow to waive its own failure. Honest boundary: a PR can still rewrite policy and baseline *consistently*, so require independent review of those diffs. (Wiring the Action directly also works — pin the Action commit and provide its exact CLI `version` and independently verified `integrity` inputs.)
 - **Reconciliation on top of interception.** The guard is the fast layer; every `safeinstall` install/check also reconciles against the baseline. Deleting the hook to silence the guard, or editing a protected file, shows up as drift on the next SafeInstall run locally — and, regardless, fails CI re-verification.
-- **Human-gated changes.** Both commands that relax enforcement require a human: `safeinstall trust approve` reads its confirmation from the controlling terminal (`/dev/tty`), never from stdin, and `trust unlock` likewise requires a controlling terminal — both refuse to run in CI or known agent-hook contexts, so an agent cannot silently re-baseline or remove the surface. `trust status` is read-only (safe in CI, never mutates the repo).
+- **Human-gated changes.** Both commands that relax enforcement require a human: `safeinstall trust approve` reads its confirmation from the controlling terminal (`/dev/tty`), never from stdin, and `trust unlock` likewise requires a controlling terminal — both refuse to run in CI or known agent-hook contexts, including when only a parent process carries the context marker (Linux and macOS), so an agent cannot silently re-baseline or remove the surface by dropping the marker from its own environment. This is a barrier, not proof of human presence. `trust status` is read-only (safe in CI, never mutates the repo).
 - **Hash-chained ledger.** Baseline decisions are chained in `.safeinstall/ledger.jsonl`; the lock binds to a ledger entry (including its enforcement `mode`), so editing the committed lock to drop a file or downgrade strict→warn breaks the binding. A local head mirror under `~/.safeinstall/` catches naive/accidental history rewrites; a vanished mirror is self-healed from the verified head on the next clean run, so a fresh clone establishes it automatically without noise.
 
 ### Trust surface limitations — read honestly
@@ -469,7 +471,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `provenance.mode` | `"off"` / `"warn"` / `"require"` — whether to verify Sigstore attestations |
 | `provenance.requireFor` | Package names (glob supported) for which provenance is required even in `"warn"` mode |
 | `provenance.trustedPublishers` | Map of package name pattern → expected `owner/repo` slug; mismatches always block |
-| `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cached attestation |
+| `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cryptographically verified cached attestation whose signed subject matches the exact package and version |
 | `provenance.toolingUnavailable` | `"warn"` (default) proceeds with a loud warning when the `sigstore` verifier is not installed; `"fail-closed"` treats a missing verifier as suspicious and blocks every install until it is present (installing `sigstore` itself stays exempt, so it can never deadlock) |
 | `transitive.mode` | `"off"` / `"warn"` / `"block"` — evaluate the full lockfile tree, not just direct deps |
 | `transitive.checks` | Which checks run transitively: `"install-script"` and/or `"untrusted-source"` |

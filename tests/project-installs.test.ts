@@ -598,4 +598,37 @@ packages:
     const result = await inferProjectInstallTargetsForCheck(cwd, cwd);
     expect(result?.issues[0]).toContain("both pnpm-lock.yaml and an npm lockfile exist");
   });
+
+  it("does not substitute an npm lockfile for a declared Bun project", async () => {
+    const cwd = await createTempProject({
+      "package.json": JSON.stringify({
+        name: "demo",
+        version: "1.0.0",
+        packageManager: "bun@1.3.0",
+        dependencies: { axios: "^1.14.0" }
+      }),
+      "bun.lock": "lockfileVersion = 1",
+      "package-lock.json": JSON.stringify({ lockfileVersion: 3, packages: {} })
+    });
+
+    const result = await inferProjectInstallTargetsForCheck(cwd, cwd);
+
+    expect(result).toBeUndefined();
+  });
+
+  it("does not choose a supported lockfile when an undeclared Bun lock is present", async () => {
+    const cwd = await createTempProject({
+      "package.json": JSON.stringify({
+        name: "demo",
+        version: "1.0.0",
+        dependencies: { axios: "^1.14.0" }
+      }),
+      "bun.lockb": "binary-lock-placeholder",
+      "pnpm-lock.yaml": "lockfileVersion: '9.0'\nimporters:\n  .: {}\n"
+    });
+
+    const result = await inferProjectInstallTargetsForCheck(cwd, cwd);
+
+    expect(result).toBeUndefined();
+  });
 });
