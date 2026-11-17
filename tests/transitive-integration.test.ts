@@ -33,6 +33,13 @@ const PACKAGE_JSON = JSON.stringify({
   dependencies: { "local-lib": "file:./local-lib" }
 });
 
+const BUN_PACKAGE_JSON = JSON.stringify({
+  name: "demo",
+  version: "1.0.0",
+  packageManager: "bun@1.3.0",
+  dependencies: { "local-lib": "file:./local-lib" }
+});
+
 function lockfileWith(transitive: Record<string, unknown>): string {
   return JSON.stringify({
     name: "demo",
@@ -116,6 +123,60 @@ describe("transitive evaluation through runCheckFlow", () => {
 
     expect(result.decision).toBe("allow");
     expect(result.warnings.some((w) => w.includes("install script"))).toBe(true);
+  });
+
+  it("blocks check mode when transitive policy has no lockfile evidence", async () => {
+    const cwd = await createProject({
+      "package.json": JSON.stringify({
+        name: "demo",
+        version: "1.0.0",
+        dependencies: { "local-lib": "file:./local-lib" }
+      }),
+      "safeinstall.config.json": JSON.stringify({
+        minimumReleaseAgeHours: 0,
+        transitive: { mode: "block", checks: ["untrusted-source"] }
+      })
+    });
+
+    const result = await runCheckFlow(cwd, ["check"]);
+
+    expect(result.decision).toBe("block");
+    expect(result.reasons.map((reason) => reason.code)).toContain(
+      "transitive-evaluation-unavailable"
+    );
+  });
+
+  it("blocks Bun check mode when its transitive lockfile is unsupported", async () => {
+    const cwd = await createProject({
+      "package.json": BUN_PACKAGE_JSON,
+      "bun.lock": "lockfileVersion = 1",
+      "safeinstall.config.json": JSON.stringify({
+        minimumReleaseAgeHours: 0,
+        transitive: { mode: "block", checks: ["untrusted-source"] }
+      })
+    });
+
+    const result = await runCheckFlow(cwd, ["check"]);
+
+    expect(result.decision).toBe("block");
+    expect(result.reasons.map((reason) => reason.code)).toContain(
+      "transitive-evaluation-unavailable"
+    );
+  });
+
+  it("warns in check mode when transitive lockfile evidence is unavailable", async () => {
+    const cwd = await createProject({
+      "package.json": BUN_PACKAGE_JSON,
+      "safeinstall.config.json": JSON.stringify({
+        minimumReleaseAgeHours: 0,
+        transitive: { mode: "warn", checks: ["untrusted-source"] }
+      })
+    });
+
+    const result = await runCheckFlow(cwd, ["check"]);
+
+    expect(result.decision).toBe("allow");
+    expect(result.warnings.some((warning) => warning.includes("no npm or pnpm lockfile was found"))).toBe(true);
   });
 
   it("does not evaluate transitive deps when mode is off (default)", async () => {
