@@ -12,6 +12,7 @@ import {
   type ProjectInstallTargetsResult
 } from "./project-installs";
 import { RegistryClient } from "./registry";
+import { isLocalSourceType } from "./local-source";
 import { loadHeadSourceBaseline } from "./source-baseline";
 import { FLAGS_WITH_VALUES } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
@@ -262,7 +263,8 @@ async function loadInstallScope(packageDir: string, manager: "npm" | "pnpm", ran
     manifests: loaded.manifestPaths,
     manifestDigests,
     lockDigest,
-    targets: loaded.targets
+    targets: loaded.targets,
+    importers: loaded.importers
   };
 }
 
@@ -321,12 +323,26 @@ export async function runBoundInstall(options: {
   verifyTargets(targets, initialArtifacts, Boolean(preparation));
   const initialKeys = new Set(options.evaluations.map((evaluation) => JSON.stringify([evaluation.requested.name,
     evaluation.resolvedRegistryPackage?.resolvedVersion ?? evaluation.requested.requested])));
-  const remaining = [...new Map(targets.targets.filter((target) =>
-    !initialKeys.has(JSON.stringify([target.requested.name, target.requested.requested])))
+  const isRemaining = (target: (typeof targets.targets)[number]): boolean =>
+    !initialKeys.has(JSON.stringify([target.requested.name, target.requested.requested]));
+  const sourceBaseline = await loadHeadSourceBaseline(scope.manifests, config);
+  const remaining = [...new Map(targets.targets
+    .filter((target) => isRemaining(target) && !isLocalSourceType(target.requested.sourceType))
     .map((target) => [target.requested.raw, target.requested])).values()];
   const additional = await evaluateRequestedPackages(packageDir,
     remaining,
-    registryClient, config, options.signal, await loadHeadSourceBaseline(scope.manifests, config));
+    registryClient, config, options.signal, sourceBaseline);
+  // A local specifier such as `file:../shared` is relative to the manifest
+  // that declares it, so local dependencies are evaluated per importer.
+  for (const importer of scope.importers) {
+    const local = [...new Map(importer.targets.targets
+      .filter((target) => isRemaining(target) && isLocalSourceType(target.requested.sourceType))
+      .map((target) => [target.requested.raw, target.requested])).values()];
+    if (local.length > 0) {
+      additional.push(...await evaluateRequestedPackages(importer.packageDir, local,
+        registryClient, config, options.signal, sourceBaseline));
+    }
+  }
   const evaluations = [...options.evaluations, ...additional];
   const transitive = await evaluateTransitiveDependencies({ lockfilePath: targets.lockfilePath,
     directLockfileKeys: directLockfileKeys(targets), config });

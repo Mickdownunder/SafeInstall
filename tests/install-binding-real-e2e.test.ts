@@ -139,8 +139,15 @@ describe("artifact binding with real package managers and real archives", () => 
       try {
         const app = path.join(f.cwd, "packages", "app");
         await mkdirp(app);
+        // The sibling is a first-party workspace package referenced by a path
+        // relative to the app's manifest. It must be classified from there and
+        // not from the directory the install runs in, where `../shared` would
+        // point outside the repository and fail allowedSources: ["registry"].
+        const shared = path.join(f.cwd, "packages", "shared");
+        await mkdirp(shared);
+        await writeJson(path.join(shared, "package.json"), { name: "workspace-shared", version: "1.0.0" });
         await writeJson(path.join(app, "package.json"), { name: "workspace-app", version: "1.0.0",
-          dependencies: { [name]: "1.0.0" } });
+          dependencies: { [name]: "1.0.0", "workspace-shared": "file:../shared" } });
         const manifest = JSON.parse(await readFile(path.join(f.cwd, "package.json"), "utf8"));
         manifest.workspaces = ["packages/*"];
         await writeJson(path.join(f.cwd, "package.json"), manifest);

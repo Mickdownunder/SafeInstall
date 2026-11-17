@@ -100,6 +100,53 @@ describe("LocalSourceClassifier on real trees", () => {
     expect(await classify("file:/srv/evil.tgz", "file")).toEqual({ kind: "file", outsideRepository: true });
   });
 
+  it("applies brace, class and single-character workspace globs, for inclusion and exclusion", async () => {
+    const { dir } = await createRepoFixture(tempDirs);
+    await writeFiles(dir, {
+      "package.json": json({
+        name: "root",
+        private: true,
+        workspaces: ["packages/*", "!packages/{vendor,untrusted}", "libs/lib-?", "tools/[ab]*", "apps/+(x|y)"]
+      }),
+      "packages/app/package.json": json({ name: "@repo/app" }),
+      "packages/shared/package.json": json({ name: "@repo/shared" }),
+      "packages/vendor/package.json": json({ name: "vendor" }),
+      "packages/untrusted/package.json": json({ name: "untrusted" }),
+      "libs/lib-a/package.json": json({ name: "lib-a" }),
+      "libs/lib-ab/package.json": json({ name: "lib-ab" }),
+      "tools/alpha/package.json": json({ name: "alpha" }),
+      "tools/gamma/package.json": json({ name: "gamma" }),
+      "apps/x/package.json": json({ name: "x" })
+    });
+    const classifier = new LocalSourceClassifier(path.join(dir, "packages", "app"));
+    const kind = async (spec: string) => (await classifier.classify(requested("dep", spec, "directory")))?.kind;
+
+    expect(await kind("file:../shared")).toBe("member");
+    // Excluded with a brace pattern: not a member, so allowedSources applies.
+    expect(await kind("file:../vendor")).toBe("directory");
+    expect(await kind("file:../untrusted")).toBe("directory");
+    expect(await kind("file:../../libs/lib-a")).toBe("member");
+    expect(await kind("file:../../libs/lib-ab")).toBe("directory");
+    expect(await kind("file:../../tools/alpha")).toBe("member");
+    expect(await kind("file:../../tools/gamma")).toBe("directory");
+    // An extended glob is not modelled and never grants membership.
+    expect(await kind("file:../../apps/x")).toBe("directory");
+  });
+
+  it("an exclusion written as an extended glob excludes everything rather than nothing", async () => {
+    const { dir } = await createRepoFixture(tempDirs);
+    await writeFiles(dir, {
+      "package.json": json({ name: "root", private: true, workspaces: ["packages/*", "!packages/@(vendor)"] }),
+      "packages/app/package.json": json({ name: "@repo/app" }),
+      "packages/vendor/package.json": json({ name: "vendor" })
+    });
+    const classifier = new LocalSourceClassifier(path.join(dir, "packages", "app"));
+
+    expect(await classifier.classify(requested("vendor", "file:../vendor", "directory"))).toMatchObject({
+      kind: "directory"
+    });
+  });
+
   it("does not let an in-repository symlink to the outside pass as a member", async () => {
     const dir = await monorepo("pnpm");
     const outside = await mkdtemp(path.join(os.tmpdir(), "safeinstall-outside-"));

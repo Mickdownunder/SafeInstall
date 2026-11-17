@@ -109,30 +109,109 @@ async function readWorkspacePatterns(dir: string): Promise<string[] | undefined>
   }
 }
 
-function patternToRegExp(pattern: string): RegExp {
-  const segments = pattern.split("/").filter((segment) => segment !== "" && segment !== ".");
-  let source = "^";
-  segments.forEach((segment, index) => {
-    const last = index === segments.length - 1;
-    if (segment === "**") {
-      source += last ? ".*" : "(?:[^/]+/)*";
-      return;
+/** Expand `{a,b}` alternatives (nested ones too) into separate patterns. */
+function expandBraces(pattern: string): string[] {
+  let depth = 0;
+  let open = -1;
+  const commas: number[] = [];
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index];
+    if (character === "\\") {
+      index += 1;
+    } else if (character === "{") {
+      if (depth === 0) {
+        open = index;
+        commas.length = 0;
+      }
+      depth += 1;
+    } else if (character === "," && depth === 1) {
+      commas.push(index);
+    } else if (character === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && commas.length > 0) {
+        const bounds = [open, ...commas, index];
+        const alternatives: string[] = [];
+        for (let part = 0; part < bounds.length - 1; part += 1) {
+          alternatives.push(pattern.slice((bounds[part] as number) + 1, bounds[part + 1]));
+        }
+        const prefix = pattern.slice(0, open);
+        const suffix = pattern.slice(index + 1);
+        return alternatives.flatMap((alternative) => expandBraces(`${prefix}${alternative}${suffix}`));
+      }
     }
-    source += segment
-      .split("*")
-      .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
-      .join("[^/]*");
-    source += last ? "" : "/";
-  });
-  return new RegExp(`${source}/?$`);
+  }
+  return [pattern];
 }
+
+/** One path segment of a workspace glob: `*`, `?` and `[...]` classes. */
+function segmentToRegExpSource(segment: string): string {
+  let source = "";
+  for (let index = 0; index < segment.length; index += 1) {
+    const character = segment[index] as string;
+    if (character === "*") {
+      source += "[^/]*";
+    } else if (character === "?") {
+      source += "[^/]";
+    } else if (character === "[") {
+      const close = segment.indexOf("]", index + 2);
+      if (close === -1) {
+        source += "\\[";
+        continue;
+      }
+      let body = segment.slice(index + 1, close);
+      const negated = body.startsWith("!") || body.startsWith("^");
+      if (negated) {
+        body = body.slice(1);
+      }
+      source += `[${negated ? "^" : ""}${body.replace(/[\\\]^]/g, "\\$&")}]`;
+      index = close;
+    } else if (character === "\\" && index + 1 < segment.length) {
+      index += 1;
+      source += (segment[index] as string).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    } else {
+      source += character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return source;
+}
+
+function patternToRegExps(pattern: string): RegExp[] {
+  return expandBraces(pattern).map((expanded) => {
+    const segments = expanded.split("/").filter((segment) => segment !== "" && segment !== ".");
+    let source = "^";
+    segments.forEach((segment, index) => {
+      const last = index === segments.length - 1;
+      if (segment === "**") {
+        source += last ? ".*" : "(?:[^/]+/)*";
+        return;
+      }
+      source += segmentToRegExpSource(segment);
+      source += last ? "" : "/";
+    });
+    return new RegExp(`${source}/?$`);
+  });
+}
+
+/**
+ * Extended glob operators (`+(a|b)`, `@(a)`, `!(a)`) are not modelled. A
+ * pattern that uses one cannot make a path a member, and as an exclusion it
+ * excludes everything, so an unreadable pattern never grants the exemption
+ * from `allowedSources` that membership carries.
+ */
+const EXTENDED_GLOB = /[@!+*?]\(/;
 
 function matchesWorkspace(patterns: readonly string[], relativePath: string): boolean {
   let member = false;
   for (const pattern of patterns) {
     const negated = pattern.startsWith("!");
-    const regexp = patternToRegExp(negated ? pattern.slice(1) : pattern);
-    if (regexp.test(relativePath)) {
+    const body = negated ? pattern.slice(1) : pattern;
+    if (EXTENDED_GLOB.test(body)) {
+      if (negated) {
+        member = false;
+      }
+      continue;
+    }
+    if (patternToRegExps(body).some((regexp) => regexp.test(relativePath))) {
       member = !negated;
     }
   }
