@@ -1,3 +1,5 @@
+import nodePath from "node:path";
+
 import { cliVersionWarning } from "./cli-version";
 import { loadConfig } from "./config";
 import { captureDecisionState, emitDecisionRecord } from "./decision-emit";
@@ -6,8 +8,10 @@ import { formatCommand, printConfigInfo, printWarnings } from "./output";
 import { InstallBindingError, installOptionReasons, runBoundInstall } from "./install-binding";
 import { loadManifestDependencies } from "./project-state";
 import { hasAmbiguousWorkspaceFlags, resolveInvocationContext } from "./project-discovery";
-import { loadProjectInstallTargetsForManager } from "./project-installs";
+import { directLockfileKeys, loadProjectInstallTargetsForManager } from "./project-installs";
 import { RegistryClient } from "./registry";
+import { loadHeadSourceBaseline } from "./source-baseline";
+import { redactCliResult, redactSensitiveText } from "./redaction";
 import { throwIfAborted } from "./signals";
 import { buildInstallPlan, parseManifestDependency } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
@@ -72,10 +76,11 @@ async function collectTargetPackages(
   issues: CliReason[];
   plan: ReturnType<typeof buildInstallPlan>;
   lockfilePath?: string | undefined;
+  directLockfileKeys: ReadonlySet<string>;
 }> {
   const plan = buildInstallPlan(argv);
   if (!plan.projectInstall) {
-    return { issues: [], plan };
+    return { issues: [], plan, directLockfileKeys: new Set<string>() };
   }
 
   const lockfileResult = await loadProjectInstallTargetsForManager(effectiveCwd, packageDir, plan.manager);
@@ -84,7 +89,8 @@ async function collectTargetPackages(
       return {
         issues: lockfileResult.issues.map(createProjectIssueReason),
         plan,
-        lockfilePath: lockfileResult.lockfilePath
+        lockfilePath: lockfileResult.lockfilePath,
+        directLockfileKeys: directLockfileKeys(lockfileResult)
       };
     }
 
@@ -94,7 +100,8 @@ async function collectTargetPackages(
         ...plan,
         packages: lockfileResult.targets.map((target) => target.requested)
       },
-      lockfilePath: lockfileResult.lockfilePath
+      lockfilePath: lockfileResult.lockfilePath,
+      directLockfileKeys: directLockfileKeys(lockfileResult)
     };
   }
 
@@ -108,7 +115,8 @@ async function collectTargetPackages(
     plan: {
       ...plan,
       packages
-    }
+    },
+    directLockfileKeys: new Set<string>()
   };
 }
 
@@ -124,7 +132,7 @@ function createAffectedPackage(evaluation: PackageEvaluation) {
   };
 }
 
-export async function runInstallFlow(
+async function runInstallFlowInternal(
   cwd: string,
   argv: string[],
   options: InstallFlowOptions
@@ -138,13 +146,13 @@ export async function runInstallFlow(
   const versionWarning = cliVersionWarning(config.minimumCliVersion);
   const cliVersionWarnings = versionWarning ? [versionWarning] : [];
 
-  const trust = await trustSurfacePrecheck(invocation.effectiveCwd);
+  const trust = await trustSurfacePrecheck(invocation.effectiveCwd, path);
   if (trust.reasons.length > 0) {
     return {
       mode: "install",
       decision: "block",
       exitCode: 2,
-      exitCodeMeaning: "Install was blocked because the Agent Trust Surface has drifted.",
+      exitCodeMeaning: "Install was blocked by the Agent Trust Surface.",
       command: argv,
       commandString,
       configPath: path,
@@ -218,7 +226,7 @@ export async function runInstallFlow(
     };
   }
 
-  const { issues, plan, lockfilePath } = await collectTargetPackages(
+  const { issues, plan, lockfilePath, directLockfileKeys: directKeys } = await collectTargetPackages(
     invocation.packageDir ?? invocation.effectiveCwd,
     invocation.effectiveCwd,
     argv
@@ -277,29 +285,40 @@ export async function runInstallFlow(
     registryUrl: config.registryUrl,
     signal: options.signal
   });
+  const evaluationDir = invocation.packageDir ?? invocation.effectiveCwd;
   const evaluations = await evaluateRequestedPackages(
-    invocation.packageDir ?? invocation.effectiveCwd,
+    evaluationDir,
     plan.packages,
     registryClient,
     config,
-    options.signal
+    options.signal,
+    await loadHeadSourceBaseline([nodePath.join(evaluationDir, "package.json")], config)
   );
-  const transitive = await evaluateTransitiveDependencies({
-    lockfilePath,
-    directNames: new Set(plan.packages.map((requested) => requested.name)),
-    config
-  });
+  // Explicit additions do not have their candidate lockfile yet. Their
+  // transitive policy is enforced by runBoundInstall after lockfile-only
+  // preparation and before the frozen install.
+  const transitive = plan.projectInstall
+    ? await evaluateTransitiveDependencies({
+        lockfilePath,
+        directLockfileKeys: directKeys,
+        config
+      })
+    : undefined;
 
   const blocked = evaluations.filter((evaluation) => evaluation.blockedReasons.length > 0);
   const warnings = [
     ...cliVersionWarnings,
     ...trustWarnings,
     ...evaluations.flatMap((evaluation) => evaluation.warnings),
-    ...transitive.warnings
+    ...(transitive?.warnings ?? [])
   ];
   const infos = evaluations.flatMap((evaluation) => evaluation.infos);
   const directBlockReasons = blocked.flatMap((evaluation) => evaluation.blockedReasons);
-  const allBlockReasons = [...directBlockReasons, ...transitive.blockedReasons, ...installOptionReasons(plan, config)];
+  const allBlockReasons = [
+    ...directBlockReasons,
+    ...(transitive?.blockedReasons ?? []),
+    ...installOptionReasons(plan, config)
+  ];
 
   // Bind the repository state BEFORE the package manager can change it: the
   // decision record's before/after lockfile bindings are what CI later
@@ -356,11 +375,13 @@ export async function runInstallFlow(
   if (!options.jsonMode) {
     printConfigInfo(path);
     for (const warning of cliVersionWarnings) {
-      console.error(`Warning: ${warning}`);
+      console.error(`Warning: ${redactSensitiveText(warning)}`);
     }
     printWarnings(evaluations);
     if (!decisionState.captured) {
-      console.error(`Info: Decision record not written: ${decisionState.skippedReason}.`);
+      console.error(
+        `Info: Decision record not written: ${redactSensitiveText(decisionState.skippedReason)}.`
+      );
     }
     console.error("Policy checks passed; verifying install artifacts.");
   }
@@ -395,7 +416,9 @@ export async function runInstallFlow(
   warnings.push(...addedWarnings);
   infos.push(...additional.flatMap((evaluation) => evaluation.infos));
   if (!options.jsonMode) {
-    for (const warning of addedWarnings) console.error(`Warning: ${warning}`);
+    for (const warning of addedWarnings) {
+      console.error(`Warning: ${redactSensitiveText(warning)}`);
+    }
   }
 
   if (decisionState.captured) {
@@ -413,13 +436,13 @@ export async function runInstallFlow(
     if (emitted.info) {
       infos.push(emitted.info);
       if (!options.jsonMode) {
-        console.error(`Info: ${emitted.info}`);
+        console.error(`Info: ${redactSensitiveText(emitted.info)}`);
       }
     }
     if (emitted.warning) {
       warnings.push(emitted.warning);
       if (!options.jsonMode) {
-        console.error(`Warning: ${emitted.warning}`);
+        console.error(`Warning: ${redactSensitiveText(emitted.warning)}`);
       }
     }
   }
@@ -455,4 +478,12 @@ export async function runInstallFlow(
       suppressHumanOutput: !options.jsonMode
     }
   };
+}
+
+export async function runInstallFlow(
+  cwd: string,
+  argv: string[],
+  options: InstallFlowOptions
+): Promise<CliResult> {
+  return redactCliResult(await runInstallFlowInternal(cwd, argv, options));
 }

@@ -103,6 +103,16 @@ describe("buildPackageManagerCommand", () => {
       expect(() => buildPackageManagerCommand(manager, [], "install", [flag], config)).toThrow("cannot be enabled");
     }
   });
+
+  it("rejects an unvalidated credential-bearing registry before constructing process arguments", () => {
+    expect(() =>
+      buildPackageManagerCommand("npm", [], "install", ["axios"], {
+        ...config,
+        registryUrl: "https://build-user:build-secret@registry.example.internal/npm?token=query-secret"
+      })
+    ).toThrow("registryUrl must not contain credentials, query parameters, or fragments");
+  });
+
 });
 
 describe("runPackageManager", () => {

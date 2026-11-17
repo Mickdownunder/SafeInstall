@@ -116,9 +116,13 @@ export async function loadNpmProjectInstallTargets(
       continue;
     }
 
+    const localPackageKey = `${packageEntryKey ? `${packageEntryKey}/` : ""}node_modules/${name}`;
+    const hoistedPackageKey = `node_modules/${name}`;
+    const localPackageEntry = lockfile.packages?.[localPackageKey];
+    const hoistedPackageEntry = lockfile.packages?.[hoistedPackageKey];
     const resolvedPackageEntry =
-      lockfile.packages?.[`${packageEntryKey ? `${packageEntryKey}/` : ""}node_modules/${name}`] ??
-      lockfile.packages?.[`node_modules/${name}`] ??
+      localPackageEntry ??
+      hoistedPackageEntry ??
       lockfile.dependencies?.[name];
 
     if (!resolvedPackageEntry) {
@@ -135,6 +139,11 @@ export async function loadNpmProjectInstallTargets(
 
     targets.push({
       manifestSpec,
+      lockfileKey: localPackageEntry
+        ? localPackageKey
+        : hoistedPackageEntry
+          ? hoistedPackageKey
+          : undefined,
       integrity: resolvedPackageEntry.integrity,
       tarballUrl: resolvedPackageEntry.resolved,
       requested:

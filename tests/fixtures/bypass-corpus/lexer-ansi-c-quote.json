@@ -1,0 +1,17 @@
+{
+  "id": "lexer-ansi-c-quote",
+  "category": "lexer",
+  "severity": "bypass",
+  "input": "$'npm' install evil-pkg",
+  "shellBehavior": "ANSI-C quoting yields the literal word npm.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "The dollar sign was kept in the word, so the command name never matched a manager. The quoted body is now read as a literal.",
+  "discoveredBy": "manual review"
+}

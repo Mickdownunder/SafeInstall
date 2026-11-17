@@ -104,6 +104,11 @@ export interface SafeInstallConfig {
   registryUrl: string;
   allowedScripts: Record<string, InstallLifecycleScriptName[]>;
   allowedSources: SourceType[];
+  /**
+   * Reviewed per-package source identities used when a complete prior manifest
+   * is unavailable. Category-wide allowedSources does not establish history.
+   */
+  sourceBaselines?: Record<string, SourceType>;
   allowedPackages: string[];
   packageManagerDefaults: Record<PackageManagerName, PackageManagerDefaults>;
   typoSquat: TypoSquatConfig;
@@ -131,6 +136,16 @@ export interface ProjectDependencyState {
   declaredSourceType?: SourceType | undefined;
   installedVersion?: string | undefined;
 }
+
+export interface DependencySourceBaseline {
+  /** True when a missing package means it was absent, rather than unevaluable. */
+  complete: boolean;
+  sourceTypes: Readonly<Record<string, SourceType>>;
+}
+
+export type PriorSourceEvidence =
+  | { status: "known"; sourceType?: SourceType | undefined }
+  | { status: "unavailable" };
 
 /**
  * Where a package's publish time was observed (RFC-001 §14 D7). The registry
@@ -176,6 +191,7 @@ export type PolicyBlockCode =
   | "attestation-tooling-unavailable"
   | "publisher-mismatch"
   | "package-resolution-failed"
+  | "transitive-evaluation-unavailable"
   | "transitive-install-script"
   | "transitive-untrusted-source"
   | "provenance-downgrade"

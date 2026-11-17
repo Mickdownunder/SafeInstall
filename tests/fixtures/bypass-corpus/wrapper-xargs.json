@@ -1,0 +1,17 @@
+{
+  "id": "wrapper-xargs",
+  "category": "wrapper-command",
+  "severity": "bypass",
+  "input": "echo evil-pkg | xargs npm install",
+  "shellBehavior": "xargs appends the piped name and runs the raw install.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 0,
+    "runners": 0,
+    "unanalyzable": 1,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "See wrapper-timeout.",
+  "discoveredBy": "manual review"
+}

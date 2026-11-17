@@ -6,6 +6,8 @@ import { DEFAULT_REGISTRY_URL } from "./config";
 import { appendDecisionRecord, type DecisionRecordDraft } from "./decision-store";
 import { DECISIONS_RELATIVE_DIR, type DecisionObservation } from "./decision-record";
 import { fileExists } from "./project-discovery";
+import { redactSensitiveArgs, redactSensitiveText } from "./redaction";
+import { requireCredentialFreeRegistryUrl } from "./registry-url";
 import { nonHumanContextMarker } from "./trust-flow";
 import { TRUST_LOCK_RELATIVE_PATH } from "./trust-surface";
 import {
@@ -177,16 +179,22 @@ export function toObservation(
   }
 
   return {
-    name: requested.name,
-    requestedSpec: requested.raw,
+    name: redactSensitiveText(requested.name),
+    requestedSpec: redactSensitiveText(requested.raw),
     sourceType,
     resolvedVersion: resolvedRegistryPackage?.resolvedVersion ?? null,
     publishedAt: resolvedRegistryPackage?.publishedAt.toISOString() ?? null,
     publishTimeSource: resolvedRegistryPackage?.publishTimeSource ?? null,
     findings: [
       ...findings,
-      ...blockedReasons.map((reason) => ({ code: reason.code, message: reason.message }))
-    ],
+      ...blockedReasons.map((reason) => ({
+        code: reason.code,
+        message: redactSensitiveText(reason.message)
+      }))
+    ].map((finding) => ({
+      ...finding,
+      message: redactSensitiveText(finding.message)
+    })),
     notEvaluable: {
       releaseAge: releaseAgeNotEvaluable,
       provenance: provenanceNotEvaluable
@@ -206,11 +214,13 @@ export async function emitDecisionRecord(options: {
   installed: boolean | null;
 }): Promise<{ info?: string; warning?: string }> {
   try {
+    requireCredentialFreeRegistryUrl(options.config.registryUrl);
     const { capture } = options;
     const observations = options.evaluations.map((evaluation) =>
       toObservation(evaluation, options.config)
     );
-    const registryUrl = options.config.registryUrl.replace(/\/+$/, "");
+    const configuredRegistryUrl = options.config.registryUrl.replace(/\/+$/, "");
+    const registryUrl = redactSensitiveText(configuredRegistryUrl);
 
     const draft: DecisionRecordDraft = {
       schemaVersion: 1,
@@ -219,7 +229,7 @@ export async function emitDecisionRecord(options: {
       createdAt: new Date().toISOString(),
       cliVersion: PACKAGE_VERSION,
       request: {
-        command: options.argv,
+        command: redactSensitiveArgs(options.argv),
         packageManager: options.packageManager
       },
       policy: {
@@ -232,13 +242,16 @@ export async function emitDecisionRecord(options: {
           transitiveMode: options.config.transitive.mode,
           continuityMode: options.config.continuity.mode,
           registryUrl,
-          registryDefault: registryUrl === DEFAULT_REGISTRY_URL
+          registryDefault: configuredRegistryUrl === DEFAULT_REGISTRY_URL
         }
       },
       observations,
       verdict: {
         decision: options.decision,
-        reasons: options.reasons.map((reason) => ({ code: reason.code, message: reason.message })),
+        reasons: options.reasons.map((reason) => ({
+          code: reason.code,
+          message: redactSensitiveText(reason.message)
+        })),
         notEvaluableCount: observations.filter(
           (observation) =>
             observation.notEvaluable.releaseAge !== null || observation.notEvaluable.provenance !== null
@@ -266,9 +279,11 @@ export async function emitDecisionRecord(options: {
     };
   } catch (error) {
     return {
-      warning: `Decision record NOT written for this ${options.recordType} decision: ${
-        error instanceof Error ? error.message : String(error)
-      }`
+      warning: redactSensitiveText(
+        `Decision record NOT written for this ${options.recordType} decision: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
     };
   }
 }

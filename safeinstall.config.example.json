@@ -6,6 +6,7 @@
     "esbuild": ["postinstall"]
   },
   "allowedSources": ["registry", "workspace", "file", "directory"],
+  "sourceBaselines": {},
   "allowedPackages": [],
   "packageManagerDefaults": {
     "npm": {

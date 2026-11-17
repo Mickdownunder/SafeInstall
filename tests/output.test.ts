@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { writeCliResult } from "../src/output";
+import { formatCommand, writeCliResult } from "../src/output";
 import type { CliResult } from "../src/types";
 import { present } from "./helpers/present";
 
@@ -28,6 +28,44 @@ function createResult(overrides: Partial<CliResult> = {}): CliResult {
 }
 
 describe("writeCliResult", () => {
+  it("redacts every credential-bearing structured output copy", () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const secret = "top-secret";
+    const requested = `git+https://user:${secret}@example.test/repo.git?token=${secret}`;
+
+    writeCliResult(
+      createResult({
+        command: ["npm", "install", requested, "--password", secret],
+        commandString: `safeinstall npm install ${requested} --password ${secret}`,
+        reasons: [{ code: "blocked", message: `Blocked ${requested}` }],
+        warnings: [`Warning for ${requested}`],
+        infos: [`Info for ${requested}`],
+        affectedPackages: [
+          {
+            name: requested,
+            requested,
+            sourceType: "git",
+            reasons: [{ code: "untrusted-source", message: `Blocked ${requested}` }],
+            warnings: [`Warning for ${requested}`],
+            infos: []
+          }
+        ],
+        execution: {
+          ranPackageManager: true,
+          stdout: `Fetched ${requested}`,
+          stderr: `Rejected ${requested}`
+        }
+      }),
+      true
+    );
+
+    const serialized = String(present(writeSpy.mock.calls[0])[0]);
+    expect(serialized).not.toContain(secret);
+    expect(serialized).toContain("[REDACTED]");
+
+    writeSpy.mockRestore();
+  });
+
   it("writes stable JSON output in json mode", () => {
     const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
 
@@ -56,6 +94,51 @@ describe("writeCliResult", () => {
     expect(payload.details).toBeUndefined();
 
     writeSpy.mockRestore();
+  });
+
+  it("redacts registry credentials from structured command output and presentation", () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const command = [
+      "npm",
+      "install",
+      "axios",
+      "--registry",
+      "https://build-user:build-secret@registry.example.internal/npm?token=query-secret#fragment-secret"
+    ];
+
+    writeCliResult(
+      createResult({ command, commandString: formatCommand("safeinstall", command) }),
+      true
+    );
+
+    const serialized = String(present(writeSpy.mock.calls[0])[0]);
+    const payload = JSON.parse(serialized) as { command: string[]; commandString: string };
+    expect(payload.command).toEqual([
+      "npm",
+      "install",
+      "axios",
+      "--registry",
+      "https://[REDACTED]@registry.example.internal/npm?token=[REDACTED]#fragment-secret"
+    ]);
+    expect(payload.commandString).toBe(
+      "safeinstall npm install axios --registry https://[REDACTED]@registry.example.internal/npm?token=[REDACTED]#fragment-secret"
+    );
+    expect(serialized).not.toContain("build-secret");
+    expect(serialized).not.toContain("query-secret");
+
+    writeSpy.mockRestore();
+  });
+
+  it("redacts verifier allowlist registry credentials from command presentation", () => {
+    expect(
+      formatCommand("safeinstall", [
+        "decisions",
+        "verify",
+        "--allow-registry=https://build-user:build-secret@registry.example.internal/npm?token=query-secret"
+      ])
+    ).toBe(
+      "safeinstall decisions verify --allow-registry=https://[REDACTED]@registry.example.internal/npm?token=[REDACTED]"
+    );
   });
 
   it("renders info lines with an Info: prefix in human mode", () => {

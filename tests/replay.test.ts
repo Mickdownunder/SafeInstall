@@ -72,7 +72,7 @@ describe("attack replay: mastra (2026-06-17)", () => {
 
     const result = await evaluateTransitiveDependencies({
       lockfilePath: path.join(dir, fixture.lockfile),
-      directNames: new Set([fixture.directInstall.name]),
+      directLockfileKeys: new Set([`node_modules/${fixture.directInstall.name}`]),
       config
     });
 
@@ -83,7 +83,7 @@ describe("attack replay: mastra (2026-06-17)", () => {
   it("does not block the transitive dropper when transitive mode is off (honest default)", async () => {
     const result = await evaluateTransitiveDependencies({
       lockfilePath: path.join(dir, fixture.lockfile),
-      directNames: new Set([fixture.directInstall.name]),
+      directLockfileKeys: new Set([`node_modules/${fixture.directInstall.name}`]),
       config: createDefaultConfig()
     });
 
