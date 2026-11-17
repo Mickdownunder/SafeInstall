@@ -21,6 +21,15 @@ const WRITE_REDIRECTIONS = new Set([">", ">>", "<>", ">|", "&>", "&>>", ">&"]);
 const FILE_WRITER_EXECUTABLES = new Set(["tee", "rm", "unlink", "mv", "cp", "truncate", "shred"]);
 const WRAPPER_COMMANDS = new Set(["sudo", "command", "nohup", "time", "env", "exec", "corepack"]);
 const ENV_ASSIGNMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/;
+/**
+ * Reserved words that precede a command without being one: the command they
+ * introduce (`then npm install`, `do npm install`, `! npm install`) runs
+ * exactly like a top-level command, so command-position resolution skips them.
+ */
+const SHELL_KEYWORDS = new Set(["if", "then", "else", "elif", "do", "while", "until", "!", "{"]);
+/** `{a,b}` and `{1..3}` expand into several words before the command runs. */
+const BRACE_EXPANSION_PATTERN = /\{[^{}]*(?:,|\.\.)[^{}]*\}/;
+const PACKAGE_MANAGER_NAMES = new Set(["npm", "pnpm", "bun", "yarn"]);
 
 interface WrapperOptionSpec {
   booleanFlags: ReadonlySet<string>;
@@ -88,9 +97,12 @@ export function splitShellSegments(command: string): ShellSegment[] {
   let tokenStart = -1;
   let tokenQuoted = false;
   let tokenHasExpansion = false;
+  let tokenHasUnquotedBrace = false;
 
   const flushToken = (end: number): void => {
     if (tokenStart === -1) return;
+    if (tokenHasUnquotedBrace && BRACE_EXPANSION_PATTERN.test(tokenValue)) tokenHasExpansion = true;
+    tokenHasUnquotedBrace = false;
     tokens.push({ value: tokenValue, start: tokenStart, end, quoted: tokenQuoted, hasExpansion: tokenHasExpansion });
     tokenValue = "";
     tokenStart = -1;
@@ -123,6 +135,11 @@ export function splitShellSegments(command: string): ShellSegment[] {
       tokenQuoted = true;
       index += 1;
       while (index < command.length && command[index] !== '"') {
+        if (command[index] === "\\" && command[index + 1] === "\n") {
+          // Line continuation: the shell removes both characters.
+          index += 2;
+          continue;
+        }
         if (command[index] === "\\" && index + 1 < command.length) {
           tokenValue += command[index + 1];
           index += 2;
@@ -138,6 +155,13 @@ export function splitShellSegments(command: string): ShellSegment[] {
       index += 1;
       continue;
     }
+    if (character === "\\" && command[index + 1] === "\n") {
+      // Line continuation: the shell removes both characters and keeps the
+      // current word open, so a manager and its subcommand split across lines
+      // are still one command.
+      index += 2;
+      continue;
+    }
     if (character === "\\" && index + 1 < command.length) {
       if (tokenStart === -1) tokenStart = index;
       tokenValue += command[index + 1];
@@ -149,6 +173,33 @@ export function splitShellSegments(command: string): ShellSegment[] {
       if (tokenStart === -1) tokenStart = index;
       tokenValue += character;
       index += 1;
+      continue;
+    }
+    if (character === "$" && command[index + 1] === "'") {
+      // ANSI-C quoting: the quoted body is a literal word. Backslash escapes
+      // are not decoded; the word is marked dynamic instead, with a `$` kept
+      // in its value so command resolution treats the name as unknown.
+      if (tokenStart === -1) tokenStart = index;
+      tokenQuoted = true;
+      index += 2;
+      let body = "";
+      let escaped = false;
+      while (index < command.length && command[index] !== "'") {
+        if (command[index] === "\\" && index + 1 < command.length) {
+          escaped = true;
+          body += command[index + 1];
+          index += 2;
+          continue;
+        }
+        body += command[index++];
+      }
+      index += 1;
+      if (escaped) {
+        tokenHasExpansion = true;
+        tokenValue += `$${body}`;
+      } else {
+        tokenValue += body;
+      }
       continue;
     }
     if (character === "$") {
@@ -182,6 +233,7 @@ export function splitShellSegments(command: string): ShellSegment[] {
         tokenStart = -1;
         tokenQuoted = false;
         tokenHasExpansion = false;
+        tokenHasUnquotedBrace = false;
       } else {
         flushToken(index);
       }
@@ -208,6 +260,7 @@ export function splitShellSegments(command: string): ShellSegment[] {
       continue;
     }
     if (tokenStart === -1) tokenStart = index;
+    if (character === "{") tokenHasUnquotedBrace = true;
     tokenValue += character;
     index += 1;
   }
@@ -220,6 +273,26 @@ export function shellBasename(value: string): string {
   base = base.replace(/\.(cmd|exe|bat|ps1)$/i, "");
   const at = base.indexOf("@", 1);
   return (at > 0 ? base.slice(0, at) : base).toLowerCase();
+}
+
+/**
+ * The package manager a word names, also through its script entry point
+ * (a manager's `-cli.js` or `.cjs` file run by node). Undefined otherwise.
+ */
+export function packageManagerFromWord(value: string): string | undefined {
+  const base = shellBasename(value).replace(/\.[cm]?js$/, "").replace(/-cli$/, "");
+  return PACKAGE_MANAGER_NAMES.has(base) ? base : undefined;
+}
+
+/**
+ * True when the word's command name cannot be read statically: its last path
+ * component still contains an expansion. A dynamic directory in front of a
+ * literal binary name stays static.
+ */
+export function hasDynamicCommandName(token: ShellToken): boolean {
+  if (!token.hasExpansion) return false;
+  const last = token.value.split(/[\\/]/).pop() ?? token.value;
+  return /[$`{]/.test(last);
 }
 
 function redirectionBase(value: string): string | undefined {
@@ -325,6 +398,10 @@ export function findCommandTokenIndex(tokens: ShellToken[]): CommandTokenResolut
       continue;
     }
     if (ENV_ASSIGNMENT_PATTERN.test(value)) {
+      index += 1;
+      continue;
+    }
+    if (!token.quoted && SHELL_KEYWORDS.has(value)) {
       index += 1;
       continue;
     }

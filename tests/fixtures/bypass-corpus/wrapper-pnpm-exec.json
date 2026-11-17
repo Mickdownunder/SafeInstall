@@ -1,0 +1,17 @@
+{
+  "id": "wrapper-pnpm-exec",
+  "category": "wrapper-command",
+  "severity": "bypass",
+  "input": "pnpm exec npm install evil-pkg",
+  "shellBehavior": "pnpm exec runs npm from PATH, which performs a raw install.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 0,
+    "runners": 0,
+    "unanalyzable": 1,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "exec was a known non-install subcommand that owned its arguments. A manager invoked behind it now fails closed.",
+  "discoveredBy": "manual review"
+}
