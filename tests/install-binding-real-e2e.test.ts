@@ -78,7 +78,12 @@ async function fixture(attack: Attack, manager: "npm" | "pnpm", withPeer = false
     await mkdirp(path.join(cwd, "peer"));
     await writeJson(path.join(cwd, "peer", "package.json"), { name: "binding-peer", version: "1.0.0" });
   }
-  await writeDefaultConfig(cwd, { registryUrl: registry });
+  // The peer is a local directory dependency, which is checked against
+  // allowedSources like any other non-workspace local source.
+  await writeDefaultConfig(cwd, {
+    registryUrl: registry,
+    ...(withPeer ? { allowedSources: ["registry", "directory"] } : {})
+  });
   await writeFile(path.join(cwd, "empty.npmrc"), "");
   await writeFile(path.join(cwd, "global.npmrc"), "");
   const env = { ...process.env, SAFEINSTALL_ATTACK_MARKER: marker,
