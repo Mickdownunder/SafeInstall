@@ -1,14 +1,21 @@
-import { mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DECISION_GENESIS_DIGEST } from "../src/decision-record";
+import {
+  DECISION_GENESIS_DIGEST,
+  decisionRecordDigest,
+  decisionRecordFileName,
+  encodeDecisionRecord,
+  type DecisionRecord
+} from "../src/decision-record";
 import {
   appendDecisionRecord,
   decisionsDirForLockfile,
-  readDecisionChain
+  readDecisionChain,
+  type StoredDecisionRecord
 } from "../src/decision-store";
 import { createDecisionDraft } from "./helpers/decision-fixture";
 import { present } from "./helpers/present";
@@ -117,5 +124,157 @@ describe("readDecisionChain", () => {
     );
 
     await expect(readDecisionChain(root, "pnpm-lock.yaml")).rejects.toThrow(/expected seq 1/);
+  });
+});
+
+/**
+ * Parallel branches each append one record at the same chain position; the
+ * merge then holds several records with one seq and one prev (the
+ * 12.09.2026 incident: three records 000013 on one predecessor).
+ */
+describe("readDecisionChain with forked siblings from merged branches", () => {
+  /** Write a record file directly — what a merged branch contributes. */
+  async function writeRecord(root: string, record: DecisionRecord): Promise<string> {
+    const bytes = encodeDecisionRecord(record);
+    const fileName = decisionRecordFileName(record.chain.seq, decisionRecordDigest(bytes));
+    await writeFile(path.join(decisionsDirForLockfile(root, record.lockfile.path), fileName), bytes);
+    return fileName;
+  }
+
+  /** A record at `head`'s successor position, as another branch would write it. */
+  function sibling(head: StoredDecisionRecord, overrides: Partial<DecisionRecord>): DecisionRecord {
+    return {
+      ...head.record,
+      ...overrides,
+      chain: { seq: head.seq + 1, prev: head.digest, archive: null }
+    };
+  }
+
+  /** Twelve linked records — the state before the parallel branches. */
+  async function chainOfTwelve(root: string): Promise<StoredDecisionRecord> {
+    let head: StoredDecisionRecord | undefined;
+    for (let index = 0; index < 12; index += 1) {
+      head = await appendDecisionRecord(root, draft());
+    }
+    return present(head);
+  }
+
+  it("resolves siblings identical except createdAt to the earliest and appends seq 14 onto it", async () => {
+    const root = await createRoot();
+    const twelve = await chainOfTwelve(root);
+    const late = await writeRecord(root, sibling(twelve, { createdAt: "2026-09-12T11:36:38.415Z" }));
+    const earliest = await writeRecord(root, sibling(twelve, { createdAt: "2026-09-12T11:36:11.645Z" }));
+    const middle = await writeRecord(root, sibling(twelve, { createdAt: "2026-09-12T11:36:22.139Z" }));
+
+    const chain = await readDecisionChain(root, "pnpm-lock.yaml");
+    expect(chain).toHaveLength(13);
+    const thirteen = present(chain[12]);
+    expect(thirteen.fileName).toBe(earliest);
+    expect([...(thirteen.duplicateSiblings ?? [])].sort()).toEqual([late, middle].sort());
+
+    const fourteen = await appendDecisionRecord(root, draft());
+    expect(fourteen.seq).toBe(14);
+    expect(fourteen.record.chain.prev).toBe(thirteen.digest);
+    expect(await readDecisionChain(root, "pnpm-lock.yaml")).toHaveLength(14);
+  });
+
+  it("follows the sibling a later record already chains onto, even when it is not the earliest", async () => {
+    const root = await createRoot();
+    const twelve = await chainOfTwelve(root);
+    await writeRecord(root, sibling(twelve, { createdAt: "2026-09-12T11:36:11.645Z" }));
+    const continuedRecord = sibling(twelve, { createdAt: "2026-09-12T11:36:38.415Z" });
+    const continued = await writeRecord(root, continuedRecord);
+    await writeRecord(root, {
+      ...continuedRecord,
+      chain: { seq: 14, prev: decisionRecordDigest(encodeDecisionRecord(continuedRecord)), archive: null }
+    });
+
+    const chain = await readDecisionChain(root, "pnpm-lock.yaml");
+    expect(chain).toHaveLength(14);
+    expect(present(chain[12]).fileName).toBe(continued);
+  });
+
+  it("refuses siblings that record different decisions and names every sibling file with the repair path", async () => {
+    const root = await createRoot();
+    const twelve = await chainOfTwelve(root);
+    const allow = await writeRecord(root, sibling(twelve, { createdAt: "2026-09-12T11:36:11.645Z" }));
+    const block = await writeRecord(
+      root,
+      sibling(twelve, {
+        createdAt: "2026-09-12T11:36:22.139Z",
+        verdict: { decision: "block", reasons: [{ code: "too-new", message: "too new" }], notEvaluableCount: 0 }
+      })
+    );
+
+    const failure = readDecisionChain(root, "pnpm-lock.yaml");
+    await expect(failure).rejects.toThrow(/forked at seq 13/);
+    await expect(failure).rejects.toThrow(new RegExp(allow));
+    await expect(failure).rejects.toThrow(new RegExp(block));
+    await expect(failure).rejects.toThrow(/subdirectory/);
+
+    // Nothing is silently dropped, and nothing is appended past the fork.
+    const dir = decisionsDirForLockfile(root, "pnpm-lock.yaml");
+    const before = (await readdir(dir)).sort();
+    await expect(appendDecisionRecord(root, draft())).rejects.toThrow(/forked at seq 13/);
+    expect((await readdir(dir)).sort()).toEqual(before);
+  });
+
+  it("refuses identical siblings when more than one of them was continued", async () => {
+    const root = await createRoot();
+    const twelve = await chainOfTwelve(root);
+    for (const createdAt of ["2026-09-12T11:36:11.645Z", "2026-09-12T11:36:22.139Z"]) {
+      const record = sibling(twelve, { createdAt });
+      await writeRecord(root, record);
+      await writeRecord(root, {
+        ...record,
+        chain: { seq: 14, prev: decisionRecordDigest(encodeDecisionRecord(record)), archive: null }
+      });
+    }
+
+    await expect(readDecisionChain(root, "pnpm-lock.yaml")).rejects.toThrow(/forked at seq 13/);
+  });
+
+  it("refuses a sibling that does not chain onto the shared predecessor", async () => {
+    const root = await createRoot();
+    const twelve = await chainOfTwelve(root);
+    await writeRecord(root, sibling(twelve, { createdAt: "2026-09-12T11:36:11.645Z" }));
+    const foreign = sibling(twelve, { createdAt: "2026-09-12T11:36:22.139Z" });
+    await writeRecord(root, { ...foreign, chain: { seq: 13, prev: "f".repeat(64), archive: null } });
+
+    await expect(readDecisionChain(root, "pnpm-lock.yaml")).rejects.toThrow(/does not chain/);
+  });
+
+  it("keeps the hand-repaired form valid: set-aside siblings in a subdirectory are evidence, not chain", async () => {
+    const root = await createRoot();
+    const twelve = await chainOfTwelve(root);
+    const kept = await writeRecord(root, sibling(twelve, { createdAt: "2026-09-12T11:36:11.645Z" }));
+    const dir = decisionsDirForLockfile(root, "pnpm-lock.yaml");
+    const setAside = path.join(dir, "gabelung-2026-09-12");
+    await mkdir(setAside);
+    for (const createdAt of ["2026-09-12T11:36:22.139Z", "2026-09-12T11:36:38.415Z"]) {
+      const name = await writeRecord(root, sibling(twelve, { createdAt }));
+      await rename(path.join(dir, name), path.join(setAside, name));
+    }
+    await writeFile(path.join(setAside, "LIESMICH.md"), "set aside\n");
+
+    const chain = await readDecisionChain(root, "pnpm-lock.yaml");
+    expect(chain).toHaveLength(13);
+    expect(present(chain[12]).fileName).toBe(kept);
+    expect(chain.every((entry) => entry.duplicateSiblings === undefined)).toBe(true);
+    expect((await appendDecisionRecord(root, draft())).seq).toBe(14);
+  });
+
+  it("leaves unforked chains exactly as before: no sibling notes, same linkage", async () => {
+    const root = await createRoot();
+    await chainOfTwelve(root);
+
+    const chain = await readDecisionChain(root, "pnpm-lock.yaml");
+    expect(chain.map((entry) => entry.seq)).toEqual(Array.from({ length: 12 }, (_, index) => index + 1));
+    expect(chain.every((entry) => entry.duplicateSiblings === undefined)).toBe(true);
+    for (const [index, entry] of chain.entries()) {
+      expect(entry.record.chain.prev).toBe(
+        index === 0 ? DECISION_GENESIS_DIGEST : present(chain[index - 1]).digest
+      );
+    }
   });
 });
