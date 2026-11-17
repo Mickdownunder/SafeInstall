@@ -293,15 +293,16 @@ async function walkForNestedInstructions(root: string): Promise<string[]> {
  * directory walk is used instead.
  */
 async function discoverNestedInstructionPaths(root: string): Promise<string[]> {
-  if (await fileExists(path.join(root, ".git"))) {
-    try {
-      const listed = await listWorkingTreeFiles(root, new Set(NESTED_INSTRUCTION_NAMES));
-      return listed.filter(isNestedInstructionPath);
-    } catch {
-      // Not a usable repository after all: fall through to the walk.
-    }
+  // Ask git from the trust root itself, which may be a subdirectory of the
+  // repository: `ls-files` then lists paths relative to that directory. This
+  // keeps the directory walk, which runs on every guard call, for trees that
+  // are not in a repository at all.
+  try {
+    const listed = await listWorkingTreeFiles(root, new Set(NESTED_INSTRUCTION_NAMES));
+    return listed.filter(isNestedInstructionPath);
+  } catch {
+    return walkForNestedInstructions(root);
   }
-  return walkForNestedInstructions(root);
 }
 
 /** Hash every existing trust-surface file and parse MCP declarations. */
