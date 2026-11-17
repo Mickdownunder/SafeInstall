@@ -45,21 +45,11 @@ interface PnpmLockfileTree {
   >;
 }
 
-const SOURCE_NOT_POLICY_RELEVANT: ReadonlySet<SourceType> = new Set<SourceType>([
-  "workspace",
-  "file",
-  "directory"
-]);
-
 const SUPPORTED_TRANSITIVE_LOCKFILES = new Set([
   "package-lock.json",
   "npm-shrinkwrap.json",
   "pnpm-lock.yaml"
 ]);
-
-function isSourcePolicyRelevant(sourceType: SourceType): boolean {
-  return !SOURCE_NOT_POLICY_RELEVANT.has(sourceType);
-}
 
 function extractNpmName(packageKey: string): string | undefined {
   const marker = "node_modules/";
@@ -228,9 +218,14 @@ export function evaluateTransitivePackages(
     if (checkInstallScript && pkg.hasInstallScript === true) {
       evaluation.installScriptPackages.push(label(pkg));
     }
+    // Lockfile entries that are `link:` references (every workspace member in
+    // a pnpm lockfile) are first-party directories, not supply-chain sources,
+    // and are never flagged. Local tarballs ("file") are unverifiable artifacts
+    // and are checked against allowedSources like any other source.
     if (
       checkUntrustedSource &&
-      isSourcePolicyRelevant(pkg.sourceType) &&
+      pkg.sourceType !== "workspace" &&
+      pkg.sourceType !== "directory" &&
       !config.allowedSources.includes(pkg.sourceType)
     ) {
       evaluation.untrustedSourcePackages.push(`${label(pkg)} (${pkg.sourceType})`);
