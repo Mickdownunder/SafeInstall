@@ -1,4 +1,4 @@
-/** Shell tokenization and command-position resolution for the agent guard. */
+/** Shell tokenization and command-position resolution for the shell guard. */
 
 export interface ShellToken {
   value: string;

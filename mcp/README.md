@@ -3,7 +3,7 @@
 Wire SafeInstall's supply-chain policy engine into your AI coding agent so it checks every package **before** suggesting or running an install.
 
 > [!TIP]
-> The MCP tool is **advisory** — the agent chooses to call it. For **enforcement** (every agent shell command intercepted before it runs, no cooperation required), also run `safeinstall guard install`. See the "Agent guard" section of the main README. The two layers complement each other: the MCP tool lets the agent pick safe packages proactively; the guard catches anything that slips through.
+> The MCP tool is **advisory** — the agent chooses to call it. For **enforcement** (every agent shell command intercepted before it runs, no cooperation required), also run `safeinstall guard install`. See the "Shell guard" section of the main README. The two layers complement each other: the MCP tool lets the agent pick safe packages proactively; the guard catches anything that slips through.
 
 The CLI (`safeinstall …`) protects humans who type the command. This MCP server protects **agents** — Claude Code, Claude Desktop, Cursor, Windsurf, Cline — by exposing the same engine as a tool the agent can call on its own.
 
