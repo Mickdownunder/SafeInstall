@@ -1,0 +1,17 @@
+{
+  "id": "keyword-if-then",
+  "category": "shell-keyword",
+  "severity": "bypass",
+  "input": "if [ ! -d node_modules ]; then npm install evil-pkg; fi",
+  "shellBehavior": "The then-branch runs the raw install like a top-level command.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "Reserved words (if, then, else, elif, do, while, until, !, {) were taken as the command name, so the manager behind them was never inspected. Command resolution now skips them.",
+  "discoveredBy": "manual review"
+}

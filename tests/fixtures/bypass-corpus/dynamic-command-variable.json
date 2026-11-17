@@ -1,0 +1,17 @@
+{
+  "id": "dynamic-command-variable",
+  "category": "dynamic-command",
+  "severity": "bypass",
+  "input": "a=npm; $a install evil-pkg",
+  "shellBehavior": "The variable expands to npm and the install runs.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 0,
+    "runners": 0,
+    "unanalyzable": 1,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "A command name produced by expansion with an install subcommand right behind it now fails closed.",
+  "discoveredBy": "manual review"
+}
