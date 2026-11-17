@@ -152,6 +152,29 @@ describe("tree helpers", () => {
 
       await expect(changedPaths(repo, base, head)).rejects.toThrow("not valid UTF-8");
       await expect(pathsAtRef(repo, head, "workspace")).rejects.toThrow("not valid UTF-8");
+      // A caller that names the final components it cares about still fails
+      // closed for a lockfile under a non-UTF-8 directory.
+      await expect(changedPaths(repo, base, head, new Set(["package-lock.json"]))).rejects.toThrow(
+        "not valid UTF-8"
+      );
+    }
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "skips unrelated non-UTF-8 paths when the caller names the relevant file names",
+    async () => {
+      const { dir } = await createRepoFixture(tempDirs);
+      const oddFile = Buffer.concat([Buffer.from(path.join(dir, "legacy-"), "utf8"), Buffer.from([0xe9, 0x2e, 0x74, 0x78, 0x74])]);
+      await writeFile(oddFile, "a\n");
+      await writeFile(path.join(dir, "pnpm-lock.yaml"), "v: 1\n");
+      const base = commitAll(dir, "base");
+      await writeFile(oddFile, "b\n");
+      await writeFile(path.join(dir, "pnpm-lock.yaml"), "v: 2\n");
+      const head = commitAll(dir, "change");
+      const repo = (await resolveGitRepo(dir))!;
+
+      expect(await changedPaths(repo, base, head, new Set(["pnpm-lock.yaml"]))).toEqual(["pnpm-lock.yaml"]);
+      await expect(changedPaths(repo, base, head)).rejects.toThrow("not valid UTF-8");
     }
   );
 });

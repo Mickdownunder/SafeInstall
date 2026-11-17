@@ -82,7 +82,11 @@ async function runGitText(cwd: string, args: string[], input?: Buffer): Promise<
 }
 
 /** Decode Git's raw `-z` path output without quoting or delimiter ambiguity. */
-function decodeGitPaths(output: Buffer, gitArgs: string[]): string[] {
+function decodeGitPaths(
+  output: Buffer,
+  gitArgs: string[],
+  relevantNames?: ReadonlySet<string>
+): string[] {
   if (output.length === 0) {
     return [];
   }
@@ -99,14 +103,19 @@ function decodeGitPaths(output: Buffer, gitArgs: string[]): string[] {
     if (end === start) {
       throw new GitError(`git ${gitArgs[0]} returned an empty path.`, gitArgs);
     }
+    const raw = output.subarray(start, end);
     try {
       // Git paths are byte strings. The public API uses JavaScript strings,
-      // so paths outside UTF-8 must fail closed instead of being replaced.
-      paths.push(
-        new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(output.subarray(start, end))
-      );
+      // so a path outside UTF-8 cannot be represented faithfully.
+      paths.push(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw));
     } catch {
-      throw new GitError(`git ${gitArgs[0]} returned a path that is not valid UTF-8.`, gitArgs);
+      // Skipped only when the caller named the final components it cares
+      // about and this path's is not one of them; otherwise fail closed so a
+      // relevant file cannot escape.
+      const base = raw.subarray(raw.lastIndexOf(0x2f) + 1).toString("utf8");
+      if (!relevantNames || relevantNames.has(base)) {
+        throw new GitError(`git ${gitArgs[0]} returned a path that is not valid UTF-8.`, gitArgs);
+      }
     }
     start = end + 1;
   }
@@ -227,7 +236,12 @@ export async function readBlob(repo: GitRepoContext, oid: string): Promise<Buffe
 }
 
 /** Repo-relative paths that differ between two committed revisions. */
-export async function changedPaths(repo: GitRepoContext, baseRef: string, headRef: string): Promise<string[]> {
+export async function changedPaths(
+  repo: GitRepoContext,
+  baseRef: string,
+  headRef: string,
+  relevantNames?: ReadonlySet<string>
+): Promise<string[]> {
   const args = [
     "diff",
     "--name-only",
@@ -237,7 +251,7 @@ export async function changedPaths(repo: GitRepoContext, baseRef: string, headRe
     headRef,
     "--"
   ];
-  return decodeGitPaths(await runGit(repo.root, args), args);
+  return decodeGitPaths(await runGit(repo.root, args), args, relevantNames);
 }
 
 /** Repo-relative paths under `prefix` present in the tree at `ref`. */
