@@ -286,7 +286,7 @@ async function decideGuardCommand(command: string, cwd: string): Promise<GuardDe
 
   const remoteRunners: GuardRunnerMatch[] = [];
   for (const runner of analysis.runners) {
-    if (!(await resolvesLocally(runner, cwd))) {
+    if (!analysis.localRunnerResolutionSafe || !(await resolvesLocally(runner, cwd))) {
       remoteRunners.push(runner);
     }
   }

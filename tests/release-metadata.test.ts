@@ -75,7 +75,8 @@ describe("release metadata", () => {
       lint: "eslint src tests",
       // Build before test: the e2e suites run dist/cli.js via ensureBuiltCli,
       // which skips rebuilding an existing (possibly stale) dist.
-      "release:check": "pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm pack:smoke"
+      "release:verify": "pnpm lint && pnpm typecheck && pnpm build && pnpm test",
+      "release:check": "pnpm release:verify && pnpm pack:smoke"
     });
     expect(packageJson.publishConfig).toMatchObject({
       access: "public"

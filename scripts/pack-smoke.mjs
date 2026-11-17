@@ -9,26 +9,47 @@ const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 async function main() {
-  const packDir = await mkdtemp(path.join(os.tmpdir(), "safeinstall-pack-"));
+  const tarballArguments = process.argv.slice(2);
+  if (tarballArguments.length > 1) {
+    throw new Error("Expected at most one tarball path for the pack smoke test.");
+  }
+
+  const suppliedTarball = tarballArguments[0];
+  const packDir = suppliedTarball
+    ? undefined
+    : await mkdtemp(path.join(os.tmpdir(), "safeinstall-pack-"));
   const installDir = await mkdtemp(path.join(os.tmpdir(), "safeinstall-install-"));
 
   try {
-    await execFileAsync("pnpm", ["pack", "--pack-destination", packDir], {
-      cwd: projectRoot
-    });
+    let tarballPath;
+    if (suppliedTarball) {
+      tarballPath = path.resolve(projectRoot, suppliedTarball);
+    } else {
+      await execFileAsync("pnpm", ["pack", "--pack-destination", packDir], {
+        cwd: projectRoot
+      });
 
-    const tarballs = (await readdir(packDir)).filter((entry) => entry.endsWith(".tgz"));
-    if (tarballs.length !== 1) {
-      throw new Error(`Expected exactly one tarball from pnpm pack, found ${tarballs.length}.`);
+      const tarballs = (await readdir(packDir)).filter((entry) => entry.endsWith(".tgz"));
+      if (tarballs.length !== 1) {
+        throw new Error(`Expected exactly one tarball from pnpm pack, found ${tarballs.length}.`);
+      }
+
+      tarballPath = path.join(packDir, tarballs[0]);
     }
-
-    const tarballPath = path.join(packDir, tarballs[0]);
 
     await execFileAsync("npm", ["init", "-y"], {
       cwd: installDir
     });
 
-    await execFileAsync("npm", ["install", tarballPath], {
+    await execFileAsync(
+      "npm",
+      ["install", "--package-lock-only", "--ignore-scripts", tarballPath],
+      {
+        cwd: installDir
+      }
+    );
+
+    await execFileAsync("npm", ["ci", "--ignore-scripts"], {
       cwd: installDir
     });
 
@@ -84,7 +105,9 @@ async function main() {
 
     console.log(`Smoke test passed for ${path.basename(tarballPath)}.`);
   } finally {
-    await rm(packDir, { recursive: true, force: true });
+    if (packDir) {
+      await rm(packDir, { recursive: true, force: true });
+    }
     await rm(installDir, { recursive: true, force: true });
   }
 }
