@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -131,6 +131,44 @@ async function createAuthorizedFixture(overrides: Record<string, unknown> = {}):
   return { dir, repo, base };
 }
 
+async function addUnsafeNestedProject(fixture: Fixture): Promise<string> {
+  const projectDir = path.join(fixture.dir, "tools", "nested");
+  const manifestPath = path.join(projectDir, "package.json");
+  const lockfileRepoPath = "tools/nested/package-lock.json";
+  await mkdir(projectDir, { recursive: true });
+  await writeFile(
+    manifestPath,
+    JSON.stringify({
+      name: "nested-project",
+      version: "1.0.0",
+      dependencies: { "nested-only": "git+https://example.test/nested-only.git" }
+    }) + "\n"
+  );
+  await writeFile(
+    path.join(projectDir, "package-lock.json"),
+    JSON.stringify({
+      name: "nested-project",
+      lockfileVersion: 3,
+      packages: {
+        "": {
+          name: "nested-project",
+          dependencies: { "nested-only": "git+https://example.test/nested-only.git" }
+        },
+        "node_modules/nested-only": {
+          version: "git+https://example.test/nested-only.git",
+          resolved: "git+https://example.test/nested-only.git"
+        }
+      }
+    }) + "\n"
+  );
+  const after = (await bindFileAsStaged(fixture.repo, lockfileRepoPath)) ?? null;
+  await appendDecisionRecord(
+    fixture.dir,
+    createDecisionDraft({ lockfilePath: lockfileRepoPath, before: null, after, registryUrl })
+  );
+  return manifestPath;
+}
+
 describe("authorizeDecisions", () => {
   it("authorizes a verified delta after a fresh evaluation reaches allow", async () => {
     const fixture = await createAuthorizedFixture();
@@ -148,9 +186,109 @@ describe("authorizeDecisions", () => {
       schemaVersion: 1,
       verdict: "allow",
       headCommit: head,
-      lockfiles: [{ path: "package-lock.json" }]
+      lockfiles: [{
+        path: "package-lock.json",
+        evaluation: {
+          status: "evaluated",
+          importers: [{ manifestPath: "package.json" }]
+        }
+      }]
     });
     expect(result.authorization?.policyBlobOid).not.toBeNull();
+  });
+
+  it("evaluates every workspace importer represented by a verified lockfile", async () => {
+    const fixture = await createAuthorizedFixture();
+    const appDir = path.join(fixture.dir, "packages", "app");
+    await mkdir(appDir, { recursive: true });
+    await writeFile(
+      path.join(appDir, "package.json"),
+      JSON.stringify({
+        name: "workspace-app",
+        version: "1.0.0",
+        dependencies: { "workspace-only": "git+https://example.test/workspace-only.git" }
+      }) + "\n"
+    );
+
+    const before = (await bindFileAsStaged(fixture.repo, "package-lock.json")) ?? null;
+    const lockfilePath = path.join(fixture.dir, "package-lock.json");
+    const lockfile = JSON.parse(await readFile(lockfilePath, "utf8")) as {
+      packages: Record<string, unknown>;
+    };
+    lockfile.packages["packages/app"] = {
+      name: "workspace-app",
+      dependencies: { "workspace-only": "git+https://example.test/workspace-only.git" }
+    };
+    lockfile.packages["packages/app/node_modules/workspace-only"] = {
+      version: "git+https://example.test/workspace-only.git",
+      resolved: "git+https://example.test/workspace-only.git"
+    };
+    await writeFile(lockfilePath, JSON.stringify(lockfile) + "\n");
+    const after = (await bindFileAsStaged(fixture.repo, "package-lock.json")) ?? null;
+    await appendDecisionRecord(
+      fixture.dir,
+      createDecisionDraft({ lockfilePath: "package-lock.json", before, after, registryUrl })
+    );
+    const head = commitAll(fixture.dir, "add unsafe workspace importer");
+
+    const result = await authorizeDecisions(fixture.dir, {
+      baseRef: fixture.base,
+      headRef: head,
+      allowedRegistryUrls: [registryUrl]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.findings.map((finding) => finding.code)).toContain("untrusted-source");
+    expect(result.authorization?.lockfiles[0]?.evaluation.importers).toMatchObject([
+      { manifestPath: "package.json" },
+      { manifestPath: "packages/app/package.json" }
+    ]);
+  });
+
+  it("evaluates every independently nested verified lockfile", async () => {
+    const fixture = await createAuthorizedFixture();
+    await addUnsafeNestedProject(fixture);
+    const head = commitAll(fixture.dir, "add unsafe nested project");
+
+    const result = await authorizeDecisions(fixture.dir, {
+      baseRef: fixture.base,
+      headRef: head,
+      allowedRegistryUrls: [registryUrl]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.findings.map((finding) => finding.code)).toContain("untrusted-source");
+    const nestedCoverage = result.authorization?.lockfiles.find(
+      (lockfile) => lockfile.path === "tools/nested/package-lock.json"
+    );
+    expect(nestedCoverage?.evaluation).toMatchObject({
+      status: "evaluated",
+      importers: [{ manifestPath: "tools/nested/package.json" }]
+    });
+  });
+
+  it("refuses a nested importer manifest that differs from the authorized head", async () => {
+    const fixture = await createAuthorizedFixture();
+    const manifestPath = await addUnsafeNestedProject(fixture);
+    const head = commitAll(fixture.dir, "add nested project");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ name: "nested-project", version: "1.0.0", dependencies: {} }) + "\n"
+    );
+
+    const result = await authorizeDecisions(fixture.dir, {
+      baseRef: fixture.base,
+      headRef: head,
+      allowedRegistryUrls: [registryUrl]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.findings).toContainEqual(
+      expect.objectContaining({ code: "decisions-dirty-state" })
+    );
+    expect(result.findings.map((finding) => finding.message).join(" ")).toContain(
+      "tools/nested/package.json"
+    );
   });
 
   it("blocks when the fresh evaluation finds a policy violation, ignoring the recorded allow", async () => {
