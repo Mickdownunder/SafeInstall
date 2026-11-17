@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
+import { TextDecoder } from "node:util";
 
 /**
  * Git blob bindings for decision records (RFC-001 §5.2, decision D2).
@@ -78,6 +79,38 @@ function runGit(cwd: string, args: string[], input?: Buffer): Promise<Buffer> {
 
 async function runGitText(cwd: string, args: string[], input?: Buffer): Promise<string> {
   return (await runGit(cwd, args, input)).toString("utf8").replace(/\r?\n$/, "");
+}
+
+/** Decode Git's raw `-z` path output without quoting or delimiter ambiguity. */
+function decodeGitPaths(output: Buffer, gitArgs: string[]): string[] {
+  if (output.length === 0) {
+    return [];
+  }
+  if (output[output.length - 1] !== 0) {
+    throw new GitError(`git ${gitArgs[0]} returned malformed NUL-delimited path output.`, gitArgs);
+  }
+
+  const paths: string[] = [];
+  let start = 0;
+  for (let end = 0; end < output.length; end += 1) {
+    if (output[end] !== 0) {
+      continue;
+    }
+    if (end === start) {
+      throw new GitError(`git ${gitArgs[0]} returned an empty path.`, gitArgs);
+    }
+    try {
+      // Git paths are byte strings. The public API uses JavaScript strings,
+      // so paths outside UTF-8 must fail closed instead of being replaced.
+      paths.push(
+        new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(output.subarray(start, end))
+      );
+    } catch {
+      throw new GitError(`git ${gitArgs[0]} returned a path that is not valid UTF-8.`, gitArgs);
+    }
+    start = end + 1;
+  }
+  return paths;
 }
 
 function sha256Hex(bytes: Buffer): string {
@@ -195,26 +228,28 @@ export async function readBlob(repo: GitRepoContext, oid: string): Promise<Buffe
 
 /** Repo-relative paths that differ between two committed revisions. */
 export async function changedPaths(repo: GitRepoContext, baseRef: string, headRef: string): Promise<string[]> {
-  const output = await runGitText(repo.root, [
+  const args = [
     "diff",
     "--name-only",
+    "-z",
     "--no-renames",
     baseRef,
     headRef,
     "--"
-  ]);
-  return output === "" ? [] : output.split("\n");
+  ];
+  return decodeGitPaths(await runGit(repo.root, args), args);
 }
 
 /** Repo-relative paths under `prefix` present in the tree at `ref`. */
 export async function pathsAtRef(repo: GitRepoContext, ref: string, prefix: string): Promise<string[]> {
-  let output: string;
+  const args = ["ls-tree", "-r", "--name-only", "-z", ref, "--", prefix];
+  let output: Buffer;
   try {
-    output = await runGitText(repo.root, ["ls-tree", "-r", "--name-only", ref, "--", prefix]);
+    output = await runGit(repo.root, args);
   } catch {
     return [];
   }
-  return output === "" ? [] : output.split("\n");
+  return decodeGitPaths(output, args);
 }
 
 /** Resolve a revision expression to a full commit id, or undefined. */

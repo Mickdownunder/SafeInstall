@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -92,7 +92,6 @@ describe("tree helpers", () => {
     const base = commitAll(dir, "base");
 
     await writeFile(path.join(dir, "pnpm-lock.yaml"), "v: 2\n");
-    const { mkdir } = await import("node:fs/promises");
     await mkdir(path.join(dir, ".safeinstall", "decisions", "slug"), { recursive: true });
     await writeFile(path.join(dir, ".safeinstall", "decisions", "slug", "000001-abc.json"), "{}");
     const head = commitAll(dir, "change");
@@ -107,4 +106,52 @@ describe("tree helpers", () => {
     ]);
     expect(await blobOidAtRef(repo, base, "missing.txt")).toBeUndefined();
   });
+
+  it.skipIf(process.platform === "win32")(
+    "preserves paths that Git quotes or splits in line-delimited output",
+    async () => {
+      const { dir } = await createRepoFixture(tempDirs);
+      const parentNames = ["unicode-雪", "tab-\t", "newline-\n", 'quote-"', "backslash-\\"];
+      const repoPaths = parentNames.map((parent) => `workspace/${parent}/package-lock.json`).sort();
+
+      for (const repoPath of repoPaths) {
+        await mkdir(path.dirname(path.join(dir, repoPath)), { recursive: true });
+        await writeFile(path.join(dir, repoPath), '{"lockfileVersion":3}\n');
+      }
+      const base = commitAll(dir, "base with unusually named workspaces");
+
+      for (const repoPath of repoPaths) {
+        await writeFile(path.join(dir, repoPath), '{"lockfileVersion":3,"packages":{"evil":{}}}\n');
+      }
+      const head = commitAll(dir, "change unusually named workspace lockfiles");
+      const repo = (await resolveGitRepo(dir))!;
+
+      expect(await changedPaths(repo, base, head)).toEqual(repoPaths);
+      expect(await pathsAtRef(repo, head, "workspace")).toEqual(repoPaths);
+    }
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects repository paths that are not valid UTF-8",
+    async () => {
+      const { dir } = await createRepoFixture(tempDirs);
+      const invalidDir = Buffer.concat([
+        Buffer.from(path.join(dir, "workspace", "invalid-"), "utf8"),
+        Buffer.from([0xff])
+      ]);
+      const lockfilePath = Buffer.concat([
+        invalidDir,
+        Buffer.from(`${path.sep}package-lock.json`, "utf8")
+      ]);
+      await mkdir(invalidDir, { recursive: true });
+      await writeFile(lockfilePath, '{"lockfileVersion":3}\n');
+      const base = commitAll(dir, "base with non-UTF-8 path");
+      await writeFile(lockfilePath, '{"lockfileVersion":3,"packages":{"evil":{}}}\n');
+      const head = commitAll(dir, "change non-UTF-8 path");
+      const repo = (await resolveGitRepo(dir))!;
+
+      await expect(changedPaths(repo, base, head)).rejects.toThrow("not valid UTF-8");
+      await expect(pathsAtRef(repo, head, "workspace")).rejects.toThrow("not valid UTF-8");
+    }
+  );
 });
