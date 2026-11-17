@@ -71,6 +71,34 @@ describe("safeinstall trust (end to end)", () => {
     expect(parsed.reasons.some((reason) => reason.code === "trust-enforcement-drift")).toBe(true);
   });
 
+  it("protects a SafeInstall project in a git subfolder and blocks a planted second lock", async () => {
+    const repo = await createTempDir("safeinstall-trust-e2e-repo-");
+    const stateDir = await createTempDir("safeinstall-trust-state-");
+    await mkdir(path.join(repo, ".git"), { recursive: true });
+    await writeFile(path.join(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+    const cwd = path.join(repo, "frontend");
+    await mkdir(path.join(cwd, ".cursor"), { recursive: true });
+    await writeFile(path.join(cwd, "safeinstall.config.json"), "{}\n");
+    await writeFile(path.join(cwd, ".cursor", "hooks.json"), JSON.stringify({ version: 1 }));
+    const env = { SAFEINSTALL_STATE_DIR: stateDir };
+
+    const lock = await runCli(["trust", "lock"], { cwd, env });
+    expect(lock.code).toBe(0);
+    expect((await runCli(["trust", "status"], { cwd, env })).code).toBe(0);
+
+    await writeFile(path.join(cwd, ".cursor", "hooks.json"), JSON.stringify({ version: 1, evil: true }));
+    const tampered = await runCli(["trust", "status", "--json"], { cwd, env });
+    expect(tampered.code).toBe(2);
+
+    // A second lock planted higher up in the same repository must not shadow it.
+    await mkdir(path.join(repo, ".safeinstall"), { recursive: true });
+    await writeFile(path.join(repo, ".safeinstall", "trust-surface.lock"), "{}\n");
+    const ambiguous = await runCli(["trust", "status", "--json"], { cwd, env });
+    expect(ambiguous.code).toBe(2);
+    const parsed = JSON.parse(ambiguous.stdout) as { reasons: Array<{ code: string }> };
+    expect(parsed.reasons.some((reason) => reason.code === "trust-lock-ambiguous")).toBe(true);
+  });
+
   it("blocks the install flow when the trust surface drifted", async () => {
     const { cwd, stateDir } = await seedLockedProject();
     await writeFile(path.join(cwd, "safeinstall.config.json"), '{"minimumReleaseAgeHours":0}\n');
@@ -82,6 +110,28 @@ describe("safeinstall trust (end to end)", () => {
     expect(install.code).toBe(2);
     const parsed = JSON.parse(install.stdout) as { reasons: Array<{ code: string }> };
     expect(parsed.reasons.some((reason) => reason.code.startsWith("trust-"))).toBe(true);
+  });
+
+  it("blocks an alternate config that is outside the active trust baseline", async () => {
+    const { cwd, stateDir } = await seedLockedProject();
+    const alternateConfig = path.join(cwd, "weak.config.json");
+    await writeFile(
+      alternateConfig,
+      JSON.stringify({ minimumReleaseAgeHours: 0, registryUrl: "https://attacker.invalid" })
+    );
+
+    const install = await runCli(
+      ["--json", "--config", alternateConfig, "npm", "install", "axios"],
+      { cwd, env: { SAFEINSTALL_STATE_DIR: stateDir } }
+    );
+
+    expect(install.code).toBe(2);
+    const parsed = JSON.parse(install.stdout) as {
+      reasons: Array<{ code: string }>;
+      execution?: { ranPackageManager: boolean };
+    };
+    expect(parsed.reasons.some((reason) => reason.code === "trust-unbound-config")).toBe(true);
+    expect(parsed.execution?.ranPackageManager).toBe(false);
   });
 
   it("makes the guard lock down after tampering, via the real hook process", async () => {

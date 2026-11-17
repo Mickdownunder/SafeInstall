@@ -389,7 +389,8 @@ export type TrustFindingKind =
   | "mirror-mismatch"
   | "lock-forged"
   | "lock-removed"
-  | "lock-unreadable";
+  | "lock-unreadable"
+  | "lock-ambiguous";
 
 export interface TrustFinding {
   kind: TrustFindingKind;
@@ -411,33 +412,37 @@ export interface TrustSurfaceStatus {
 }
 
 /**
- * Walk upward from a directory looking for a trust lock. A directory whose
- * ledger-head mirror exists in the user's state dir but whose lock file is
- * gone was tampered with: deleting the lock must not silently disable the
- * trust surface.
+ * True when `candidate/.git` looks like a real git checkout: a directory
+ * containing `HEAD`, or a file (worktree/submodule pointer) starting with
+ * `gitdir:`. An empty `.git` directory is NOT a boundary: otherwise anyone who
+ * can create a directory could declare any subfolder its own "repository" and
+ * thereby make a planted lock authoritative.
  *
- * The walk never leaves the repository that contains `startDir`: a `.git`
- * entry (directory in a normal checkout, file in a worktree or submodule)
- * marks the boundary. Without this stop, a nested checkout — a git worktree
- * under the main checkout's tree, a submodule, a vendored repo — would
- * silently inherit the trust context of the enclosing checkout, and its
- * lock, approvals, and guard decisions would be governed by a baseline it
- * does not own.
+ * Documented limit: a real `git init` inside a locked repository creates a
+ * genuinely independent checkout, and is treated as one by design (that is
+ * what keeps submodules, worktrees and vendored repos independent of an
+ * enclosing checkout the user never locked for them). The lock of the
+ * enclosing repository does not govern it.
  */
-export async function findTrustContext(
-  startDir: string
-): Promise<{ root: string; hasLock: boolean } | undefined> {
+async function isGitBoundary(candidate: string): Promise<boolean> {
+  const gitPath = path.join(candidate, ".git");
+  // Read first and let the failure tell file from directory: a separate
+  // stat-then-read would leave a window in which the entry can be swapped.
+  try {
+    return (await readFile(gitPath, "utf8")).slice(0, 512).startsWith("gitdir:");
+  } catch {
+    // A directory (or no entry at all): a checkout only if it holds HEAD.
+    return fileExists(path.join(gitPath, "HEAD"));
+  }
+}
+
+/** The nearest repository root, recognizing normal checkouts and worktrees. */
+export async function findTrustRepositoryRoot(startDir: string): Promise<string | undefined> {
   let currentDir = path.resolve(startDir);
 
   while (true) {
-    if (await fileExists(trustLockPath(currentDir))) {
-      return { root: currentDir, hasLock: true };
-    }
-    if ((await readLedgerHeadMirror(currentDir)) !== undefined) {
-      return { root: currentDir, hasLock: false };
-    }
-    if (await fileExists(path.join(currentDir, ".git"))) {
-      return undefined;
+    if (await isGitBoundary(currentDir)) {
+      return currentDir;
     }
 
     const parentDir = path.dirname(currentDir);
@@ -446,4 +451,69 @@ export async function findTrustContext(
     }
     currentDir = parentDir;
   }
+}
+
+async function readTrustContextAt(root: string): Promise<{ root: string; hasLock: boolean } | undefined> {
+  if (await fileExists(trustLockPath(root))) {
+    return { root, hasLock: true };
+  }
+  if ((await readLedgerHeadMirror(root)) !== undefined) {
+    return { root, hasLock: false };
+  }
+  return undefined;
+}
+
+export interface TrustContext {
+  root: string;
+  hasLock: boolean;
+  /**
+   * Set only when more than one directory on the path carries a trust lock
+   * (or ledger-head mirror): every such root, nearest first. No lock may
+   * silently shadow another, so callers must treat this as a hard finding.
+   */
+  conflictingRoots?: string[];
+}
+
+/**
+ * Locate the trust lock that governs a directory. A directory whose
+ * ledger-head mirror exists in the user's state dir but whose lock file is
+ * gone was tampered with: deleting the lock must not silently disable the
+ * trust surface.
+ *
+ * Scope: from `startDir` up to and including the nearest real git boundary
+ * (or the filesystem root outside a repository). Every directory on that path
+ * with a lock or mirror is a candidate. Exactly one candidate is authoritative
+ * wherever it sits, so a SafeInstall project living in a repo subfolder keeps
+ * its protection. More than one is ambiguous and is reported through
+ * `conflictingRoots` instead of letting either one win: a planted nested lock
+ * must not shadow the real one, and a planted root lock must not shadow a
+ * project's own. A nested checkout (submodule, worktree, vendored repo) stays
+ * independent because its own `.git` ends the search.
+ */
+export async function findTrustContext(startDir: string): Promise<TrustContext | undefined> {
+  const boundary = await findTrustRepositoryRoot(startDir);
+  const candidates: Array<{ root: string; hasLock: boolean }> = [];
+
+  let currentDir = path.resolve(startDir);
+  while (true) {
+    const context = await readTrustContextAt(currentDir);
+    if (context !== undefined) {
+      candidates.push(context);
+    }
+
+    const parentDir = path.dirname(currentDir);
+    if (currentDir === boundary || parentDir === currentDir) {
+      break;
+    }
+    currentDir = parentDir;
+  }
+
+  const [nearest, ...rest] = candidates;
+  if (nearest === undefined) {
+    return undefined;
+  }
+  if (rest.length === 0) {
+    return nearest;
+  }
+  return { ...nearest, conflictingRoots: candidates.map((candidate) => candidate.root) };
 }

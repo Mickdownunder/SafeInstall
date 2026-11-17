@@ -394,7 +394,7 @@ Instruction content drift only warns by default because Claude Code writes to `C
 
 ## Configuration
 
-Optional `safeinstall.config.json` — discovered by walking upward from the project directory, or passed explicitly with `--config <path>`. An explicit path that cannot be read is an error (exit 1), never a silent fallback to defaults.
+Optional `safeinstall.config.json` — discovered by walking upward from the project directory, or passed explicitly with `--config <path>`. An explicit path that cannot be read is an error (exit 1), never a silent fallback to defaults. `--config` must come before the command (`safeinstall --config <path> check`); after the command it is an error. In a project with a trust lock, only the locked `safeinstall.config.json` at the trust root is accepted: any other config, whether passed explicitly or discovered in a subfolder or parent folder, blocks with `trust-unbound-config`.
 
 ```json
 {
