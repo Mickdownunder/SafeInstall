@@ -13,6 +13,32 @@ export interface ShellSegment {
   start: number;
   end: number;
   hasSubstitution: boolean;
+  /**
+   * True for `$(...)`, backticks and process substitution. Plain `( ... )`
+   * grouping sets `hasSubstitution` (fail-closed for installs) but not this.
+   */
+  hasCommandSubstitution: boolean;
+  /** Unquoted parentheses seen in this segment, in order. */
+  scopeEvents: ScopeEvent[];
+  /** Shell operator joining the previous non-empty segment to this one. */
+  connector?: "sequence" | "and" | "or" | "pipe" | "background";
+}
+
+export interface ScopeEvent {
+  type: "open" | "close";
+  /** True for `$(`, `<(` and `>(`; false for a plain subshell or function-body paren. */
+  substitution: boolean;
+  /** Number of complete tokens that precede the parenthesis in its segment. */
+  tokenCount: number;
+}
+
+export interface ShellWriteTarget {
+  token: ShellToken;
+  kind: "redirection" | "argument";
+  /** True when a directory operand is removed or moved as a whole (`rm -r`, `mv`). */
+  recursive: boolean;
+  /** True for `>(...)`: the target is a process, not a path. */
+  processSubstitution?: boolean;
 }
 
 const REDIRECTION_OPERATORS = ["&>>", "<<<", "<<-", ">>", "<<", "<>", ">|", ">&", "<&", "&>", ">", "<"] as const;
@@ -92,7 +118,10 @@ export function splitShellSegments(command: string): ShellSegment[] {
   const segments: ShellSegment[] = [];
   let tokens: ShellToken[] = [];
   let segmentStart = 0;
+  let connector: ShellSegment["connector"];
   let hasSubstitution = false;
+  let hasCommandSubstitution = false;
+  let scopeEvents: ScopeEvent[] = [];
   let tokenValue = "";
   let tokenStart = -1;
   let tokenQuoted = false;
@@ -113,10 +142,20 @@ export function splitShellSegments(command: string): ShellSegment[] {
   const flushSegment = (end: number): void => {
     flushToken(end);
     if (tokens.length > 0 || hasSubstitution) {
-      segments.push({ tokens, start: segmentStart, end, hasSubstitution });
+      segments.push({
+        tokens,
+        start: segmentStart,
+        end,
+        hasSubstitution,
+        hasCommandSubstitution,
+        scopeEvents,
+        ...(connector === undefined ? {} : { connector })
+      });
     }
     tokens = [];
     hasSubstitution = false;
+    hasCommandSubstitution = false;
+    scopeEvents = [];
   };
 
   let index = 0;
@@ -147,9 +186,15 @@ export function splitShellSegments(command: string): ShellSegment[] {
         }
         if (command[index] === "$") {
           tokenHasExpansion = true;
-          if (command[index + 1] === "(") hasSubstitution = true;
+          if (command[index + 1] === "(") {
+            hasSubstitution = true;
+            hasCommandSubstitution = true;
+          }
         }
-        if (command[index] === "`") hasSubstitution = true;
+        if (command[index] === "`") {
+          hasSubstitution = true;
+          hasCommandSubstitution = true;
+        }
         tokenValue += command[index++];
       }
       index += 1;
@@ -170,6 +215,7 @@ export function splitShellSegments(command: string): ShellSegment[] {
     }
     if (character === "`") {
       hasSubstitution = true;
+      hasCommandSubstitution = true;
       if (tokenStart === -1) tokenStart = index;
       tokenValue += character;
       index += 1;
@@ -205,7 +251,10 @@ export function splitShellSegments(command: string): ShellSegment[] {
     if (character === "$") {
       if (tokenStart === -1) tokenStart = index;
       tokenHasExpansion = true;
-      if (command[index + 1] === "(") hasSubstitution = true;
+      if (command[index + 1] === "(") {
+        hasSubstitution = true;
+        hasCommandSubstitution = true;
+      }
       tokenValue += character;
       index += 1;
       continue;
@@ -216,7 +265,18 @@ export function splitShellSegments(command: string): ShellSegment[] {
     }
     if (character === "\n" || character === ";") {
       flushSegment(index);
+      connector = "sequence";
       segmentStart = ++index;
+      continue;
+    }
+
+    if ((character === ">" || character === "<") && command[index + 1] === "(") {
+      if (tokenStart === -1) tokenStart = index;
+      hasSubstitution = true;
+      hasCommandSubstitution = true;
+      tokenHasExpansion = true;
+      tokenValue += character;
+      index += 1;
       continue;
     }
 
@@ -251,12 +311,20 @@ export function splitShellSegments(command: string): ShellSegment[] {
       const pair = command.slice(index, index + 2);
       flushSegment(index);
       index += pair === "&&" || pair === "||" ? 2 : 1;
+      connector = pair === "&&" ? "and" : pair === "||" ? "or" : character === "|" ? "pipe" : "background";
       segmentStart = index;
       continue;
     }
     if (character === "(" || character === ")") {
       hasSubstitution = true;
-      flushToken(index++);
+      flushToken(index);
+      const previous = command[index - 1];
+      scopeEvents.push({
+        type: character === "(" ? "open" : "close",
+        substitution: character === "(" && (previous === "$" || previous === "<" || previous === ">"),
+        tokenCount: tokens.length
+      });
+      index += 1;
       continue;
     }
     if (tokenStart === -1) tokenStart = index;
@@ -416,18 +484,46 @@ export function findCommandTokenIndex(tokens: ShellToken[]): CommandTokenResolut
   return { index: -1, corepackToken };
 }
 
-export function collectWriteTargets(tokens: ShellToken[], commandIndex: number): string[] {
-  const targets: string[] = [];
+/** Number of `{` group openers that lead the segment (`{ cd x`, `if { ...`). */
+export function leadingBraceOpens(tokens: ShellToken[]): number {
+  let opens = 0;
+  for (const token of tokens) {
+    if (token.quoted || !SHELL_KEYWORDS.has(token.value)) break;
+    if (token.value === "{") opens += 1;
+  }
+  return opens;
+}
+
+/** True when the segment starts with the `}` that closes a `{ ...; }` group. */
+export function startsWithBraceClose(tokens: ShellToken[]): boolean {
+  const first = tokens[0];
+  return first !== undefined && !first.quoted && first.value === "}";
+}
+
+export function collectWriteTargetTokens(tokens: ShellToken[], commandIndex: number): ShellWriteTarget[] {
+  const targets: ShellWriteTarget[] = [];
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
     if (token === undefined) {
       continue;
     }
     const operator = redirectionBase(token.value);
+    if (operator && token.hasExpansion) {
+      if (WRITE_REDIRECTIONS.has(operator)) {
+        targets.push({ token, kind: "redirection", recursive: false, processSubstitution: true });
+      }
+      continue;
+    }
     if (operator && WRITE_REDIRECTIONS.has(operator)) {
-      const target = tokens[index + 1]?.value;
-      const duplicatesFd = (operator === ">&" || operator === "<&") && /^-?\d+$/.test(target ?? "");
-      if (target && target !== "/dev/null" && !duplicatesFd) targets.push(target);
+      const target = tokens[index + 1];
+      const duplicatesFd =
+        (operator === ">&" || operator === "<&") &&
+        target !== undefined &&
+        !target.hasExpansion &&
+        /^-?\d+$/.test(target.value);
+      if (target && (target.value !== "/dev/null" || target.hasExpansion) && !duplicatesFd) {
+        targets.push({ token: target, kind: "redirection", recursive: false });
+      }
       index += 1;
     }
   }
@@ -436,9 +532,24 @@ export function collectWriteTargets(tokens: ShellToken[], commandIndex: number):
   if (commandToken === undefined) return targets;
   const executable = shellBasename(commandToken.value);
   const args = stripRedirections(tokens.slice(commandIndex + 1));
-  const isInPlaceSed = executable === "sed" && args.some((token) => token.value === "-i" || token.value.startsWith("-i"));
+  const isInPlaceSed =
+    executable === "sed" &&
+    args.some(
+      (token) => token.value.startsWith("-i") || token.value === "--in-place" || token.value.startsWith("--in-place=")
+    );
   if (FILE_WRITER_EXECUTABLES.has(executable) || isInPlaceSed) {
-    for (const token of args) if (!token.value.startsWith("-")) targets.push(token.value);
+    const recursive =
+      executable === "mv" ||
+      (executable === "rm" &&
+        args.some((token) => /^-[A-Za-z]*[rRd][A-Za-z]*$/.test(token.value) || token.value === "--recursive" || token.value === "--dir"));
+    for (const token of args) {
+      if (!token.value.startsWith("-")) targets.push({ token, kind: "argument", recursive });
+    }
   }
   return targets;
+}
+
+/** Backward-compatible best-effort target values used by parser consumers. */
+export function collectWriteTargets(tokens: ShellToken[], commandIndex: number): string[] {
+  return collectWriteTargetTokens(tokens, commandIndex).map(({ token }) => token.value);
 }
