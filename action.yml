@@ -86,11 +86,11 @@ runs:
           const integrity = process.env.SAFEINSTALL_CLI_INTEGRITY || "";
           const exactVersion = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
           if (!exactVersion.test(version)) {
-            console.error("Invalid SafeInstall version: expected an exact semantic version, not a dist-tag or range.");
+            console.error("Invalid SafeInstall version: expected an exact semantic version such as `version: 0.15.0`, not a dist-tag (latest, next) or a range.");
             process.exit(2);
           }
           if (!integrity.startsWith("sha512-")) {
-            console.error("Invalid SafeInstall integrity: expected a canonical sha512 SRI.");
+            console.error("SafeInstall Action: the `integrity` input is required. Add `integrity: sha512-...` (the dist.integrity of safeinstall-cli@" + version + ", verified against the release provenance, for example `npm view safeinstall-cli@" + version + " dist.integrity`) next to `version: " + version + "`, and pin this Action to a reviewed commit SHA.");
             process.exit(2);
           }
           const encoded = integrity.slice("sha512-".length);

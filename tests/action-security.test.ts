@@ -79,10 +79,11 @@ describe("GitHub Action install input boundary", () => {
     };
     const install = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!.run!;
 
-    expect(action.inputs.version.default).toBe(packageVersion);
-    expect(action.inputs.integrity.required).toBe(true);
-    expect(action.inputs.integrity.default).toBeUndefined();
-    expect(install).toContain("expected an exact semantic version, not a dist-tag or range");
+    expect(action.inputs.version?.default).toBe(packageVersion);
+    expect(action.inputs.integrity?.required).toBe(true);
+    expect(action.inputs.integrity?.default).toBeUndefined();
+    expect(install).toContain("expected an exact semantic version such as `version: 0.15.0`");
+    expect(install).toContain("the `integrity` input is required. Add `integrity: sha512-...`");
     expect(install).toContain("timingSafeEqual(actual, expected)");
     expect(install).toContain('npm install -g "$SAFEINSTALL_TARBALL" --ignore-scripts');
     expect(install).not.toMatch(/npm install -g ["']?safeinstall-cli@/);
@@ -102,8 +103,8 @@ describe("GitHub Action install input boundary", () => {
     expect(mcpReadme).not.toContain('"args": ["safeinstall-cli", "mcp"]');
     expect(mcpReadme).not.toContain("npx safeinstall-cli");
     expect(mcpReadme).toContain("/absolute/path/to/safeinstall-mcp/node_modules/safeinstall-cli/dist/cli.js");
-    expect(mcpConfig).toContain('"args": ["dist/cli.js", "mcp"]');
-    expect(mcpConfig).not.toContain('"command": "npx"');
+    // The repository's own MCP config must not resolve a floating publication.
+    expect(mcpConfig).not.toMatch(/safeinstall-cli["']|safeinstall-cli@(latest|next)/);
   });
 
   it.each(["substitution", "quote-breakout", "backticks"])("passes %s as data, not shell code", async attack => {
