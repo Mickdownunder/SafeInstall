@@ -35,6 +35,21 @@ exec "${portable(process.execPath)}" "${portable(path.join(stub.dir, "npm-stub.j
   return stub;
 }
 
+/**
+ * A stub that the Action's bash step can run by its bare name. On Windows
+ * bash does not resolve the .cmd shim, and without a sh wrapper the real
+ * program (for example the system curl) would run instead.
+ */
+async function writeBashStub(dir: string, name: string, nodeScript: string): Promise<void> {
+  await writeStubExecutable(dir, name, nodeScript);
+  if (process.platform === "win32") {
+    const portable = (file: string) => file.split(path.sep).join("/");
+    await writeFile(path.join(dir, name), `#!/bin/sh
+exec "${portable(process.execPath)}" "${portable(path.join(dir, `${name}-stub.js`))}" "$@"
+`, { mode: 0o755 });
+  }
+}
+
 async function actionSafeInstallStub() {
   const dir = await createTempDir("safeinstall-action-cli-");
   const logPath = path.join(dir, "safeinstall.args.log");
@@ -188,7 +203,7 @@ describe("GitHub Action install input boundary", () => {
     const step = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!;
     const stub = await actionNpmStub();
     // The registry answers with bytes that are not the recorded release.
-    await writeStubExecutable(stub.dir, "curl", `
+    await writeBashStub(stub.dir, "curl", `
 const args = process.argv.slice(2);
 require("node:fs").writeFileSync(args[args.indexOf("--output") + 1], "substituted release");
 `);
@@ -232,7 +247,7 @@ require("node:fs").writeFileSync(args[args.indexOf("--output") + 1], "substitute
     const stub = await actionNpmStub();
     const archive = Buffer.from("reviewed SafeInstall release artifact");
     const integrity = `sha512-${createHash("sha512").update(archive).digest("base64")}`;
-    await writeStubExecutable(stub.dir, "curl", `
+    await writeBashStub(stub.dir, "curl", `
 const args = process.argv.slice(2);
 const output = args[args.indexOf("--output") + 1];
 require("node:fs").writeFileSync(output, Buffer.from(${JSON.stringify(archive.toString("base64"))}, "base64"));
@@ -247,10 +262,12 @@ require("node:fs").writeFileSync(output, Buffer.from(${JSON.stringify(archive.to
       PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
     } });
 
-    expect(await readLoggedArgs(stub.logPath)).toEqual([
+    // bash joins RUNNER_TEMP and the file name with "/", also on Windows.
+    const slashes = (value: string) => value.split("\\").join("/");
+    expect((await readLoggedArgs(stub.logPath)).map(slashes)).toEqual([
       "install",
       "-g",
-      path.join(stub.dir, `safeinstall-cli-${packageVersion}.tgz`),
+      slashes(path.join(stub.dir, `safeinstall-cli-${packageVersion}.tgz`)),
       "--ignore-scripts"
     ]);
   });
@@ -261,7 +278,7 @@ require("node:fs").writeFileSync(output, Buffer.from(${JSON.stringify(archive.to
     };
     const step = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!;
     const stub = await actionNpmStub();
-    await writeStubExecutable(stub.dir, "curl", `
+    await writeBashStub(stub.dir, "curl", `
 const args = process.argv.slice(2);
 const output = args[args.indexOf("--output") + 1];
 require("node:fs").writeFileSync(output, "attacker bytes");
