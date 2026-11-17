@@ -308,19 +308,31 @@ describe("decideGuard trust surface", () => {
     }
   });
 
-  it("fails closed for expanded targets and unmodeled cwd changes", async () => {
+  it("fails closed when an expanded target or an unmodeled cwd change could reach the surface", async () => {
     const root = await lockedProject();
     for (const command of [
-      "echo evil > \"$TARGET\"",
       "echo evil > \"$(pwd)/safeinstall.config.json\"",
-      "tee >(cat > safeinstall.config.json)",
       "pushd packages/app && echo evil > ../../safeinstall.config.json",
-      "time cd packages/app && echo evil > ../../safeinstall.config.json",
-      "(cd packages/app) && echo evil > safeinstall.config.json"
+      "time cd packages/app && echo evil > ../../safeinstall.config.json"
     ]) {
       const decision = await decideGuard(command, root);
       expect(decision.action, command).toBe("deny");
       expect(decision.userMessage, command).toContain("could not be resolved safely");
+    }
+    for (const command of [
+      "tee >(cat > safeinstall.config.json)",
+      "(cd packages/app) && echo evil > safeinstall.config.json"
+    ]) {
+      const decision = await decideGuard(command, root);
+      expect(decision.action, command).toBe("deny");
+      expect(decision.userMessage, command).toContain("safeinstall.config.json");
+    }
+  });
+
+  it("allows expanded targets whose literal parts name nothing protected", async () => {
+    const root = await lockedProject();
+    for (const command of ["echo ok > \"$TARGET\"", "echo ok > out-$(date +%F).txt"]) {
+      expect(await decideGuard(command, root), command).toEqual({ action: "allow" });
     }
   });
 

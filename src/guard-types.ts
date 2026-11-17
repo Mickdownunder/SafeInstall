@@ -22,11 +22,30 @@ export interface GuardRunnerMatch {
   segmentText: string;
 }
 
+/** One piece of a shell word after quote removal. */
+export type WordPart =
+  /** Characters the shell takes literally (quoted, escaped or plain). */
+  | { kind: "text"; value: string }
+  /** An unquoted glob: `*`, `?` or a bracket class such as `[ab]`. */
+  | { kind: "glob"; value: string }
+  /** A leading unquoted `~`. */
+  | { kind: "tilde" }
+  /** `$NAME` or `${NAME}`. */
+  | { kind: "var"; name: string }
+  /** Anything else the shell expands at run time (substitution, `~user`, `${x:-y}`, ...). */
+  | { kind: "unknown" };
+
 /** Static shell-resolution context for one recognized write target. */
 export interface GuardWriteOperation {
+  /** The target word as the tokenizer saw it. */
   target: string;
   /** True when the shell can expand or substitute the target before execution. */
   hasExpansion: boolean;
+  /** The target word split into parts; several entries when brace expansion applies. */
+  words: WordPart[][];
+  kind: "redirection" | "argument";
+  /** True when a directory target is removed or moved as a whole (`rm -r`, `mv`). */
+  recursive: boolean;
   /** Literal cwd changes to apply in order from the hook event's initial cwd. */
   cwdVariants: string[][];
   /** True when at least one reachable cwd cannot be represented statically. */

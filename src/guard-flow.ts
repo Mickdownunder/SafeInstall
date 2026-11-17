@@ -5,7 +5,7 @@ import { loadConfig } from "./config";
 import { analyzeShellCommand } from "./guard-commands";
 import type { GuardRunnerMatch } from "./guard-commands";
 import { findNearestUpward } from "./project-discovery";
-import { isTrustSurfacePath } from "./trust-surface";
+import { findProtectedWrite } from "./guard-write-match";
 import type { TrustSurfaceStatus } from "./trust-surface";
 import { checkTrustSurface, partitionTrustFindings } from "./trust-surface-check";
 
@@ -125,7 +125,6 @@ const TRUST_APPROVE_INSTRUCTION =
  * - shell writes targeting protected files are denied outright.
  */
 async function decideTrustSurface(
-  _command: string,
   cwd: string,
   analysis: ReturnType<typeof analyzeShellCommand>
 ): Promise<GuardDecision | undefined> {
@@ -159,32 +158,29 @@ async function decideTrustSurface(
     };
   }
 
-  const unresolvedWrite = analysis.writeOperations.find(
-    (operation) => operation.hasExpansion || operation.cwdUncertain
-  );
-  if (unresolvedWrite) {
+  const protectedWrite = await findProtectedWrite(analysis.writeOperations, {
+    root: status.root,
+    cwd
+  });
+  if (protectedWrite?.exact === false) {
+    const target = protectedWrite.operation.target;
     return {
       action: "deny",
-      userMessage: `SafeInstall blocked a write whose target could not be resolved safely: ${unresolvedWrite.target}.`,
+      userMessage: `SafeInstall blocked a write whose target could not be resolved safely: ${target}.`,
       agentMessage:
-        `SafeInstall guard: the destination of ${JSON.stringify(unresolvedWrite.target)} depends on shell expansion ` +
-        "or an unmodeled working-directory change. With an active trust lock, write targets must be literal and " +
-        "their execution directory must be statically known so protected policy, hook, rules, and MCP files cannot be bypassed."
+        `SafeInstall guard: ${JSON.stringify(target)} could land on the Agent Trust Surface (SafeInstall policy, ` +
+        "agent hooks, rules files, MCP configs): its path depends on a glob, a shell expansion, or a " +
+        "working-directory change the guard cannot follow. Agents must not modify the surface. Spell the " +
+        "destination out literally, or ask the user to make the change and approve it with `safeinstall trust approve`."
     };
   }
-
-  const protectedWrite = analysis.writeOperations.find((operation) =>
-    operation.cwdVariants.some((changes) => {
-      const effectiveCwd = changes.reduce((directory, change) => path.resolve(directory, change), cwd);
-      return isTrustSurfacePath(status.root as string, path.resolve(effectiveCwd, operation.target));
-    })
-  );
   if (protectedWrite) {
+    const target = protectedWrite.operation.target;
     return {
       action: "deny",
-      userMessage: `SafeInstall blocked a write to the protected file ${protectedWrite.target}.`,
+      userMessage: `SafeInstall blocked a write to the protected file ${target}.`,
       agentMessage:
-        `SafeInstall guard: ${JSON.stringify(protectedWrite.target)} is part of the Agent Trust Surface ` +
+        `SafeInstall guard: ${JSON.stringify(target)} is part of the Agent Trust Surface ` +
         "(SafeInstall policy, agent hooks, rules files, MCP configs). Agents must not modify it. " +
         "If the user wants this change, they can make it themselves and approve it with `safeinstall trust approve`."
     };
@@ -257,7 +253,7 @@ export async function decideGuard(command: string, cwd: string = process.cwd()):
 async function decideGuardCommand(command: string, cwd: string): Promise<GuardDecision> {
   const analysis = analyzeShellCommand(command);
 
-  const trustDecision = await decideTrustSurface(command, cwd, analysis);
+  const trustDecision = await decideTrustSurface(cwd, analysis);
   if (trustDecision) {
     return trustDecision;
   }
