@@ -22,6 +22,8 @@ import { present } from "./helpers/present";
  */
 
 const tempDirs: string[] = [];
+const REGISTRY_INTEGRITY = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
+const ATTACKER_INTEGRITY = `sha512-${Buffer.alloc(64, 8).toString("base64")}`;
 let server: Server;
 let registryUrl: string;
 
@@ -40,7 +42,14 @@ beforeAll(async () => {
     const [name, version] = segments;
     if (name && version) {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ version, dist: {}, scripts: {} }));
+      res.end(JSON.stringify({
+        version,
+        dist: {
+          tarball: `${registryUrl}/${name}/-/${name}-${version}.tgz`,
+          integrity: REGISTRY_INTEGRITY
+        },
+        scripts: {}
+      }));
       return;
     }
     if (name) {
@@ -77,7 +86,10 @@ interface Fixture {
   base: string;
 }
 
-async function createAuthorizedFixture(overrides: Record<string, unknown> = {}): Promise<Fixture> {
+async function createAuthorizedFixture(
+  overrides: Record<string, unknown> = {},
+  lockfileArtifact: { resolved?: string; integrity?: string } = {}
+): Promise<Fixture> {
   const { dir } = await createRepoFixture(tempDirs);
   await writeFile(
     path.join(dir, "package.json"),
@@ -119,7 +131,11 @@ async function createAuthorizedFixture(overrides: Record<string, unknown> = {}):
       lockfileVersion: 3,
       packages: {
         "": { name: "authorize-fixture", dependencies: { "left-pad": "1.13.2" } },
-        "node_modules/left-pad": { version: "1.13.2", resolved: "", integrity: "" }
+        "node_modules/left-pad": {
+          version: "1.13.2",
+          resolved: lockfileArtifact.resolved ?? `${registryUrl}/left-pad/-/left-pad-1.13.2.tgz`,
+          integrity: lockfileArtifact.integrity ?? REGISTRY_INTEGRITY
+        }
       }
     }) + "\n"
   );
@@ -422,6 +438,24 @@ describe("authorizeDecisions", () => {
     expect(result.ok).toBe(false);
     expect(result.authorization?.verdict).toBe("block");
     expect(result.findings.map((finding) => finding.code)).toContain("release-too-new");
+  });
+
+  it("blocks an attacker URL and digest that do not match the checked registry artifact", async () => {
+    const fixture = await createAuthorizedFixture({}, {
+      resolved: "https://attacker.example/left-pad-1.13.2.tgz",
+      integrity: ATTACKER_INTEGRITY
+    });
+    const head = commitAll(fixture.dir, "record attacker-controlled lockfile artifact");
+
+    const result = await authorizeDecisions(fixture.dir, {
+      baseRef: fixture.base,
+      headRef: head,
+      allowedRegistryUrls: [registryUrl]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.authorization?.verdict).toBe("block");
+    expect(result.findings.map((finding) => finding.code)).toContain("artifact-binding-failed");
   });
 
   it("fails on a broken chain before evaluating anything", async () => {
