@@ -7,6 +7,7 @@ import { appendDecisionRecord, type DecisionRecordDraft } from "./decision-store
 import { DECISIONS_RELATIVE_DIR, type DecisionObservation } from "./decision-record";
 import { fileExists } from "./project-discovery";
 import { redactSensitiveArgs, redactSensitiveText } from "./redaction";
+import { requireCredentialFreeRegistryUrl } from "./registry-url";
 import { nonHumanContextMarker } from "./trust-flow";
 import { TRUST_LOCK_RELATIVE_PATH } from "./trust-surface";
 import {
@@ -213,6 +214,7 @@ export async function emitDecisionRecord(options: {
   installed: boolean | null;
 }): Promise<{ info?: string; warning?: string }> {
   try {
+    requireCredentialFreeRegistryUrl(options.config.registryUrl);
     const { capture } = options;
     const observations = options.evaluations.map((evaluation) =>
       toObservation(evaluation, options.config)
