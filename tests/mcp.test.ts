@@ -243,11 +243,11 @@ describe("check_package continuity verdict (E2E through the MCP layer)", () => {
 
   // An npm attestation response carrying a SLSA provenance statement that names
   // the publishing GitHub repository — the exact shape src/provenance.ts parses.
-  function attestationResponse(repo: string) {
+  function attestationResponse(repo: string, version: string) {
     const statement = {
       _type: "https://in-toto.io/Statement/v1",
       predicateType: "https://slsa.dev/provenance/v1",
-      subject: [{ name: "acme-shapes", digest: { sha512: "deadbeef" } }],
+      subject: [{ name: `pkg:npm/acme-shapes@${version}`, digest: { sha512: "deadbeef" } }],
       predicate: {
         buildDefinition: {
           externalParameters: {
@@ -299,7 +299,7 @@ describe("check_package continuity verdict (E2E through the MCP layer)", () => {
       if (url.includes("/-/npm/v1/attestations/")) {
         const version = decodeURIComponent(url.split("@").pop() ?? "");
         return Promise.resolve(
-          version === TARGET_VERSION ? notFound() : jsonResponse(attestationResponse(BASELINE_REPO))
+          version === TARGET_VERSION ? notFound() : jsonResponse(attestationResponse(BASELINE_REPO, version))
         );
       }
       if (url.endsWith("/acme-shapes")) {
