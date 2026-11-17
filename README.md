@@ -156,6 +156,8 @@ Two checks run transitively, both read directly from the lockfile with **zero ex
 
 Release-age, typo-squat, and provenance are deliberately **not** run transitively — they would either flood you with noise or require a registry round-trip per package. Transitive evaluation applies to `safeinstall check`, project installs, and the prepared lockfile for explicit npm/pnpm additions.
 
+An enabled transitive policy never treats unavailable lockfile evidence as a clean result. `block` mode blocks when an npm/pnpm lockfile is missing, unreadable, unsupported, or invalid; `warn` mode emits an explicit warning instead. Bun lockfiles are not currently supported for transitive evaluation, so Bun checks follow the same fail-closed or warning behavior according to the configured mode.
+
 ```json
 {
   "transitive": {

@@ -35,6 +35,7 @@ interface NpmLockfileTree {
 }
 
 interface PnpmLockfileTree {
+  lockfileVersion?: string | number;
   packages?: Record<
     string,
     {
@@ -48,6 +49,12 @@ const SOURCE_NOT_POLICY_RELEVANT: ReadonlySet<SourceType> = new Set<SourceType>(
   "workspace",
   "file",
   "directory"
+]);
+
+const SUPPORTED_TRANSITIVE_LOCKFILES = new Set([
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "pnpm-lock.yaml"
 ]);
 
 function isSourcePolicyRelevant(sourceType: SourceType): boolean {
@@ -245,25 +252,70 @@ function collectFromLockfile(
   const basename = path.basename(lockfilePath);
 
   if (basename === "pnpm-lock.yaml") {
-    const lockfile = parseYaml(rawLockfile) as PnpmLockfileTree;
-    return collectPnpmTransitivePackages(lockfile, directNames);
+    const lockfile = parseYaml(rawLockfile) as unknown;
+    if (
+      !isRecord(lockfile) ||
+      (typeof lockfile.lockfileVersion !== "string" && typeof lockfile.lockfileVersion !== "number") ||
+      (lockfile.packages !== undefined && !isRecord(lockfile.packages))
+    ) {
+      throw new Error("Unsupported pnpm lockfile structure.");
+    }
+    return collectPnpmTransitivePackages(lockfile as PnpmLockfileTree, directNames);
   }
 
-  // package-lock.json or npm-shrinkwrap.json
-  const lockfile = JSON.parse(rawLockfile) as NpmLockfileTree;
-  return collectNpmTransitivePackages(lockfile, directNames);
+  if (basename === "package-lock.json" || basename === "npm-shrinkwrap.json") {
+    const lockfile = JSON.parse(rawLockfile) as unknown;
+    if (
+      !isRecord(lockfile) ||
+      (lockfile.lockfileVersion !== 2 && lockfile.lockfileVersion !== 3) ||
+      !isRecord(lockfile.packages)
+    ) {
+      throw new Error("Unsupported npm lockfile structure.");
+    }
+    return collectNpmTransitivePackages(lockfile as NpmLockfileTree, directNames);
+  }
+
+  throw new Error(`Unsupported lockfile: ${basename}`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function unavailableEvaluation(
+  config: SafeInstallConfig,
+  message: string,
+  suggestion: string
+): TransitiveEvaluation {
+  const evaluation: TransitiveEvaluation = {
+    blockedReasons: [],
+    warnings: [],
+    installScriptPackages: [],
+    untrustedSourcePackages: []
+  };
+
+  if (config.transitive.mode === "block") {
+    evaluation.blockedReasons.push({
+      code: "transitive-evaluation-unavailable",
+      message: `Blocked: ${message}`,
+      suggestion
+    });
+  } else if (config.transitive.mode === "warn") {
+    evaluation.warnings.push(`${message} ${suggestion}`);
+  }
+
+  return evaluation;
 }
 
 /**
  * Read the project lockfile, walk the full dependency tree, and evaluate
  * transitive dependencies against the configured transitive checks.
  *
- * Returns an empty evaluation when transitive mode is off, when there is no
- * lockfile, or when the lockfile cannot be read or parsed. The parser is
- * chosen by lockfile filename (pnpm-lock.yaml vs package-lock.json /
- * npm-shrinkwrap.json); a bun binary lockfile fails JSON parsing and yields
- * an empty result. This evaluation is purely additive over the
- * direct-dependency evaluation.
+ * Returns an empty evaluation only when transitive mode is off or a supported
+ * lockfile was evaluated without findings. Missing, unreadable, unsupported,
+ * and invalid lockfiles block in block mode and produce an explicit warning
+ * in warn mode. This evaluation is purely additive over the direct-dependency
+ * evaluation.
  */
 export async function evaluateTransitiveDependencies(options: {
   lockfilePath: string | undefined;
@@ -277,22 +329,50 @@ export async function evaluateTransitiveDependencies(options: {
     untrustedSourcePackages: []
   };
 
-  if (options.config.transitive.mode === "off" || !options.lockfilePath) {
+  if (options.config.transitive.mode === "off") {
     return empty;
+  }
+
+  const unavailableSuggestion =
+    "Create or repair package-lock.json, npm-shrinkwrap.json, or pnpm-lock.yaml before retrying.";
+
+  if (!options.lockfilePath) {
+    return unavailableEvaluation(
+      options.config,
+      "Transitive dependencies could not be evaluated because no supported npm or pnpm lockfile was found.",
+      unavailableSuggestion
+    );
+  }
+
+  const lockfileName = path.basename(options.lockfilePath);
+  if (!SUPPORTED_TRANSITIVE_LOCKFILES.has(lockfileName)) {
+    return unavailableEvaluation(
+      options.config,
+      `Transitive dependencies could not be evaluated because ${lockfileName} is not a supported lockfile.`,
+      unavailableSuggestion
+    );
   }
 
   let rawLockfile: string;
   try {
     rawLockfile = await readFile(options.lockfilePath, "utf8");
   } catch {
-    return empty;
+    return unavailableEvaluation(
+      options.config,
+      `Transitive dependencies could not be evaluated because ${lockfileName} could not be read.`,
+      unavailableSuggestion
+    );
   }
 
   let packages: TransitivePackage[];
   try {
     packages = collectFromLockfile(options.lockfilePath, rawLockfile, options.directNames);
   } catch {
-    return empty;
+    return unavailableEvaluation(
+      options.config,
+      `Transitive dependencies could not be evaluated because ${lockfileName} is invalid or unsupported.`,
+      unavailableSuggestion
+    );
   }
 
   return evaluateTransitivePackages(packages, options.config);
