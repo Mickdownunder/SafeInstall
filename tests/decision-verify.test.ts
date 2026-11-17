@@ -56,6 +56,46 @@ describe("verifyDecisions", () => {
     expect(result.verifiedPaths).toEqual(["pnpm-lock.yaml"]);
   });
 
+  it.skipIf(process.platform === "win32")(
+    "requires and verifies a record for a path containing Git-quoted characters",
+    async () => {
+      const fixture = await createBaseFixture();
+      const lockfilePath = 'apps/quoted-雪-\t-\n-"-\\/package-lock.json';
+      const absolutePath = path.join(fixture.dir, lockfilePath);
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, '{"lockfileVersion":3}\n');
+      const base = commitAll(fixture.dir, "base with unusually named workspace");
+
+      const before = (await bindFileAsStaged(fixture.repo, lockfilePath)) ?? null;
+      await writeFile(absolutePath, '{"lockfileVersion":3,"packages":{"left-pad":{}}}\n');
+      const after = (await bindFileAsStaged(fixture.repo, lockfilePath)) ?? null;
+      const unrecordedHead = commitAll(fixture.dir, "change unusually named workspace lockfile");
+
+      const unrecorded = await verifyDecisions(fixture.dir, {
+        baseRef: base,
+        headRef: unrecordedHead
+      });
+      expect(unrecorded.ok).toBe(false);
+      expect(
+        unrecorded.findings.some(
+          (finding) => finding.code === "decisions-missing" && finding.message.includes(lockfilePath)
+        )
+      ).toBe(true);
+
+      await appendDecisionRecord(fixture.dir, createDecisionDraft({ lockfilePath, before, after }));
+      const recordedHead = commitAll(
+        fixture.dir,
+        "record unusually named workspace lockfile"
+      );
+
+      const result = await verifyDecisions(fixture.dir, { baseRef: base, headRef: recordedHead });
+
+      expect(result.findings).toEqual([]);
+      expect(result.ok).toBe(true);
+      expect(result.verifiedPaths).toEqual([lockfilePath]);
+    }
+  );
+
   it("verifies a multi-step chain within one delta (intermediate states never committed)", async () => {
     const fixture = await createBaseFixture();
     await recordLockfileChange(fixture, "lockfileVersion: 9\npackages:\n  left-pad@1.3.0: {}\n");

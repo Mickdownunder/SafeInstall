@@ -328,7 +328,7 @@ export async function verifyDecisions(
     };
   }
 
-  const changed = (await changedPaths(repo, baseCommit, headCommit)).filter(isKnownLockfile);
+  const changed = (await changedPaths(repo, baseCommit, headCommit, KNOWN_LOCKFILE_NAMES)).filter(isKnownLockfile);
   const recordsByLockfile = await readRecordsAtHead(repo, headCommit, findings);
 
   for (const lockfilePath of changed) {
