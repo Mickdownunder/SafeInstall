@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -17,6 +19,10 @@ import {
 
 const exec = promisify(execFile);
 afterAll(cleanupTempDirs);
+
+const packageVersion = (
+  JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf8")) as { version: string }
+).version;
 
 async function actionNpmStub() {
   const stub = await createStubPackageManager("npm");
@@ -76,6 +82,49 @@ describe("GitHub Action install input boundary", () => {
     expect(step.run).not.toMatch(/echo[^\n]*\$CMD/);
   });
 
+  it("defaults to an exact version with a recorded digest and requires a digest for any other version", async () => {
+    const action = parse(await readFile(path.join(projectRoot, "action.yml"), "utf8")) as {
+      inputs: Record<string, { default?: string; required?: boolean }>;
+      runs: { steps: Array<{ name: string; run?: string }> };
+    };
+    const install = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!.run!;
+
+    // The default version and the digest of its published tarball live in the
+    // Action together. The default may lag behind package.json: it can only
+    // name a version that is already published, so it is bumped after a release.
+    const defaultVersion = action.inputs.version?.default ?? "";
+    expect(defaultVersion).toMatch(/^[0-9]+\.[0-9]+\.[0-9]+$/);
+    expect(install).toContain(`SAFEINSTALL_DEFAULT_VERSION="${defaultVersion}"`);
+    const recorded = /SAFEINSTALL_DEFAULT_INTEGRITY="sha512-([A-Za-z0-9+/=]+)"/.exec(install)?.[1] ?? "";
+    expect(Buffer.from(recorded, "base64")).toHaveLength(64);
+    expect(Buffer.from(recorded, "base64").toString("base64")).toBe(recorded);
+    expect(action.inputs.integrity?.required).toBe(false);
+    expect(action.inputs.integrity?.default).toBe("");
+    expect(install).toContain("expected an exact semantic version such as `version: 0.15.0`");
+    expect(install).toContain("the `integrity` input is required when `version` is not the default.");
+    expect(install).toContain("timingSafeEqual(actual, expected)");
+    expect(install).toContain('npm install -g "$SAFEINSTALL_TARBALL" --ignore-scripts');
+    expect(install).not.toMatch(/npm install -g ["']?safeinstall-cli@/);
+  });
+
+  it("keeps public integration examples off mutable execution channels", async () => {
+    const readme = await readFile(path.join(projectRoot, "README.md"), "utf8");
+    const mcpReadme = await readFile(path.join(projectRoot, "mcp", "README.md"), "utf8");
+    const mcpConfig = await readFile(path.join(projectRoot, ".mcp.json"), "utf8");
+
+    expect(readme).not.toContain("Mickdownunder/SafeInstall@v1");
+    expect(readme).not.toContain("actions/checkout@v");
+    expect(readme).not.toContain("actions/setup-node@v");
+    expect(readme).not.toContain('"args": ["safeinstall-cli", "mcp"]');
+    expect(readme).toContain("Mickdownunder/SafeInstall@<full-40-character-commit-sha>");
+    expect(readme).toContain("integrity: sha512-<verified-release-integrity>");
+    expect(mcpReadme).not.toContain('"args": ["safeinstall-cli", "mcp"]');
+    expect(mcpReadme).not.toContain("npx safeinstall-cli");
+    expect(mcpReadme).toContain("/absolute/path/to/safeinstall-mcp/node_modules/safeinstall-cli/dist/cli.js");
+    // The repository's own MCP config must not resolve a floating publication.
+    expect(mcpConfig).not.toMatch(/safeinstall-cli["']|safeinstall-cli@(latest|next)/);
+  });
+
   it.each(["substitution", "quote-breakout", "backticks"])("passes %s as data, not shell code", async attack => {
     const cwd = await createTempDir("safeinstall-action-security-");
     const marker = path.join(cwd, "injected").split(path.sep).join("/");
@@ -97,16 +146,136 @@ describe("GitHub Action install input boundary", () => {
     await expect(access(stub.logPath)).rejects.toThrow();
   });
 
-  it.each(["latest", "0.15.0", "0.15.0-rc.1"])("accepts a literal version or tag: %s", async version => {
+  it.each(["latest", "next", "^0.15.0", "0.15.x"])("rejects a mutable version selector: %s", async version => {
     const action = parse(await readFile(path.join(projectRoot, "action.yml"), "utf8")) as {
       runs: { steps: Array<{ name: string; run?: string }> };
     };
     const step = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!;
     const stub = await actionNpmStub();
     const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
-    await exec(bash, ["-c", step.run!], { env: { ...process.env, SAFEINSTALL_CLI_VERSION: version,
-      PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}` } });
-    expect(await readLoggedArgs(stub.logPath)).toEqual(["install", "-g", `safeinstall-cli@${version}`, "--ignore-scripts"]);
+    await expect(exec(bash, ["-c", step.run!], { env: {
+      ...process.env,
+      SAFEINSTALL_CLI_VERSION: version,
+      SAFEINSTALL_CLI_INTEGRITY: `sha512-${Buffer.alloc(64).toString("base64")}`,
+      RUNNER_TEMP: stub.dir,
+      PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+    } })).rejects.toMatchObject({ code: 2 });
+    await expect(access(stub.logPath)).rejects.toThrow();
+  });
+
+  it("requires a digest when the version is not the default", async () => {
+    const action = parse(await readFile(path.join(projectRoot, "action.yml"), "utf8")) as {
+      runs: { steps: Array<{ name: string; run?: string }> };
+    };
+    const step = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!;
+    const stub = await actionNpmStub();
+    const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
+    await expect(exec(bash, ["-c", step.run!], { env: {
+      ...process.env,
+      SAFEINSTALL_CLI_VERSION: "999.0.0",
+      SAFEINSTALL_CLI_INTEGRITY: "",
+      RUNNER_TEMP: stub.dir,
+      PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+    } })).rejects.toMatchObject({ code: 2 });
+    await expect(access(stub.logPath)).rejects.toThrow();
+  });
+
+  it("checks the default version against the digest recorded in the Action", async () => {
+    const action = parse(await readFile(path.join(projectRoot, "action.yml"), "utf8")) as {
+      inputs: Record<string, { default?: string }>;
+      runs: { steps: Array<{ name: string; run?: string }> };
+    };
+    const step = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!;
+    const stub = await actionNpmStub();
+    // The registry answers with bytes that are not the recorded release.
+    await writeStubExecutable(stub.dir, "curl", `
+const args = process.argv.slice(2);
+require("node:fs").writeFileSync(args[args.indexOf("--output") + 1], "substituted release");
+`);
+    const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
+    await expect(exec(bash, ["-c", step.run!], { env: {
+      ...process.env,
+      SAFEINSTALL_CLI_VERSION: action.inputs.version?.default ?? "",
+      SAFEINSTALL_CLI_INTEGRITY: "",
+      RUNNER_TEMP: stub.dir,
+      PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+    } })).rejects.toMatchObject({ code: 2 });
+    await expect(access(stub.logPath)).rejects.toThrow();
+  });
+
+  it.each([
+    `sha256-${Buffer.alloc(32).toString("base64")}`,
+    "sha512-not-base64",
+    `sha512-${Buffer.alloc(63).toString("base64")}`
+  ])("rejects a malformed digest: %s", async integrity => {
+    const action = parse(await readFile(path.join(projectRoot, "action.yml"), "utf8")) as {
+      runs: { steps: Array<{ name: string; run?: string }> };
+    };
+    const step = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!;
+    const stub = await actionNpmStub();
+    const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
+    await expect(exec(bash, ["-c", step.run!], { env: {
+      ...process.env,
+      SAFEINSTALL_CLI_VERSION: packageVersion,
+      SAFEINSTALL_CLI_INTEGRITY: integrity,
+      RUNNER_TEMP: stub.dir,
+      PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+    } })).rejects.toMatchObject({ code: 2 });
+    await expect(access(stub.logPath)).rejects.toThrow();
+  });
+
+  it("installs an exact version only from a matching local tarball", async () => {
+    const action = parse(await readFile(path.join(projectRoot, "action.yml"), "utf8")) as {
+      runs: { steps: Array<{ name: string; run?: string }> };
+    };
+    const step = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!;
+    const stub = await actionNpmStub();
+    const archive = Buffer.from("reviewed SafeInstall release artifact");
+    const integrity = `sha512-${createHash("sha512").update(archive).digest("base64")}`;
+    await writeStubExecutable(stub.dir, "curl", `
+const args = process.argv.slice(2);
+const output = args[args.indexOf("--output") + 1];
+require("node:fs").writeFileSync(output, Buffer.from(${JSON.stringify(archive.toString("base64"))}, "base64"));
+`);
+    const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
+
+    await exec(bash, ["-c", step.run!], { env: {
+      ...process.env,
+      SAFEINSTALL_CLI_VERSION: packageVersion,
+      SAFEINSTALL_CLI_INTEGRITY: integrity,
+      RUNNER_TEMP: stub.dir,
+      PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+    } });
+
+    expect(await readLoggedArgs(stub.logPath)).toEqual([
+      "install",
+      "-g",
+      path.join(stub.dir, `safeinstall-cli-${packageVersion}.tgz`),
+      "--ignore-scripts"
+    ]);
+  });
+
+  it("rejects substituted tarball bytes before npm sees them", async () => {
+    const action = parse(await readFile(path.join(projectRoot, "action.yml"), "utf8")) as {
+      runs: { steps: Array<{ name: string; run?: string }> };
+    };
+    const step = action.runs.steps.find(entry => entry.name === "Install SafeInstall CLI")!;
+    const stub = await actionNpmStub();
+    await writeStubExecutable(stub.dir, "curl", `
+const args = process.argv.slice(2);
+const output = args[args.indexOf("--output") + 1];
+require("node:fs").writeFileSync(output, "attacker bytes");
+`);
+    const bash = process.platform === "win32" ? path.join(process.env.ProgramFiles ?? "C:/Program Files", "Git", "bin", "bash.exe") : "bash";
+
+    await expect(exec(bash, ["-c", step.run!], { env: {
+      ...process.env,
+      SAFEINSTALL_CLI_VERSION: packageVersion,
+      SAFEINSTALL_CLI_INTEGRITY: `sha512-${Buffer.alloc(64).toString("base64")}`,
+      RUNNER_TEMP: stub.dir,
+      PATH: `${stub.dir}${path.delimiter}${process.env.PATH ?? ""}`
+    } })).rejects.toMatchObject({ code: 2 });
+    await expect(access(stub.logPath)).rejects.toThrow();
   });
 
   it.each(["--config /tmp/weak.json", "--config=/tmp/weak.json"])(
