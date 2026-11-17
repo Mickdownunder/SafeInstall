@@ -29,6 +29,8 @@ export interface GuardCommandAnalysis {
   localRunnerResolutionSafe: boolean;
   unanalyzable: GuardUnanalyzableSegment[];
   usesSafeInstall: boolean;
+  /** True when an agent command invokes `safeinstall trust approve|unlock`. */
+  changesTrust: boolean;
   /** Best-effort paths written or removed by the intercepted shell command. */
   writeTargets: string[];
   /** Complete safe replacement, only when every install segment is analyzable. */

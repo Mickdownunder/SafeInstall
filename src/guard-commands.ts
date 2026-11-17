@@ -167,6 +167,12 @@ function wrappedInstallFinding(
   };
 }
 const INSTALL_HINT_PATTERN = /\b(npm|pnpm|bun|yarn)\b/i;
+const SAFEINSTALL_HINT_PATTERN = /\bsafeinstall(?:\.(?:cmd|exe|bat|ps1))?\b/i;
+const TRUST_HINT_PATTERN = /\btrust\b/i;
+
+function hasTrustCommandHint(value: string): boolean {
+  return SAFEINSTALL_HINT_PATTERN.test(value) && TRUST_HINT_PATTERN.test(value);
+}
 
 /** Standalone package-runner binaries. */
 interface RunnerConfig {
@@ -239,7 +245,61 @@ interface SegmentFinding {
   runner?: GuardRunnerMatch;
   unanalyzable?: GuardUnanalyzableSegment;
   usesSafeInstall?: boolean;
+  changesTrust?: boolean;
   writeTargets?: string[];
+}
+
+/**
+ * Mirror the CLI's global-option removal closely enough to identify trust
+ * mutations from the host-authored command text. This happens before the
+ * child process can remove agent-context environment markers.
+ */
+function hasTrustChangeArgs(tokens: ShellToken[]): boolean {
+  const args: ShellToken[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === undefined) continue;
+    if (token.value === "--json") continue;
+    if (token.value === "--config") {
+      index += 1;
+      continue;
+    }
+    if (token.value.startsWith("--config=")) continue;
+    args.push(token);
+  }
+
+  const command = args[0];
+  const subcommand = args[1];
+  if (command?.value === "trust") {
+    return (
+      subcommand?.value === "approve" ||
+      subcommand?.value === "unlock" ||
+      subcommand?.hasExpansion === true
+    );
+  }
+
+  // An unquoted expansion can split into both `trust` and `unlock`; a quoted
+  // expansion can still become `trust` when the next argument is dangerous.
+  return command?.hasExpansion === true && (
+    !command.quoted ||
+    subcommand?.value === "approve" ||
+    subcommand?.value === "unlock" ||
+    subcommand?.hasExpansion === true
+  );
+}
+
+function hasWrappedTrustChange(tokens: ShellToken[]): boolean {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (
+      token &&
+      basename(token.value) === "safeinstall" &&
+      hasTrustChangeArgs(tokens.slice(index + 1))
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -361,13 +421,22 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
   const segmentText = command.slice(segment.start, segment.end).trim();
   const { index: commandIndex, corepackToken, wrapperError } = findCommandTokenIndex(segment.tokens);
 
-  if (wrapperError && INSTALL_HINT_PATTERN.test(segmentText)) {
-    return {
-      unanalyzable: {
-        segmentText,
-        reason: `${wrapperError} SafeInstall fails closed because the segment also mentions a package manager.`
-      }
-    };
+  if (wrapperError) {
+    if (hasTrustCommandHint(segmentText)) {
+      return { usesSafeInstall: true, changesTrust: true };
+    }
+    if (INSTALL_HINT_PATTERN.test(segmentText)) {
+      return {
+        unanalyzable: {
+          segmentText,
+          reason: `${wrapperError} SafeInstall fails closed because the segment also mentions a package manager.`
+        }
+      };
+    }
+  }
+
+  if (segment.hasSubstitution && hasTrustCommandHint(segmentText)) {
+    return { usesSafeInstall: true, changesTrust: true };
   }
 
   if (commandIndex === -1) {
@@ -390,10 +459,13 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
   const rest = stripRedirections(segment.tokens.slice(commandIndex + 1));
 
   if (executable === "safeinstall") {
-    return { usesSafeInstall: true };
+    return { usesSafeInstall: true, changesTrust: hasTrustChangeArgs(rest) };
   }
 
   if (hasDynamicCommandName(commandToken)) {
+    if (hasTrustChangeArgs(rest)) {
+      return { changesTrust: true };
+    }
     // `$tool install x`, `{npm,install,x}`: the command word itself is only
     // known after expansion. Fail closed when the segment still looks like an
     // install; any other dynamic command is none of the guard's business.
@@ -416,6 +488,9 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
 
   if (NESTED_SHELLS.has(executable)) {
     const nestedScript = rest.map((token) => token.value).join(" ");
+    if (hasTrustCommandHint(nestedScript)) {
+      return { usesSafeInstall: true, changesTrust: true };
+    }
     if (INSTALL_HINT_PATTERN.test(nestedScript)) {
       return {
         unanalyzable: {
@@ -465,6 +540,9 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
       };
     }
     if (!REMOTE_EXECUTORS.has(executable) && !ARGUMENT_ONLY_COMMANDS.has(executable)) {
+      if (hasWrappedTrustChange(rest)) {
+        return { usesSafeInstall: true, changesTrust: true };
+      }
       const wrapped = findWrappedInstall(rest);
       if (wrapped) {
         return wrappedInstallFinding(executable, wrapped, segmentText);
@@ -591,6 +669,7 @@ export function analyzeShellCommand(command: string): GuardCommandAnalysis {
   const unanalyzable: GuardUnanalyzableSegment[] = [];
   const writeTargets: string[] = [];
   let usesSafeInstall = false;
+  let changesTrust = false;
 
   for (const segment of segments) {
     const finding = analyzeSegment(segment, command);
@@ -608,6 +687,9 @@ export function analyzeShellCommand(command: string): GuardCommandAnalysis {
     }
     if (finding.usesSafeInstall) {
       usesSafeInstall = true;
+    }
+    if (finding.changesTrust) {
+      changesTrust = true;
     }
   }
 
@@ -651,6 +733,7 @@ export function analyzeShellCommand(command: string): GuardCommandAnalysis {
     localRunnerResolutionSafe: hasStableLocalRunnerResolution(segments, runners),
     unanalyzable,
     usesSafeInstall,
+    changesTrust,
     writeTargets,
     rewrittenCommand
   };

@@ -240,6 +240,20 @@ export async function decideGuard(command: string, cwd: string = process.cwd()):
 async function decideGuardCommand(command: string, cwd: string): Promise<GuardDecision> {
   const analysis = analyzeShellCommand(command);
 
+  // This decision is based on the host-authored tool call, before wrappers
+  // such as `env -u CODEX_SHELL` can erase the child process's agent marker.
+  // Human invocations outside an agent hook continue to use the interactive
+  // CLI flow, while an agent may only inspect trust with `trust status`.
+  if (analysis.changesTrust) {
+    return {
+      action: "deny",
+      userMessage: "SafeInstall blocked an agent command that would change the Agent Trust Surface.",
+      agentMessage:
+        "SafeInstall guard: agents cannot run `safeinstall trust approve` or `safeinstall trust unlock`. " +
+        "A human must run trust-changing commands in their own terminal after reviewing the affected project."
+    };
+  }
+
   const trustDecision = await decideTrustSurface(command, cwd, analysis);
   if (trustDecision) {
     return trustDecision;

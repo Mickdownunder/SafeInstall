@@ -111,6 +111,29 @@ describe("analyzeShellCommand", () => {
       expect(analysis.installs).toEqual([]);
       expect(analysis.unanalyzable).toEqual([]);
       expect(analysis.usesSafeInstall).toBe(true);
+      expect(analysis.changesTrust).toBe(false);
+    });
+
+    it("identifies trust changes before wrappers can remove agent markers", () => {
+      for (const command of [
+        "safeinstall trust approve",
+        "env -u CODEX_SHELL safeinstall trust unlock",
+        "env --unset=CLAUDECODE /usr/local/bin/safeinstall --json trust approve",
+        "safeinstall trust --config policy.json unlock",
+        "safeinstall.cmd --config=policy.json trust unlock",
+        "env -S 'safeinstall trust unlock'",
+        "bash -c 'safeinstall trust approve'",
+        "timeout 30 safeinstall trust unlock",
+        "$CLI trust unlock",
+        "safeinstall trust $ACTION",
+        "safeinstall $ARGS",
+        "echo $(safeinstall trust unlock)"
+      ]) {
+        const analysis = analyzeShellCommand(command);
+        expect(analysis.changesTrust, command).toBe(true);
+      }
+
+      expect(analyzeShellCommand("safeinstall trust status").changesTrust).toBe(false);
     });
   });
 

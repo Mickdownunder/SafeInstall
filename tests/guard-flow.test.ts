@@ -104,6 +104,29 @@ describe("decideGuard", () => {
     expect(await decideGuard("safeinstall npm install axios")).toEqual({ action: "allow" });
   });
 
+  it("denies trust changes before a child can remove agent markers", async () => {
+    const cwd = await createTempDir("safeinstall-guard-trust-change-");
+    for (const command of [
+      "safeinstall trust approve",
+      "env -u CODEX_SHELL safeinstall trust unlock",
+      "env --unset=CLAUDECODE safeinstall --json trust approve",
+      "env -S 'safeinstall trust unlock'",
+      "bash -c 'safeinstall trust approve'",
+      "timeout 30 safeinstall trust unlock",
+      "$CLI trust unlock",
+      "safeinstall trust $ACTION",
+      "safeinstall $ARGS",
+      "echo $(safeinstall trust unlock)"
+    ]) {
+      const decision = await decideGuard(command, cwd);
+      expect(decision.action, command).toBe("deny");
+      expect(decision.updatedCommand, command).toBeUndefined();
+      expect(decision.agentMessage, command).toContain("agents cannot run");
+    }
+
+    expect(await decideGuard("safeinstall trust status", cwd)).toEqual({ action: "allow" });
+  });
+
   it("denies raw installs and hands the agent the rewritten command", async () => {
     const decision = await decideGuard("npm i axios && npm test");
     expect(decision.action).toBe("deny");
