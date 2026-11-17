@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { parse as parseYaml } from "yaml";
 
 import { evaluateRequestedPackages } from "./evaluations";
 import { runPackageManager, type PackageManagerExecutionResult } from "./package-managers";
-import { loadProjectInstallTargetsForManager, type ProjectInstallTargetsResult } from "./project-installs";
+import {
+  discoverProjectInstallScope,
+  loadProjectInstallScope,
+  loadProjectInstallTargetsForManager,
+  type ProjectInstallTargetsResult
+} from "./project-installs";
 import { RegistryClient } from "./registry";
 import { FLAGS_WITH_VALUES } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
@@ -241,32 +245,23 @@ function verifyTargets(targets: ProjectInstallTargetsResult, artifacts: Approved
 async function loadInstallScope(packageDir: string, manager: "npm" | "pnpm", ran: boolean) {
   const selected = await loadProjectInstallTargetsForManager(packageDir, packageDir, manager);
   if (!selected?.lockfilePath) fail("Install blocked: no supported lockfile binding.", ran);
-  const root = path.dirname(selected.lockfilePath);
   const raw = await readFile(selected.lockfilePath, "utf8");
   const lockDigest = createHash("sha256").update(raw).digest("hex");
-  const document = (manager === "npm" ? JSON.parse(raw) : parseYaml(raw)) as {
-    packages?: Record<string, unknown>; importers?: Record<string, unknown>;
-  };
-  const keys = manager === "npm"
-    ? Object.keys(document.packages ?? {}).filter((key) => !key.split("/").includes("node_modules"))
-    : Object.keys(document.importers ?? {});
-  const dirs = new Set([packageDir, ...keys.map((key) => path.resolve(root, key || "."))]);
-  const results: ProjectInstallTargetsResult[] = [];
-  const manifests: string[] = [];
-  const manifestDigests: string[] = [];
-  for (const dir of dirs) {
-    const relative = path.relative(root, dir);
-    if (relative.startsWith("..") || path.isAbsolute(relative)) fail("Install blocked: a lockfile importer escapes the project root.", ran);
-    const manifest = path.join(dir, "package.json");
-    manifests.push(manifest);
-    manifestDigests.push(await fileDigest(manifest));
-    const result = await loadProjectInstallTargetsForManager(dir, dir, manager);
-    if (!result || result.lockfilePath !== selected.lockfilePath) fail("Install blocked: inconsistent workspace lockfile scope.", ran);
-    results.push(result);
+  let loaded: Awaited<ReturnType<typeof loadProjectInstallScope>>;
+  try {
+    const paths = await discoverProjectInstallScope(selected.lockfilePath, manager, packageDir);
+    loaded = await loadProjectInstallScope(paths, manager);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error), ran);
   }
-  return { root, manifests, manifestDigests, lockDigest,
-    targets: { targets: results.flatMap((result) => result.targets),
-      issues: results.flatMap((result) => result.issues), lockfilePath: selected.lockfilePath } };
+  const manifestDigests = await Promise.all(loaded.manifestPaths.map(fileDigest));
+  return {
+    root: loaded.root,
+    manifests: loaded.manifestPaths,
+    manifestDigests,
+    lockDigest,
+    targets: loaded.targets
+  };
 }
 
 async function fileDigest(file: string): Promise<string> {
