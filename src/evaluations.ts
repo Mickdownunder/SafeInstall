@@ -68,6 +68,7 @@ export async function evaluateRequestedPackages(
         provenanceResult = await verifyProvenance({
           packageName: requested.name,
           version: resolvedRegistryPackage.resolvedVersion,
+          artifactIntegrity: resolvedRegistryPackage.artifact?.integrity,
           registryUrl: config.registryUrl,
           diskCache: provenanceCache,
           config: config.provenance,

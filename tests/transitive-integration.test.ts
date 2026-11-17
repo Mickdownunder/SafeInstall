@@ -176,7 +176,7 @@ describe("transitive evaluation through runCheckFlow", () => {
     const result = await runCheckFlow(cwd, ["check"]);
 
     expect(result.decision).toBe("allow");
-    expect(result.warnings.some((warning) => warning.includes("no supported npm or pnpm lockfile"))).toBe(true);
+    expect(result.warnings.some((warning) => warning.includes("no npm or pnpm lockfile was found"))).toBe(true);
   });
 
   it("does not evaluate transitive deps when mode is off (default)", async () => {

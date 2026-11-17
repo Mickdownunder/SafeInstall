@@ -94,6 +94,11 @@ describe("collectNpmTransitivePackages", () => {
         version: "2.0.0",
         resolved: "git+ssh://git@github.com/evil/from-git.git#abc"
       },
+      "node_modules/integrity-pinned-tarball": {
+        version: "1.0.0",
+        resolved: "HTTPS://attacker.example/pkg-1.0.0.tgz",
+        integrity: "sha512-attacker-controlled"
+      },
       "node_modules/linked": { link: true, resolved: "" }
     }
   };
@@ -101,7 +106,7 @@ describe("collectNpmTransitivePackages", () => {
   it("collects transitive packages excluding root, direct deps, and links", () => {
     const packages = collectNpmTransitivePackages(lockfile, new Set(["axios"]));
     const names = packages.map((p) => p.name).sort();
-    expect(names).toEqual(["from-git", "sketchy"]);
+    expect(names).toEqual(["from-git", "integrity-pinned-tarball", "sketchy"]);
   });
 
   it("reads hasInstallScript from the lockfile entry", () => {
@@ -117,6 +122,12 @@ describe("collectNpmTransitivePackages", () => {
     const fromGit = packages.find((p) => p.name === "from-git");
     expect(fromGit?.sourceType).toBe("git");
   });
+
+  it("does not treat attacker-supplied integrity as registry provenance", () => {
+    const packages = collectNpmTransitivePackages(lockfile, new Set());
+    const pinnedTarball = packages.find((p) => p.name === "integrity-pinned-tarball");
+    expect(pinnedTarball?.sourceType).toBe("tarball");
+  });
 });
 
 describe("collectPnpmTransitivePackages", () => {
@@ -125,7 +136,10 @@ describe("collectPnpmTransitivePackages", () => {
       "axios@1.14.0": { resolution: { integrity: "sha512-x" } },
       "lodash@4.17.21": { resolution: { integrity: "sha512-y" } },
       "from-tarball@1.0.0": {
-        resolution: { tarball: "https://evil.example.com/pkg-1.0.0.tgz" }
+        resolution: {
+          tarball: "https://evil.example.com/pkg-1.0.0.tgz",
+          integrity: "sha512-attacker-controlled"
+        }
       }
     }
   };
@@ -259,7 +273,7 @@ describe("evaluateTransitiveDependencies evidence failures", () => {
     expect(result.blockedReasons.map((reason) => reason.code)).toContain(
       "transitive-evaluation-unavailable"
     );
-    expect(result.blockedReasons[0]?.message).toContain("no supported npm or pnpm lockfile");
+    expect(result.blockedReasons[0]?.message).toContain("no npm or pnpm lockfile was found");
   });
 
   it("blocks when the selected lockfile cannot be read", async () => {
@@ -299,6 +313,23 @@ describe("evaluateTransitiveDependencies evidence failures", () => {
     expect(result.blockedReasons[0]?.message).toContain("invalid or unsupported");
   });
 
+  it("blocks a pnpm lockfile major it does not know how to read", async () => {
+    const lockfilePath = await createLockfile("pnpm-lock.yaml", "lockfileVersion: '99.0'\npackages: {}\n");
+
+    const result = await evaluate(lockfilePath);
+
+    expect(result.blockedReasons[0]?.code).toBe("transitive-evaluation-unavailable");
+    expect(result.blockedReasons[0]?.message).toContain("invalid or unsupported");
+  });
+
+  it.each(["5.4", "'6.0'", "'9.0'", "9"])("accepts pnpm lockfileVersion %s", async (version) => {
+    const lockfilePath = await createLockfile("pnpm-lock.yaml", `lockfileVersion: ${version}\npackages: {}\n`);
+
+    const result = await evaluate(lockfilePath);
+
+    expect(result.blockedReasons).toEqual([]);
+  });
+
   it("blocks structurally unsupported npm lockfiles", async () => {
     const lockfilePath = await createLockfile(
       "package-lock.json",
@@ -318,7 +349,7 @@ describe("evaluateTransitiveDependencies evidence failures", () => {
     );
 
     expect(result.blockedReasons).toHaveLength(0);
-    expect(result.warnings[0]).toContain("no supported npm or pnpm lockfile");
+    expect(result.warnings[0]).toContain("no npm or pnpm lockfile was found");
   });
 
   it("keeps transitive mode off silent without a lockfile", async () => {
