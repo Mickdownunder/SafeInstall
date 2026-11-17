@@ -345,4 +345,120 @@ describe("analyzeShellCommand", () => {
       expect(analysis.rewrittenCommand).toBeUndefined();
     });
   });
+
+  describe("installs behind shell syntax", () => {
+    it.each([
+      [
+        "if [ ! -d node_modules ]; then npm install evil; fi",
+        "if [ ! -d node_modules ]; then safeinstall npm install evil; fi"
+      ],
+      ["if npm i evil; then echo ok; fi", "if safeinstall npm install evil; then echo ok; fi"],
+      ["for p in a; do pnpm add evil; done", "for p in a; do safeinstall pnpm add evil; done"],
+      ["while true; do npm ci; done", "while true; do safeinstall npm ci; done"],
+      ["test -f x || { npm install evil; }", "test -f x || { safeinstall npm install evil; }"],
+      ["! npm install evil", "! safeinstall npm install evil"],
+      ["npm \\\ninstall evil", "safeinstall npm \\\ninstall evil"],
+      ["np\\\nm install evil", "safeinstall npm install evil"],
+      ["$'npm' install evil", "safeinstall npm install evil"]
+    ])("routes %j", (command, rewritten) => {
+      const analysis = analyzeShellCommand(command);
+      expect(analysis.unanalyzable).toEqual([]);
+      expect(analysis.installs).toHaveLength(1);
+      expect(analysis.rewrittenCommand).toBe(rewritten);
+    });
+
+    it.each([
+      "{npm,install,evil}",
+      "npm {install,evil}",
+      "npm install {evil,other}",
+      "$'\\x6epm' install evil",
+      "a=npm; $a install evil",
+      "$tool add evil"
+    ])("fails closed on expansion-built install %j", (command) => {
+      const analysis = analyzeShellCommand(command);
+      expect(analysis.unanalyzable.length).toBeGreaterThan(0);
+      expect(analysis.rewrittenCommand).toBeUndefined();
+    });
+
+    it("keeps non-install commands with a dynamic name or brace arguments allowed", () => {
+      for (const command of [
+        "$PYTHON -m pip install requests",
+        "$VENV/bin/pip install requests",
+        "$EDITOR notes.txt",
+        "find . -name x -exec rm {} \\;",
+        "cp file.{ts,js} out/",
+        "git stash show stash@{0}"
+      ]) {
+        const analysis = analyzeShellCommand(command);
+        expect(analysis.unanalyzable, command).toEqual([]);
+        expect(analysis.installs, command).toEqual([]);
+      }
+    });
+  });
+
+  describe("installs run through another command", () => {
+    it.each([
+      "timeout 60 npm install evil",
+      "nice -n 10 pnpm add evil",
+      "echo evil | xargs npm install",
+      "find . -maxdepth 1 -exec npm install evil \\;",
+      "eval 'npm install evil'",
+      "pnpm exec npm install evil",
+      "node /usr/lib/node_modules/npm/bin/npm-cli.js install evil",
+      "node node_modules/pnpm/bin/pnpm.cjs add evil",
+      "timeout 60 npm update"
+    ])("fails closed on %j", (command) => {
+      const analysis = analyzeShellCommand(command);
+      expect(analysis.unanalyzable).toHaveLength(1);
+      expect(analysis.rewrittenCommand).toBeUndefined();
+    });
+
+    it("ignores package-manager words that are only text or run elsewhere", () => {
+      for (const command of [
+        "echo npm install is dangerous",
+        "grep -rn npm install docs",
+        "git commit -m \"npm install fix\"",
+        "timeout 60 echo \"npm install\"",
+        "brew install pnpm",
+        "docker run --rm node:22 npm install",
+        "ssh build-host npm ci",
+        "corepack enable pnpm",
+        "pnpm exec install-tool"
+      ]) {
+        const analysis = analyzeShellCommand(command);
+        expect(analysis.unanalyzable, command).toEqual([]);
+        expect(analysis.installs, command).toEqual([]);
+      }
+    });
+  });
+
+  describe("update and install-test subcommands", () => {
+    it.each([
+      "npm update",
+      "npm up lodash",
+      "npm upgrade",
+      "pnpm update --latest",
+      "pnpm up",
+      "bun update",
+      "yarn up lodash",
+      "yarn upgrade",
+      "npm install-test evil",
+      "npm it evil",
+      "npm install-ci-test",
+      "npm cit"
+    ])("denies %j instead of letting it fetch unchecked", (command) => {
+      const analysis = analyzeShellCommand(command);
+      expect(analysis.installs).toEqual([]);
+      expect(analysis.unanalyzable).toHaveLength(1);
+      expect(analysis.rewrittenCommand).toBeUndefined();
+    });
+
+    it("still allows read-only and local subcommands", () => {
+      for (const command of ["npm outdated", "npm run update", "pnpm why lodash", "bun upgrade", "npm test"]) {
+        const analysis = analyzeShellCommand(command);
+        expect(analysis.unanalyzable, command).toEqual([]);
+        expect(analysis.installs, command).toEqual([]);
+      }
+    });
+  });
 });

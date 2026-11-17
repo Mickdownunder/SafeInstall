@@ -2,6 +2,8 @@ import { FLAGS_WITH_VALUES, normalizeInstallCommand } from "./specs";
 import {
   collectWriteTargets,
   findCommandTokenIndex,
+  hasDynamicCommandName,
+  packageManagerFromWord,
   shellBasename as basename,
   splitShellSegments,
   stripRedirections
@@ -87,15 +89,83 @@ const NON_INSTALL_SUBCOMMANDS = new Set([
   "test",
   "uninstall",
   "unlink",
-  "update",
-  "upgrade",
   "version",
   "view",
   "whoami",
   "why",
   "x"
 ]);
-const NESTED_SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
+/** `eval` re-parses its arguments as shell text, exactly like a nested shell. */
+const NESTED_SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "eval"]);
+
+/**
+ * Subcommands that resolve and fetch new package versions but are not install
+ * flows the SafeInstall CLI can route. Allowing them raw would skip release
+ * age, provenance, and script blocking, so the guard denies them.
+ */
+const UPDATE_SUBCOMMANDS: Record<string, ReadonlySet<string>> = {
+  npm: new Set(["update", "up", "upgrade", "udpate"]),
+  pnpm: new Set(["update", "up", "upgrade"]),
+  bun: new Set(["update"]),
+  yarn: new Set(["up", "upgrade", "upgrade-interactive"])
+};
+/** npm install variants that also run the project's tests. */
+const NPM_INSTALL_TEST_SUBCOMMANDS = new Set(["install-test", "it", "install-ci-test", "cit"]);
+
+/**
+ * Commands whose arguments run somewhere else (a container, another host).
+ * A package manager named there does not install into this project.
+ */
+const REMOTE_EXECUTORS = new Set(["docker", "podman", "nerdctl", "kubectl", "ssh"]);
+/**
+ * Common commands that only read or print their arguments. A package-manager
+ * word among them (`echo npm install is dangerous`, `grep npm install log`)
+ * is text, never an invocation.
+ */
+const ARGUMENT_ONLY_COMMANDS = new Set([
+  "echo", "printf", "grep", "egrep", "fgrep", "rg", "cat", "man", "which", "type", "ls", "git"
+]);
+
+function isFetchingSubcommand(manager: string, value: string): boolean {
+  const normalized = value.toLowerCase();
+  if (UPDATE_SUBCOMMANDS[manager]?.has(normalized)) return true;
+  if (manager === "yarn") return normalized === "install" || normalized === "add" || normalized === "global";
+  if (manager === "npm" && NPM_INSTALL_TEST_SUBCOMMANDS.has(normalized)) return true;
+  return normalizeInstallCommand(manager as PackageManagerName, normalized) !== undefined;
+}
+
+/**
+ * Find a package manager that is run as an argument of another command
+ * (`timeout 60 npm install x`, `xargs npm install`, `pnpm exec npm i x`,
+ * `node .../npm-cli.js install x`): an unquoted manager word followed by one
+ * of its install or update subcommands.
+ */
+function findWrappedInstall(tokens: ShellToken[]): { manager: string; keyword: string } | undefined {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === undefined || token.quoted) continue;
+    const manager = packageManagerFromWord(token.value);
+    if (!manager) continue;
+    const keyword = tokens
+      .slice(index + 1)
+      .find((candidate) => !candidate.quoted && isFetchingSubcommand(manager, candidate.value));
+    if (keyword) return { manager, keyword: keyword.value };
+  }
+  return undefined;
+}
+
+function wrappedInstallFinding(
+  executable: string,
+  wrapped: { manager: string; keyword: string },
+  segmentText: string
+): SegmentFinding {
+  return {
+    unanalyzable: {
+      segmentText,
+      reason: `The command runs \`${wrapped.manager} ${wrapped.keyword}\` through \`${executable}\`, which SafeInstall cannot route. Run the install as a plain top-level command instead.`
+    }
+  };
+}
 const INSTALL_HINT_PATTERN = /\b(npm|pnpm|bun|yarn)\b/i;
 
 /** Standalone package-runner binaries. */
@@ -270,6 +340,27 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
     return { usesSafeInstall: true };
   }
 
+  if (hasDynamicCommandName(commandToken)) {
+    // `$tool install x`, `{npm,install,x}`: the command word itself is only
+    // known after expansion. Fail closed when the segment still looks like an
+    // install; any other dynamic command is none of the guard's business.
+    // Only the subcommand position counts, so `$PYTHON -m pip install x` and
+    // similar non-npm commands stay untouched.
+    const subcommand = findSubcommand(rest);
+    const looksLikeInstall =
+      subcommand !== undefined &&
+      ["npm", "pnpm", "bun", "yarn"].some((manager) => isFetchingSubcommand(manager, subcommand.value));
+    if (INSTALL_HINT_PATTERN.test(segmentText) || looksLikeInstall) {
+      return {
+        unanalyzable: {
+          segmentText,
+          reason: "The command name is produced by shell expansion and the segment looks like a package install, so SafeInstall cannot see what would run and fails closed. Spell out the package-manager command literally."
+        }
+      };
+    }
+    return {};
+  }
+
   if (NESTED_SHELLS.has(executable)) {
     const nestedScript = rest.map((token) => token.value).join(" ");
     if (INSTALL_HINT_PATTERN.test(nestedScript)) {
@@ -299,8 +390,7 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
         segmentText
       );
     }
-    const isInstall =
-      normalized === undefined || normalized === "install" || normalized === "add" || normalized === "global";
+    const isInstall = normalized === undefined || isFetchingSubcommand("yarn", normalized);
     if (isInstall) {
       return {
         unanalyzable: {
@@ -321,6 +411,12 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
         }
       };
     }
+    if (!REMOTE_EXECUTORS.has(executable) && !ARGUMENT_ONLY_COMMANDS.has(executable)) {
+      const wrapped = findWrappedInstall(rest);
+      if (wrapped) {
+        return wrappedInstallFinding(executable, wrapped, segmentText);
+      }
+    }
     return {};
   }
 
@@ -330,8 +426,42 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
     return {};
   }
 
+  if (subcommandToken.hasExpansion) {
+    return {
+      unanalyzable: {
+        segmentText,
+        reason: `The ${manager} subcommand ${JSON.stringify(subcommandToken.value)} is produced by shell expansion, so SafeInstall cannot tell whether it is an install and fails closed. Spell out the subcommand literally.`
+      }
+    };
+  }
+
   const canonical = normalizeInstallCommand(manager, subcommandToken.value);
   if (!canonical) {
+    const subcommand = subcommandToken.value.toLowerCase();
+    if (UPDATE_SUBCOMMANDS[manager]?.has(subcommand)) {
+      return {
+        unanalyzable: {
+          segmentText,
+          reason: `\`${manager} ${subcommand}\` resolves and fetches new package versions without SafeInstall's policy checks, and the SafeInstall CLI cannot route it. Set the wanted versions explicitly and install them with \`safeinstall ${manager} ${manager === "npm" ? "install" : "add"} <package>@<version>\`, or ask the user to run the update themselves.`
+        }
+      };
+    }
+    if (manager === "npm" && NPM_INSTALL_TEST_SUBCOMMANDS.has(subcommand)) {
+      return {
+        unanalyzable: {
+          segmentText,
+          reason: `\`npm ${subcommand}\` is an install followed by the test script, which the SafeInstall CLI cannot route as one command. Run the install as \`npm ${subcommand.startsWith("install-ci") || subcommand === "cit" ? "ci" : "install"}\` and the tests as a separate command.`
+        }
+      };
+    }
+    if (subcommand === "exec") {
+      // pnpm exec runs a local binary; a package manager named there is a
+      // raw install one level down.
+      const wrapped = findWrappedInstall(rest.slice(rest.indexOf(subcommandToken) + 1));
+      if (wrapped) {
+        return wrappedInstallFinding(`${manager} exec`, wrapped, segmentText);
+      }
+    }
     const runnerSubcommand = RUNNER_SUBCOMMANDS[manager]?.[subcommandToken.value.toLowerCase()];
     if (runnerSubcommand) {
       return createRunnerFinding(

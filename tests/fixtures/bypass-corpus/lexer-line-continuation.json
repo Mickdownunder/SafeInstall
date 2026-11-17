@@ -1,0 +1,17 @@
+{
+  "id": "lexer-line-continuation",
+  "category": "lexer",
+  "severity": "bypass",
+  "input": "npm \\\ninstall evil-pkg",
+  "shellBehavior": "Backslash-newline is removed by the shell, so this is npm install evil-pkg.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 1,
+    "runners": 0,
+    "unanalyzable": 0,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "The lexer kept the newline inside the subcommand word, which then matched no install alias. Continuations are now removed.",
+  "discoveredBy": "manual review"
+}

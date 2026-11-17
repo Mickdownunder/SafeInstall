@@ -1,0 +1,17 @@
+{
+  "id": "wrapper-timeout",
+  "category": "wrapper-command",
+  "severity": "bypass",
+  "input": "timeout 60 npm install evil-pkg",
+  "shellBehavior": "timeout runs the raw install as its child.",
+  "parserToday": {
+    "decision": "deny",
+    "installs": 0,
+    "runners": 0,
+    "unanalyzable": 1,
+    "usesSafeInstall": false
+  },
+  "expectedSecureDecision": "deny",
+  "note": "Only seven wrappers were modelled. Any command that carries a manager word followed by an install subcommand now fails closed.",
+  "discoveredBy": "manual review"
+}
