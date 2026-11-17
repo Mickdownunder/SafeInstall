@@ -332,11 +332,17 @@ export async function authorizeDecisions(
       registryClient,
       config
     );
-    const transitive = await evaluateTransitiveDependencies({
-      lockfilePath: projectTargets?.lockfilePath,
-      directNames: new Set(requestedPackages.map((requested) => requested.name)),
-      config
-    });
+    // A root without dependencies and without a lockfile has no transitive
+    // tree; asking for one would block every repository whose lockfiles all
+    // live in subdirectories.
+    const transitive =
+      requestedPackages.length > 0 || projectTargets?.lockfilePath !== undefined
+        ? await evaluateTransitiveDependencies({
+            lockfilePath: projectTargets?.lockfilePath,
+            directNames: new Set(requestedPackages.map((requested) => requested.name)),
+            config
+          })
+        : { blockedReasons: [], warnings: [] };
     appendReasons([
       ...evaluations.flatMap((evaluation) => evaluation.blockedReasons),
       ...(projectTargets ? lockfileArtifactBindingReasons(projectTargets, evaluations) : []),
