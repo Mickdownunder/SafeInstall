@@ -8,7 +8,7 @@ import { formatCommand, printConfigInfo, printWarnings } from "./output";
 import { InstallBindingError, installOptionReasons, runBoundInstall } from "./install-binding";
 import { loadManifestDependencies } from "./project-state";
 import { hasAmbiguousWorkspaceFlags, resolveInvocationContext } from "./project-discovery";
-import { loadProjectInstallTargetsForManager } from "./project-installs";
+import { directLockfileKeys, loadProjectInstallTargetsForManager } from "./project-installs";
 import { RegistryClient } from "./registry";
 import { loadHeadSourceBaseline } from "./source-baseline";
 import { redactCliResult, redactSensitiveText } from "./redaction";
@@ -76,10 +76,11 @@ async function collectTargetPackages(
   issues: CliReason[];
   plan: ReturnType<typeof buildInstallPlan>;
   lockfilePath?: string | undefined;
+  directLockfileKeys: ReadonlySet<string>;
 }> {
   const plan = buildInstallPlan(argv);
   if (!plan.projectInstall) {
-    return { issues: [], plan };
+    return { issues: [], plan, directLockfileKeys: new Set<string>() };
   }
 
   const lockfileResult = await loadProjectInstallTargetsForManager(effectiveCwd, packageDir, plan.manager);
@@ -88,7 +89,8 @@ async function collectTargetPackages(
       return {
         issues: lockfileResult.issues.map(createProjectIssueReason),
         plan,
-        lockfilePath: lockfileResult.lockfilePath
+        lockfilePath: lockfileResult.lockfilePath,
+        directLockfileKeys: directLockfileKeys(lockfileResult)
       };
     }
 
@@ -98,7 +100,8 @@ async function collectTargetPackages(
         ...plan,
         packages: lockfileResult.targets.map((target) => target.requested)
       },
-      lockfilePath: lockfileResult.lockfilePath
+      lockfilePath: lockfileResult.lockfilePath,
+      directLockfileKeys: directLockfileKeys(lockfileResult)
     };
   }
 
@@ -112,7 +115,8 @@ async function collectTargetPackages(
     plan: {
       ...plan,
       packages
-    }
+    },
+    directLockfileKeys: new Set<string>()
   };
 }
 
@@ -222,7 +226,7 @@ async function runInstallFlowInternal(
     };
   }
 
-  const { issues, plan, lockfilePath } = await collectTargetPackages(
+  const { issues, plan, lockfilePath, directLockfileKeys: directKeys } = await collectTargetPackages(
     invocation.packageDir ?? invocation.effectiveCwd,
     invocation.effectiveCwd,
     argv
@@ -296,7 +300,7 @@ async function runInstallFlowInternal(
   const transitive = plan.projectInstall
     ? await evaluateTransitiveDependencies({
         lockfilePath,
-        directNames: new Set(plan.packages.map((requested) => requested.name)),
+        directLockfileKeys: directKeys,
         config
       })
     : undefined;

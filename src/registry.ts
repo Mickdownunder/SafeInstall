@@ -100,7 +100,7 @@ export class RegistryClient {
         (versionDoc.version !== undefined && versionDoc.version !== resolvedVersion)) {
       throw new Error(`Registry error: manifest identity does not match ${requested.name}@${resolvedVersion}.`);
     }
-    const publishTime = await this.fetchPublishedAt(requested.name, resolvedVersion, versionDoc);
+    const publishTime = await this.fetchPublishedAt(requested.name, resolvedVersion);
     const lifecycleScripts = this.collectLifecycleScripts(versionDoc.scripts);
 
     return {
@@ -175,8 +175,7 @@ export class RegistryClient {
 
   private async fetchPublishedAt(
     packageName: string,
-    version: string,
-    versionDoc: RegistryVersionManifest
+    version: string
   ): Promise<PublishTimeRecord> {
     throwIfAborted(this.signal);
 
@@ -189,16 +188,19 @@ export class RegistryClient {
     // Publish time is a policy fact. Process-external cache contents are not
     // authenticated, so revalidate it against the selected registry.
     // The registry time map is the authoritative publish record (RFC-001 §14
-    // D7). The tarball last-modified header is a mutable CDN artifact; it
-    // stays available as a fallback, and which source answered is recorded so
-    // a release-age decision resting on the fallback can say so.
+    // D7). The tarball last-modified header is a mutable CDN artifact; it is a
+    // same-origin-only fallback and the answering source is recorded.
     const fromTimeMap = await this.fetchPublishedAtFromTimeMap(packageName, version);
     if (fromTimeMap) {
       return this.rememberPublishedAt(versionKey, fromTimeMap, "registry-time");
     }
 
-    const tarballUrl = versionDoc.dist?.tarball;
-    if (tarballUrl) {
+    // Fallback only for a tarball served by the configured registry itself.
+    // dist.tarball is registry-controlled metadata; requesting an arbitrary
+    // origin from it would let a hostile packument aim a request at internal
+    // hosts. Otherwise publish time stays unknown and resolution fails closed.
+    const tarballUrl = (await this.fetchVersionManifest(packageName, version)).dist?.tarball;
+    if (tarballUrl && this.isSameOriginAsRegistry(tarballUrl)) {
       const lastModified = await this.fetchTarballLastModified(packageName, version, tarballUrl);
       if (lastModified) {
         return this.rememberPublishedAt(
@@ -222,14 +224,25 @@ export class RegistryClient {
     return record;
   }
 
+  private isSameOriginAsRegistry(tarballUrl: string): boolean {
+    try {
+      const tarball = new URL(tarballUrl);
+      return !tarball.username && !tarball.password && tarball.origin === new URL(this.registryUrl).origin;
+    } catch {
+      return false;
+    }
+  }
+
   private async fetchTarballLastModified(
     packageName: string,
     version: string,
     tarballUrl: string
   ): Promise<string | undefined> {
     try {
+      // "manual": a redirect would leave the registry origin; treat it as no answer.
       const response = await fetch(tarballUrl, {
         method: "HEAD",
+        redirect: "manual",
         signal: this.fetchSignal()
       });
 
@@ -256,10 +269,9 @@ export class RegistryClient {
 
   /**
    * Publish time from the full packument's `time` map, or undefined so the
-   * caller can fall back to the tarball header. Timeouts and shutdowns stay
-   * fatal (they are environment failures, not evidence the map is absent);
-   * other fetch errors degrade to the fallback rather than failing a
-   * resolution the fallback could still serve.
+   * caller can try the same-origin tarball fallback or fail closed. Timeouts and shutdowns stay fatal (they are
+   * environment failures, not evidence the map is absent); other fetch
+   * errors are reported as missing authoritative publish-time evidence.
    */
   private async fetchPublishedAtFromTimeMap(packageName: string, version: string): Promise<Date | undefined> {
     let document: RegistryPackageDocument;

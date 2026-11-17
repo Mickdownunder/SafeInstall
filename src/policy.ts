@@ -3,6 +3,7 @@ import {
   lookupGlobPattern,
   repositoryMatchesPublisher
 } from "./provenance";
+import { isLocalSourceType, type LocalSourceClassification } from "./local-source";
 import { detectTypoSquat } from "./typo-squat";
 import type {
   ContinuityResult,
@@ -13,15 +14,12 @@ import type {
   ProvenanceVerificationResult,
   RequestedPackage,
   ResolvedRegistryPackage,
-  SafeInstallConfig
+  SafeInstallConfig,
+  SourceType
 } from "./types";
 
 function isPackageAllowlisted(config: SafeInstallConfig, packageName: string): boolean {
   return config.allowedPackages.includes(packageName.toLowerCase());
-}
-
-function isSourcePolicyRelevant(sourceType: RequestedPackage["sourceType"]): boolean {
-  return sourceType !== "workspace" && sourceType !== "file" && sourceType !== "directory";
 }
 
 function allowedLifecycleScripts(
@@ -54,6 +52,8 @@ export interface EvaluatePackageInput {
   now: Date;
   priorState?: ProjectDependencyState | undefined;
   priorSource?: PriorSourceEvidence | undefined;
+  /** How a local (workspace/file/directory) source relates to the repository. */
+  localSource?: LocalSourceClassification | undefined;
   resolvedRegistryPackage?: ResolvedRegistryPackage | undefined;
   priorLifecycleScripts?: InstallLifecycleScriptName[];
   provenanceResult?: ProvenanceVerificationResult | undefined;
@@ -108,13 +108,21 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
     }
   }
 
-  if (
-    isSourcePolicyRelevant(input.requested.sourceType) &&
-    !input.config.allowedSources.includes(input.requested.sourceType)
-  ) {
+  // Local sources: a first-party workspace member is never a supply-chain
+  // source and is exempt from allowedSources. Any other local directory (name
+  // "directory") or local tarball/file (name "file") is checked against
+  // allowedSources under the name of what it actually is, whichever label the
+  // package manager's lockfile used.
+  const local = input.localSource;
+  const isLocal = isLocalSourceType(input.requested.sourceType);
+  const policySourceName: SourceType =
+    local === undefined || local.kind === "member" ? input.requested.sourceType : local.kind;
+  const exemptFirstParty =
+    isLocal && (local?.kind === "member" || (local === undefined && input.requested.sourceType === "workspace"));
+  if (!exemptFirstParty && !input.config.allowedSources.includes(policySourceName)) {
     evaluation.blockedReasons.push({
       code: "untrusted-source",
-      message: `Blocked: untrusted source (${input.requested.sourceType}).`,
+      message: `Blocked: untrusted source (${policySourceName}${local?.outsideRepository ? ", outside the repository" : ""}).`,
       suggestion: "Use a registry release or allow this source intentionally."
     });
   }
@@ -136,10 +144,14 @@ export function evaluatePackage(input: EvaluatePackageInput): PackageEvaluation 
         "Record the established package source in sourceBaselines or evaluate the change against a trusted base commit."
     });
   } else if (
-    dropsRegistryTrust &&
+    (dropsRegistryTrust || isLocal) &&
     priorSource.status === "known" &&
     priorSource.sourceType === "registry"
   ) {
+    // A registry -> local swap is reported for every local kind, including a
+    // workspace member. An unavailable baseline does not block a local source
+    // by itself (fresh projects and monorepos without history are common);
+    // only committed evidence of a registry dependency does.
     evaluation.blockedReasons.push({
       code: "trust-level-dropped",
       message: `Blocked: trust level dropped (${input.requested.name} changed from registry to ${input.requested.sourceType}).`,
@@ -248,9 +260,10 @@ function deriveSourceRepository(input: EvaluatePackageInput): string | undefined
  *   - identity-discontinuity: the installed version is attested from a
  *     different source repository than the established baseline.
  *
- * "consistent" surfaces as an info line in warn mode. "no-baseline" and
- * "unevaluated" are silent — most packages never adopted provenance, and a
- * registry hiccup must not block.
+ * "consistent" surfaces as an info line in warn mode. "no-baseline" is
+ * silent — most packages never adopted provenance. "unevaluated" (verification
+ * tooling or registry unavailable) warns but never blocks: a hiccup must not
+ * block installs, and unverified data must not decide either way.
  */
 function applyContinuityDecision(evaluation: PackageEvaluation, input: EvaluatePackageInput): void {
   const config = input.config.continuity;
@@ -283,6 +296,15 @@ function applyContinuityDecision(evaluation: PackageEvaluation, input: EvaluateP
     } else {
       evaluation.warnings.push(`${message} ${suggestion}`);
     }
+    return;
+  }
+
+  if (result.status === "unevaluated" && result.error) {
+    // Never silent: continuity could not verify attestations (missing
+    // sigstore, offline trust root, registry error), so no decision was made.
+    evaluation.warnings.push(
+      `${name}: provenance continuity was not evaluated (${result.error}).`
+    );
     return;
   }
 

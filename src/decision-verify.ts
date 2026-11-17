@@ -20,6 +20,8 @@ import {
   resolveGitRepo,
   type GitRepoContext
 } from "./git-blob";
+import { redactSensitiveText } from "./redaction";
+import { requireCredentialFreeRegistryUrl } from "./registry-url";
 
 /**
  * Committed-state verification of decision-record chains (RFC-001 §7, D5) —
@@ -277,14 +279,33 @@ async function checkRegistryTrustRoot(
     return;
   }
   const normalized = String(registryUrl).replace(/\/+$/, "");
+  try {
+    requireCredentialFreeRegistryUrl(normalized);
+  } catch {
+    findings.push({
+      code: "registry-not-default",
+      message:
+        "The candidate's registryUrl is invalid or contains credentials, query parameters, or " +
+        "fragments; use a credential-free registry trust root."
+    });
+    return;
+  }
   const allowed = new Set(
-    [DEFAULT_REGISTRY_URL, ...allowedRegistryUrls].map((url) => url.replace(/\/+$/, ""))
+    [DEFAULT_REGISTRY_URL, ...allowedRegistryUrls].flatMap((url) => {
+      const normalizedAllowed = url.replace(/\/+$/, "");
+      try {
+        requireCredentialFreeRegistryUrl(normalizedAllowed);
+        return [normalizedAllowed];
+      } catch {
+        return [];
+      }
+    })
   );
   if (!allowed.has(normalized)) {
     findings.push({
       code: "registry-not-default",
       message:
-        `The candidate's registryUrl (${normalized}) is not the verifier's registry trust root. ` +
+        `The candidate's registryUrl (${redactSensitiveText(normalized)}) is not the verifier's registry trust root. ` +
         "A registry the pull request can choose is not a trust root (RFC-001 D3); allowlist it " +
         "on the verifier side deliberately, or remove the override."
     });
@@ -328,7 +349,7 @@ export async function verifyDecisions(
     };
   }
 
-  const changed = (await changedPaths(repo, baseCommit, headCommit)).filter(isKnownLockfile);
+  const changed = (await changedPaths(repo, baseCommit, headCommit, KNOWN_LOCKFILE_NAMES)).filter(isKnownLockfile);
   const recordsByLockfile = await readRecordsAtHead(repo, headCommit, findings);
 
   for (const lockfilePath of changed) {

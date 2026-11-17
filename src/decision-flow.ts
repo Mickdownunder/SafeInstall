@@ -4,6 +4,7 @@ import { authorizeDecisions } from "./decision-authorize";
 import { buildAuthorizationStatement, verifyAuthorizationStatement, AttestationError } from "./decision-attest";
 import { formatCommand } from "./output";
 import { verifyDecisions } from "./decision-verify";
+import { requireCredentialFreeRegistryUrl } from "./registry-url";
 import type { CliResult } from "./types";
 
 /**
@@ -62,6 +63,11 @@ function parseVerifyArgs(argv: string[]): ParsedVerifyArgs | Error {
     } else if (token === "--allow-registry" || token.startsWith("--allow-registry=")) {
       const value = readValue("--allow-registry");
       if (value instanceof Error) return value;
+      try {
+        requireCredentialFreeRegistryUrl(value);
+      } catch (error) {
+        return error instanceof Error ? error : new Error("Invalid --allow-registry URL.");
+      }
       parsed.allowedRegistryUrls.push(value);
     } else if (token === "--output" || token.startsWith("--output=")) {
       const value = readValue("--output");
