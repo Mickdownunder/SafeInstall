@@ -105,6 +105,24 @@ function parseStatement(bundle: Bundle): Slsa1Statement | undefined {
   }
 }
 
+function statementSubjectMatchesPackage(
+  statement: Slsa1Statement,
+  packageName: string,
+  version: string
+): boolean {
+  if (
+    statement._type !== "https://in-toto.io/Statement/v1" ||
+    !statement.predicateType?.startsWith(SLSA_PREDICATE_TYPE_PREFIX)
+  ) {
+    return false;
+  }
+
+  return (statement.subject ?? []).some((subject) => {
+    const identity = parseNpmPurl(typeof subject.name === "string" ? subject.name : undefined);
+    return identity?.packageName === packageName && identity.version === version;
+  });
+}
+
 /**
  * Extract the `<owner>/<repo>` slug from a GitHub repository URL in a SLSA
  * statement. Returns undefined if the URL doesn't look like a GitHub URL.
@@ -335,8 +353,8 @@ export interface FetchAttestationIdentityInput {
  * Fetch a single version's attestation from the registry and extract its
  * publish identity (whether it has SLSA provenance, and from which GitHub
  * repository and workflow). Returns `{ hasProvenance: false }` when the
- * version has no attestation or the attestation can't be parsed. Never
- * throws on ordinary failures; re-throws shutdown signals.
+ * version has no matching attestation or the attestation can't be parsed.
+ * Fetch failures propagate so continuity can remain unevaluated.
  */
 export async function fetchAttestationIdentity(
   input: FetchAttestationIdentityInput
@@ -346,25 +364,11 @@ export async function fetchAttestationIdentity(
   const url = attestationUrl(input.registryUrl, input.packageName, input.version);
   const cacheKey = `${input.registryUrl}|${input.packageName}@${input.version}`;
 
-  let rawResponse: NpmAttestationResponse | null = null;
-  const cached = input.diskCache
-    ? await input.diskCache.getJson<NpmAttestationResponse>(ATTESTATION_CACHE_NAMESPACE, cacheKey)
-    : undefined;
-  if (cached) {
-    rawResponse = cached;
-  } else {
-    try {
-      rawResponse = await fetchAttestations(url, input.signal);
-      if (rawResponse && input.diskCache) {
-        await input.diskCache.setJson(ATTESTATION_CACHE_NAMESPACE, cacheKey, rawResponse);
-      }
-    } catch {
-      const shutdownError = getShutdownSignalError(input.signal);
-      if (shutdownError) {
-        throw shutdownError;
-      }
-      return { hasProvenance: false };
-    }
+  // Continuity identity is security-sensitive but intentionally does not run
+  // Sigstore verification, so it must always be observed from the registry.
+  const rawResponse = await fetchAttestations(url, input.signal);
+  if (rawResponse && input.diskCache) {
+    await input.diskCache.setJson(ATTESTATION_CACHE_NAMESPACE, cacheKey, rawResponse);
   }
 
   if (!rawResponse) {
@@ -379,6 +383,9 @@ export async function fetchAttestationIdentity(
   }
 
   const statement = parseStatement(slsa.bundle);
+  if (!statement || !statementSubjectMatchesPackage(statement, input.packageName, input.version)) {
+    return { hasProvenance: false };
+  }
   const workflow = statement?.predicate?.buildDefinition?.externalParameters?.workflow;
   const sourceRepository = extractRepositorySlug(workflow?.repository);
   if (!sourceRepository) {
