@@ -394,7 +394,7 @@ Instruction content drift only warns by default because Claude Code writes to `C
 
 ## Configuration
 
-Optional `safeinstall.config.json` — discovered by walking upward from the project directory, or passed explicitly with `--config <path>`. An explicit path that cannot be read is an error (exit 1), never a silent fallback to defaults.
+Optional `safeinstall.config.json` — discovered by walking upward from the project directory, or passed explicitly with `--config <path>`. An explicit path that cannot be read is an error (exit 1), never a silent fallback to defaults. `--config` must come before the command (`safeinstall --config <path> check`); after the command it is an error. In a project with a trust lock, only the locked `safeinstall.config.json` at the trust root is accepted: any other config, whether passed explicitly or discovered in a subfolder or parent folder, blocks with `trust-unbound-config`.
 
 ```json
 {
@@ -451,7 +451,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `provenance.mode` | `"off"` / `"warn"` / `"require"` — whether to verify Sigstore attestations |
 | `provenance.requireFor` | Package names (glob supported) for which provenance is required even in `"warn"` mode |
 | `provenance.trustedPublishers` | Map of package name pattern → expected `owner/repo` slug; mismatches always block |
-| `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cached attestation |
+| `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cryptographically verified cached attestation whose signed subject matches the exact package and version |
 | `provenance.toolingUnavailable` | `"warn"` (default) proceeds with a loud warning when the `sigstore` verifier is not installed; `"fail-closed"` treats a missing verifier as suspicious and blocks every install until it is present (installing `sigstore` itself stays exempt, so it can never deadlock) |
 | `transitive.mode` | `"off"` / `"warn"` / `"block"` — evaluate the full lockfile tree, not just direct deps |
 | `transitive.checks` | Which checks run transitively: `"install-script"` and/or `"untrusted-source"` |

@@ -2,12 +2,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DiskCache } from "../src/disk-cache";
 import {
   attestationUrl,
+  encodeDerUtf8String,
   extractRepositorySlug,
+  fetchAttestationIdentity,
   isProvenanceRequired,
   lookupGlobPattern,
   matchesGlob,
@@ -19,6 +21,9 @@ import type { Bundle, ProvenanceDependencies } from "../src/provenance";
 import type { ProvenanceConfig } from "../src/types";
 
 const tempDirs: string[] = [];
+const EXAMPLE_DIGEST = Buffer.alloc(64, 7);
+const EXAMPLE_INTEGRITY = `sha512-${EXAMPLE_DIGEST.toString("base64")}`;
+const EXAMPLE_SHA512 = EXAMPLE_DIGEST.toString("hex");
 
 async function createTempDir(prefix: string): Promise<string> {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), prefix));
@@ -67,7 +72,7 @@ const exampleStatement = {
   subject: [
     {
       name: "pkg:npm/axios@1.14.0",
-      digest: { sha512: "abc123" }
+      digest: { sha512: EXAMPLE_SHA512 }
     }
   ],
   predicate: {
@@ -85,6 +90,37 @@ const exampleStatement = {
     }
   }
 };
+
+async function verifyStatement(
+  statement: unknown,
+  options: {
+    packageName?: string;
+    version?: string;
+    artifactIntegrity?: string;
+    verifyBundle?: ProvenanceDependencies["verifyBundle"];
+  } = {}
+) {
+  const cacheDir = await createTempDir("safeinstall-provenance-");
+  return verifyProvenance({
+    packageName: options.packageName ?? "axios",
+    version: options.version ?? "1.14.0",
+    artifactIntegrity: options.artifactIntegrity ?? EXAMPLE_INTEGRITY,
+    registryUrl: "https://registry.npmjs.org",
+    diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
+    config: createConfig(),
+    deps: createDeps({
+      fetchAttestations: async () => ({
+        attestations: [
+          {
+            predicateType: "https://slsa.dev/provenance/v1",
+            bundle: makeBundleWithStatement(statement)
+          }
+        ]
+      }),
+      verifyBundle: options.verifyBundle ?? (async () => {})
+    })
+  });
+}
 
 describe("attestationUrl", () => {
   it("builds the npm attestations endpoint URL for an unscoped package", () => {
@@ -170,6 +206,72 @@ describe("extractRepositorySlug", () => {
   });
 });
 
+describe("fetchAttestationIdentity", () => {
+  it("fetches continuity identity instead of trusting a planted disk response", async () => {
+    const cacheDir = await createTempDir("safeinstall-provenance-identity-");
+    const diskCache = new DiskCache({ cacheDir, ttlMs: 60_000 });
+    const cacheKey = "https://registry.npmjs.org|axios@1.14.0";
+    await diskCache.setJson("registry-attestations-v1", cacheKey, {
+      attestations: [
+        {
+          predicateType: "https://slsa.dev/provenance/v1",
+          bundle: makeBundleWithStatement({
+            ...exampleStatement,
+            predicate: {
+              ...exampleStatement.predicate,
+              buildDefinition: {
+                externalParameters: {
+                  workflow: {
+                    repository: "https://github.com/attacker/axios",
+                    path: ".github/workflows/release.yml"
+                  }
+                }
+              }
+            }
+          })
+        }
+      ]
+    });
+    const fetchAttestations = vi.fn().mockResolvedValue({
+      attestations: [
+        {
+          predicateType: "https://slsa.dev/provenance/v1",
+          bundle: makeBundleWithStatement(exampleStatement)
+        }
+      ]
+    });
+
+    const identity = await fetchAttestationIdentity({
+      packageName: "axios",
+      version: "1.14.0",
+      registryUrl: "https://registry.npmjs.org",
+      diskCache,
+      deps: { fetchAttestations }
+    });
+
+    expect(identity.sourceRepository).toBe("axios/axios");
+    expect(fetchAttestations).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates registry failures so continuity can remain unevaluated", async () => {
+    const cacheDir = await createTempDir("safeinstall-provenance-identity-");
+
+    await expect(
+      fetchAttestationIdentity({
+        packageName: "axios",
+        version: "1.14.0",
+        registryUrl: "https://registry.npmjs.org",
+        diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
+        deps: {
+          fetchAttestations: async () => {
+            throw new Error("registry unavailable");
+          }
+        }
+      })
+    ).rejects.toThrow("registry unavailable");
+  });
+});
+
 describe("isProvenanceRequired", () => {
   it("returns true when mode is require", () => {
     expect(isProvenanceRequired(createConfig({ mode: "require" }), "anything")).toBe(true);
@@ -212,6 +314,7 @@ describe("verifyProvenance", () => {
     const result = await verifyProvenance({
       packageName: "lodash",
       version: "4.17.21",
+      artifactIntegrity: EXAMPLE_INTEGRITY,
       registryUrl: "https://registry.npmjs.org",
       diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
       config: createConfig(),
@@ -226,6 +329,7 @@ describe("verifyProvenance", () => {
     const result = await verifyProvenance({
       packageName: "axios",
       version: "1.14.0",
+      artifactIntegrity: EXAMPLE_INTEGRITY,
       registryUrl: "https://registry.npmjs.org",
       diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
       config: createConfig(),
@@ -246,9 +350,11 @@ describe("verifyProvenance", () => {
 
   it("returns verified with extracted source repository on a valid attestation", async () => {
     const cacheDir = await createTempDir("safeinstall-provenance-");
+    let signingIdentity: Parameters<ProvenanceDependencies["verifyBundle"]>[1] | undefined;
     const result = await verifyProvenance({
       packageName: "axios",
       version: "1.14.0",
+      artifactIntegrity: EXAMPLE_INTEGRITY,
       registryUrl: "https://registry.npmjs.org",
       diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
       config: createConfig(),
@@ -261,7 +367,9 @@ describe("verifyProvenance", () => {
             }
           ]
         }),
-        verifyBundle: async () => {}
+        verifyBundle: async (_bundle, expectedIdentity) => {
+          signingIdentity = expectedIdentity;
+        }
       })
     });
 
@@ -269,6 +377,144 @@ describe("verifyProvenance", () => {
     expect(result.sourceRepository).toBe("axios/axios");
     expect(result.sourceRef).toBe("refs/tags/v1.14.0");
     expect(result.workflowPath).toBe(".github/workflows/release.yml");
+    expect(signingIdentity).toEqual({
+      certificateIssuer: "https://token.actions.githubusercontent.com",
+      sourceRepositoryUrl: "https://github.com/axios/axios"
+    });
+  });
+
+  it("returns invalid when the signed subject names a different package", async () => {
+    const result = await verifyStatement({
+      ...exampleStatement,
+      subject: [{ ...exampleStatement.subject[0], name: "pkg:npm/lodash@1.14.0" }]
+    });
+
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("subject does not match axios@1.14.0");
+  });
+
+  it("returns invalid for a replayed bundle signed for an older version", async () => {
+    const result = await verifyStatement({
+      ...exampleStatement,
+      subject: [{ ...exampleStatement.subject[0], name: "pkg:npm/axios@1.13.0" }]
+    });
+
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("subject does not match axios@1.14.0");
+  });
+
+  it("returns invalid when the signed SHA-512 differs from the registry artifact", async () => {
+    const result = await verifyStatement({
+      ...exampleStatement,
+      subject: [{ ...exampleStatement.subject[0], digest: { sha512: "0".repeat(128) } }]
+    });
+
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("SHA-512 does not match the registry artifact");
+  });
+
+  it("returns invalid when the registry artifact has no canonical SHA-512 integrity", async () => {
+    const result = await verifyStatement(exampleStatement, {
+      artifactIntegrity: "sha512-not-a-canonical-digest"
+    });
+
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("missing a canonical SHA-512 artifact integrity");
+  });
+
+  it("returns invalid when the signed predicate type is not SLSA v1", async () => {
+    const result = await verifyStatement({
+      ...exampleStatement,
+      predicateType: "https://slsa.dev/provenance/v0.2"
+    });
+
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("unexpected signed predicate type");
+  });
+
+  it("returns invalid when the signed statement is not in-toto v1", async () => {
+    const result = await verifyStatement({
+      ...exampleStatement,
+      _type: "https://in-toto.io/Statement/v0.1"
+    });
+
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("unexpected in-toto statement type");
+  });
+
+  it("returns invalid when multiple subjects make the artifact binding ambiguous", async () => {
+    const result = await verifyStatement({
+      ...exampleStatement,
+      subject: [
+        exampleStatement.subject[0],
+        { name: "pkg:npm/lodash@4.17.21", digest: { sha512: EXAMPLE_SHA512 } }
+      ]
+    });
+
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("exactly one package subject");
+  });
+
+  it.each([
+    ["a null subject", { subject: [null] }],
+    ["a non-string subject name", { subject: [{ name: 42, digest: { sha512: EXAMPLE_SHA512 } }] }],
+    ["a non-object workflow", { predicate: { buildDefinition: { externalParameters: { workflow: 7 } } } }],
+    ["a null predicate", { predicate: null }]
+  ])("returns invalid instead of throwing for %s", async (_label, override) => {
+    const result = await verifyStatement({ ...exampleStatement, ...override } as unknown as typeof exampleStatement);
+
+    expect(result.status).toBe("invalid");
+  });
+
+  it("binds the claimed repository to the certificate source repository", async () => {
+    let signingIdentity: Parameters<ProvenanceDependencies["verifyBundle"]>[1] | undefined;
+    const actualSourceRepository = "https://github.com/axios/axios";
+    const result = await verifyStatement(
+      {
+        ...exampleStatement,
+        predicate: {
+          ...exampleStatement.predicate,
+          buildDefinition: {
+            ...exampleStatement.predicate.buildDefinition,
+            externalParameters: {
+              workflow: {
+                ...exampleStatement.predicate.buildDefinition.externalParameters.workflow,
+                repository: "https://github.com/attacker/axios"
+              }
+            }
+          }
+        }
+      },
+      {
+        verifyBundle: async (_bundle, expectedIdentity) => {
+          signingIdentity = expectedIdentity;
+          if (expectedIdentity.sourceRepositoryUrl !== actualSourceRepository) {
+            throw new Error("certificate source repository mismatch");
+          }
+        }
+      }
+    );
+
+    expect(signingIdentity?.sourceRepositoryUrl).toBe("https://github.com/attacker/axios");
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("certificate source repository mismatch");
+  });
+
+  it("accepts the normalized npm PURL for a scoped package", async () => {
+    const result = await verifyStatement(
+      {
+        ...exampleStatement,
+        subject: [
+          {
+            name: "pkg:npm/%40acme/widget@2.0.0",
+            digest: { sha512: EXAMPLE_SHA512 }
+          }
+        ]
+      },
+      { packageName: "@acme/widget", version: "2.0.0" }
+    );
+
+    expect(result.status).toBe("verified");
   });
 
   it("returns invalid when the bundle verification throws", async () => {
@@ -276,6 +522,7 @@ describe("verifyProvenance", () => {
     const result = await verifyProvenance({
       packageName: "axios",
       version: "1.14.0",
+      artifactIntegrity: EXAMPLE_INTEGRITY,
       registryUrl: "https://registry.npmjs.org",
       diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
       config: createConfig(),
@@ -306,6 +553,7 @@ describe("verifyProvenance", () => {
     const result = await verifyProvenance({
       packageName: "axios",
       version: "1.14.0",
+      artifactIntegrity: EXAMPLE_INTEGRITY,
       registryUrl: "https://registry.npmjs.org",
       diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
       config: createConfig(),
@@ -334,6 +582,7 @@ describe("verifyProvenance", () => {
     const result = await verifyProvenance({
       packageName: "axios",
       version: "1.14.0",
+      artifactIntegrity: EXAMPLE_INTEGRITY,
       registryUrl: "https://registry.npmjs.org",
       diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
       config: createConfig(),
@@ -363,6 +612,7 @@ describe("verifyProvenance", () => {
     const result = await verifyProvenance({
       packageName: "axios",
       version: "1.14.0",
+      artifactIntegrity: EXAMPLE_INTEGRITY,
       registryUrl: "https://registry.npmjs.org",
       diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
       config: createConfig({ offlineBehavior: "fail-closed" }),
@@ -385,6 +635,7 @@ describe("verifyProvenance", () => {
     await verifyProvenance({
       packageName: "axios",
       version: "1.14.0",
+      artifactIntegrity: EXAMPLE_INTEGRITY,
       registryUrl: "https://registry.npmjs.org",
       diskCache,
       config: createConfig(),
@@ -404,6 +655,7 @@ describe("verifyProvenance", () => {
     const result = await verifyProvenance({
       packageName: "axios",
       version: "1.14.0",
+      artifactIntegrity: EXAMPLE_INTEGRITY,
       registryUrl: "https://registry.npmjs.org",
       diskCache,
       config: createConfig({ offlineBehavior: "allow-cached" }),
@@ -418,11 +670,50 @@ describe("verifyProvenance", () => {
     expect(result.sourceRepository).toBe("axios/axios");
   });
 
+  it("rejects a cached attestation whose signed subject names another package", async () => {
+    const cacheDir = await createTempDir("safeinstall-provenance-");
+    const diskCache = new DiskCache({ cacheDir, ttlMs: 60_000 });
+    await diskCache.setJson(
+      "registry-attestations-v1",
+      "https://registry.npmjs.org|axios@1.14.0",
+      {
+        attestations: [
+          {
+            predicateType: "https://slsa.dev/provenance/v1",
+            bundle: makeBundleWithStatement({
+              ...exampleStatement,
+              subject: [{ name: "pkg:npm/lodash@4.17.21", digest: { sha512: "attacker" } }]
+            })
+          }
+        ]
+      }
+    );
+
+    const result = await verifyProvenance({
+      packageName: "axios",
+      version: "1.14.0",
+      registryUrl: "https://registry.npmjs.org",
+      diskCache,
+      artifactIntegrity: EXAMPLE_INTEGRITY,
+      config: createConfig({ offlineBehavior: "allow-cached" }),
+      deps: createDeps({
+        fetchAttestations: async () => {
+          throw new Error("network down");
+        },
+        verifyBundle: async () => {}
+      })
+    });
+
+    expect(result.status).toBe("invalid");
+    expect(result.error).toContain("subject does not match axios@1.14.0");
+  });
+
   it("returns invalid with a clear message when verifyBundle throws because sigstore is missing", async () => {
     const cacheDir = await createTempDir("safeinstall-provenance-");
     const result = await verifyProvenance({
       packageName: "axios",
       version: "1.14.0",
+      artifactIntegrity: EXAMPLE_INTEGRITY,
       registryUrl: "https://registry.npmjs.org",
       diskCache: new DiskCache({ cacheDir, ttlMs: 60_000 }),
       config: createConfig(),
@@ -447,5 +738,100 @@ describe("verifyProvenance", () => {
     expect(result.status).toBe("invalid");
     expect(result.error).toContain("sigstore");
     expect(result.error).toContain("npm install");
+  });
+});
+
+describe("encodeDerUtf8String", () => {
+  it("uses the short length form below 128 bytes", () => {
+    const url = "https://github.com/axios/axios";
+    const der = encodeDerUtf8String(url);
+    expect([...der.subarray(0, 2)]).toEqual([0x0c, url.length]);
+    expect(der.subarray(2).toString("utf8")).toBe(url);
+    expect(der.length).toBe(url.length + 2);
+  });
+
+  it("uses the 0x81 long length form for 128 to 255 bytes", () => {
+    const url = "https://github.com/o/" + "r".repeat(200);
+    const der = encodeDerUtf8String(url);
+    expect([...der.subarray(0, 3)]).toEqual([0x0c, 0x81, url.length]);
+    expect(der.subarray(3).toString("utf8")).toBe(url);
+  });
+
+  it("uses the 0x82 long length form above 255 bytes", () => {
+    const url = "https://github.com/o/" + "r".repeat(300);
+    const der = encodeDerUtf8String(url);
+    expect([...der.subarray(0, 4)]).toEqual([0x0c, 0x82, url.length >> 8, url.length & 0xff]);
+    expect(der.length).toBe(url.length + 4);
+  });
+
+  it("encodes exactly 127 and 128 byte values at the form boundary", () => {
+    expect([...encodeDerUtf8String("a".repeat(127)).subarray(0, 2)]).toEqual([0x0c, 127]);
+    expect([...encodeDerUtf8String("a".repeat(128)).subarray(0, 3)]).toEqual([0x0c, 0x81, 128]);
+  });
+});
+
+describe("defaultVerifyBundle", () => {
+  afterEach(() => {
+    vi.doUnmock("sigstore");
+    vi.resetModules();
+  });
+
+  async function callWithMockedSigstore(sourceRepositoryUrl: string) {
+    const verify = vi.fn(async (..._args: unknown[]) => ({}));
+    vi.resetModules();
+    vi.doMock("sigstore", () => ({ verify }));
+    const { defaultVerifyBundle } = await import("../src/provenance");
+    const bundle = makeBundleWithStatement(exampleStatement);
+    await defaultVerifyBundle(bundle, {
+      certificateIssuer: "https://token.actions.githubusercontent.com",
+      sourceRepositoryUrl
+    });
+    return { verify, bundle };
+  }
+
+  it("passes the options as the second argument with the DER source repository", async () => {
+    const url = "https://github.com/axios/axios";
+    const { verify, bundle } = await callWithMockedSigstore(url);
+
+    expect(verify).toHaveBeenCalledTimes(1);
+    const args = verify.mock.calls[0]!;
+    expect(args).toHaveLength(2);
+    expect(args[0]).toBe(bundle);
+    const options = args[1] as {
+      certificateIssuer: string;
+      certificateOIDs: Record<string, string | Buffer>;
+    };
+    expect(options.certificateIssuer).toBe("https://token.actions.githubusercontent.com");
+    expect(Object.keys(options.certificateOIDs)).toEqual(["1.3.6.1.4.1.57264.1.12"]);
+    expect(Buffer.from(options.certificateOIDs["1.3.6.1.4.1.57264.1.12"]!)).toEqual(
+      encodeDerUtf8String(url)
+    );
+    expect(options).not.toHaveProperty("certificateIdentityURI");
+  });
+
+  it("survives sigstore's Buffer.from byte for byte for a long repository URL", async () => {
+    const url = "https://github.com/owner/" + "r".repeat(150);
+    const { verify } = await callWithMockedSigstore(url);
+    const value = (
+      verify.mock.calls[0]![1] as { certificateOIDs: Record<string, string | Buffer> }
+    ).certificateOIDs["1.3.6.1.4.1.57264.1.12"]!;
+    // sigstore's createVerificationPolicy does Buffer.from(value).
+    const received = Buffer.from(value);
+    expect([...received.subarray(0, 3)]).toEqual([0x0c, 0x81, url.length]);
+    expect(received).toEqual(encodeDerUtf8String(url));
+  });
+
+  it("reports missing tooling distinctly when sigstore cannot be imported", async () => {
+    vi.resetModules();
+    vi.doMock("sigstore", () => {
+      throw new Error("Cannot find module 'sigstore'");
+    });
+    const mod = await import("../src/provenance");
+    await expect(
+      mod.defaultVerifyBundle(makeBundleWithStatement(exampleStatement), {
+        certificateIssuer: "x",
+        sourceRepositoryUrl: "https://github.com/a/b"
+      })
+    ).rejects.toBeInstanceOf(mod.SigstoreToolingUnavailableError);
   });
 });

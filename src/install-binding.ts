@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { parse as parseYaml } from "yaml";
 
 import { evaluateRequestedPackages } from "./evaluations";
 import { runPackageManager, type PackageManagerExecutionResult } from "./package-managers";
-import { loadProjectInstallTargetsForManager, type ProjectInstallTargetsResult } from "./project-installs";
+import {
+  discoverProjectInstallScope,
+  loadProjectInstallScope,
+  loadProjectInstallTargetsForManager,
+  type ProjectInstallTargetsResult
+} from "./project-installs";
 import { RegistryClient } from "./registry";
 import { FLAGS_WITH_VALUES } from "./specs";
 import { evaluateTransitiveDependencies } from "./transitive";
@@ -28,6 +32,110 @@ export function sha512Integrity(raw: string | undefined): string | undefined {
   const encoded = entry.slice(7);
   const digest = Buffer.from(encoded, "base64");
   return digest.length === 64 && digest.toString("base64") === encoded ? entry : undefined;
+}
+
+/**
+ * Bind lockfile registry targets to the exact artifacts returned by the
+ * registry evaluation. Check and authorization flows use this before they
+ * can report allow; install mode performs the same comparison in
+ * `verifyTargets` immediately before the frozen package-manager install.
+ */
+export function lockfileArtifactBindingReasons(
+  targets: ProjectInstallTargetsResult,
+  evaluations: PackageEvaluation[]
+): CliReason[] {
+  if (targets.issues.length > 0 || !targets.lockfilePath) {
+    return [{
+      code: "artifact-binding-failed",
+      message: `Check blocked: ${targets.issues.join(" ") || "no resolved lockfile was available for artifact binding."}`
+    }];
+  }
+
+  const reasons: CliReason[] = [];
+  for (const evaluation of evaluations) {
+    if (evaluation.requested.sourceType !== "registry") continue;
+
+    const resolved = evaluation.resolvedRegistryPackage;
+    if (!resolved) {
+      // Registry resolution failures already fail closed in the policy
+      // evaluation. Only add a binding reason if no policy reason did so.
+      if (evaluation.blockedReasons.length === 0) {
+        reasons.push({
+          code: "artifact-binding-failed",
+          message: `Check blocked: ${evaluation.requested.name} has no checked registry artifact to bind to the lockfile.`
+        });
+      }
+      continue;
+    }
+
+    const expectedIntegrity = sha512Integrity(resolved.artifact?.integrity);
+    if (!resolved.artifact || !expectedIntegrity) {
+      reasons.push({
+        code: "artifact-binding-failed",
+        message: `Check blocked: ${evaluation.requested.name} has no valid SHA-512 artifact binding in the checked registry manifest.`
+      });
+      continue;
+    }
+
+    const matches = targets.targets.filter((target) =>
+      target.requested.name === evaluation.requested.name &&
+      target.requested.requested === resolved.resolvedVersion
+    );
+    if (matches.length === 0) {
+      reasons.push({
+        code: "artifact-binding-failed",
+        message: `Check blocked: the lockfile has no target for ${evaluation.requested.name}@${resolved.resolvedVersion}.`
+      });
+      continue;
+    }
+
+    let expectedTarballUrl: string;
+    try {
+      expectedTarballUrl = new URL(resolved.artifact.tarballUrl).href;
+    } catch {
+      reasons.push({
+        code: "artifact-binding-failed",
+        message: `Check blocked: ${evaluation.requested.name} has an invalid tarball URL in the checked registry manifest.`
+      });
+      continue;
+    }
+
+    for (const target of matches) {
+      if (
+        target.requested.sourceType !== "registry" ||
+        sha512Integrity(target.integrity) !== expectedIntegrity
+      ) {
+        reasons.push({
+          code: "artifact-binding-failed",
+          message: `Check blocked: the lockfile does not bind ${evaluation.requested.name}@${resolved.resolvedVersion} to its checked registry SHA-512.`
+        });
+        break;
+      }
+
+      if (target.tarballUrl) {
+        let actualTarballUrl: string;
+        try {
+          actualTarballUrl = new URL(target.tarballUrl).href;
+        } catch {
+          reasons.push({
+            code: "artifact-binding-failed",
+            message: `Check blocked: the lockfile has an invalid tarball URL for ${evaluation.requested.name}.`
+          });
+          break;
+        }
+
+        if (actualTarballUrl !== expectedTarballUrl) {
+          reasons.push({
+            code: "artifact-binding-failed",
+            message: `Check blocked: the lockfile tarball for ${evaluation.requested.name} differs from the checked registry artifact.`
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  return reasons;
 }
 
 interface ApprovedArtifact {
@@ -137,32 +245,23 @@ function verifyTargets(targets: ProjectInstallTargetsResult, artifacts: Approved
 async function loadInstallScope(packageDir: string, manager: "npm" | "pnpm", ran: boolean) {
   const selected = await loadProjectInstallTargetsForManager(packageDir, packageDir, manager);
   if (!selected?.lockfilePath) fail("Install blocked: no supported lockfile binding.", ran);
-  const root = path.dirname(selected.lockfilePath);
   const raw = await readFile(selected.lockfilePath, "utf8");
   const lockDigest = createHash("sha256").update(raw).digest("hex");
-  const document = (manager === "npm" ? JSON.parse(raw) : parseYaml(raw)) as {
-    packages?: Record<string, unknown>; importers?: Record<string, unknown>;
-  };
-  const keys = manager === "npm"
-    ? Object.keys(document.packages ?? {}).filter((key) => !key.split("/").includes("node_modules"))
-    : Object.keys(document.importers ?? {});
-  const dirs = new Set([packageDir, ...keys.map((key) => path.resolve(root, key || "."))]);
-  const results: ProjectInstallTargetsResult[] = [];
-  const manifests: string[] = [];
-  const manifestDigests: string[] = [];
-  for (const dir of dirs) {
-    const relative = path.relative(root, dir);
-    if (relative.startsWith("..") || path.isAbsolute(relative)) fail("Install blocked: a lockfile importer escapes the project root.", ran);
-    const manifest = path.join(dir, "package.json");
-    manifests.push(manifest);
-    manifestDigests.push(await fileDigest(manifest));
-    const result = await loadProjectInstallTargetsForManager(dir, dir, manager);
-    if (!result || result.lockfilePath !== selected.lockfilePath) fail("Install blocked: inconsistent workspace lockfile scope.", ran);
-    results.push(result);
+  let loaded: Awaited<ReturnType<typeof loadProjectInstallScope>>;
+  try {
+    const paths = await discoverProjectInstallScope(selected.lockfilePath, manager, packageDir);
+    loaded = await loadProjectInstallScope(paths, manager);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error), ran);
   }
-  return { root, manifests, manifestDigests, lockDigest,
-    targets: { targets: results.flatMap((result) => result.targets),
-      issues: results.flatMap((result) => result.issues), lockfilePath: selected.lockfilePath } };
+  const manifestDigests = await Promise.all(loaded.manifestPaths.map(fileDigest));
+  return {
+    root: loaded.root,
+    manifests: loaded.manifestPaths,
+    manifestDigests,
+    lockDigest,
+    targets: loaded.targets
+  };
 }
 
 async function fileDigest(file: string): Promise<string> {

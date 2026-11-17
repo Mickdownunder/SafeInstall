@@ -2,9 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { evaluateContinuity, selectBaseline } from "../src/continuity";
+import {
+  createDefaultContinuityDependencies,
+  evaluateContinuity,
+  selectBaseline
+} from "../src/continuity";
 import type { ContinuityDependencies, VersionRecord } from "../src/continuity";
 import { DiskCache } from "../src/disk-cache";
 import type { AttestationIdentity } from "../src/provenance";
@@ -19,6 +23,7 @@ async function createDiskCache(): Promise<DiskCache> {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -54,6 +59,35 @@ const provFrom = (repo: string): AttestationIdentity => ({
   workflowPath: ".github/workflows/publish.yml"
 });
 const noProv: AttestationIdentity = { hasProvenance: false };
+
+describe("createDefaultContinuityDependencies", () => {
+  it("fetches version history instead of trusting planted disk history", async () => {
+    const diskCache = await createDiskCache();
+    await diskCache.setJson(
+      "registry-version-history-v1",
+      "https://registry.npmjs.org|demo",
+      [{ version: "9.9.9", publishedAt: "2020-01-01T00:00:00.000Z" }]
+    );
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          versions: { "1.0.0": {} },
+          time: { "1.0.0": "2026-01-01T00:00:00.000Z" }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const records = await createDefaultContinuityDependencies(diskCache).fetchVersionHistory(
+      "demo",
+      "https://registry.npmjs.org"
+    );
+
+    expect(records).toEqual([version("1.0.0", "2026-01-01T00:00:00.000Z")]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("selectBaseline", () => {
   const history = [

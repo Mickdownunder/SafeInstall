@@ -420,7 +420,8 @@ section now so records remain comparable.
    by CI from the pinned root.
 4. Verdict `allow` → check passes. `decisions authorize --output` writes the
    authorization artifact (canonical JCS bytes: base/head commits, verified
-   lockfile blob OIDs, the policy blob, verdict + reasons). `decisions attest`
+   lockfile blob OIDs, per-lockfile importer and workspace-metadata coverage,
+   the policy blob, verdict + reasons). `decisions attest`
    builds the in-toto v1 Statement over that artifact (subject = artifact
    sha256, predicate = the authorization) — the signable DSSE payload. **L2,
    when enabled:** that statement is signed with Sigstore keyless (OIDC

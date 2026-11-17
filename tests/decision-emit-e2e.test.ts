@@ -11,6 +11,7 @@ import {
   createStubPackageManager,
   createTempDir,
   ensureBuiltCli,
+  FIXTURE_INTEGRITY,
   runCli,
   startRegistryFixture,
   writeDefaultConfig,
@@ -214,7 +215,11 @@ describe("decision record emission (e2e)", () => {
         lockfileVersion: 3,
         packages: {
           "": { name: "emit-fixture", dependencies: { "left-pad": "1.13.2" } },
-          "node_modules/left-pad": { version: "1.13.2", resolved: "", integrity: "" }
+          "node_modules/left-pad": {
+            version: "1.13.2",
+            resolved: `${registry.url}/left-pad/-/left-pad-1.13.2.tgz`,
+            integrity: FIXTURE_INTEGRITY
+          }
         }
       }) + "\n"
     );
