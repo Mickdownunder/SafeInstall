@@ -685,7 +685,7 @@ To enforce policy during the actual install step (not just a check):
 | `package-manager` | `pnpm` | `npm` or `pnpm` for installation; `bun` fails closed |
 | `args` | | Additional arguments forwarded to the package manager |
 | `config-path` | | Explicit path to `safeinstall.config.json` (auto-discovered if omitted) |
-| `version` | `0.15.0` | Exact SafeInstall CLI version to install; dist-tags and ranges are rejected |
+| `version` | `0.16.0` | Exact SafeInstall CLI version to install; dist-tags and ranges are rejected |
 | `integrity` | recorded for the default version | SHA-512 SRI of the selected CLI tarball; required when `version` is not the default |
 
 ### Outputs
