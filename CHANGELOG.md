@@ -50,6 +50,7 @@
 - The shell guard fails closed when a package manager or runner reaches a shell without being on its command line: text piped or here-stringed into a shell that reads commands from standard input (`echo 'npm install x' | sh`, `bash <<< 'npm i x'`), a git alias that runs a shell command (`git -c alias.x='!npm install y' x`, or one stored with `git config alias.x '!...'`), and a command name or package-manager subcommand that a glob can complete (`np? install x`, `npm in* x`).
 - An error while the guard analyzes a command now denies the command. The hook used to exit with an error instead of a decision, and clients that treat a failing hook as non-blocking, such as Claude Code, then ran the command unscreened.
 - The published package bundles its runtime dependencies (`npm-package-arg`, `semver`, `yaml` and what they depend on) at the versions and SHA-512 digests of the repository lockfile. The GitHub Action and the workflow from `trust lock --ci` check the tarball's SHA-512 and then install it; npm used to resolve the dependencies from their caret ranges at that point, so code outside the checked digest ran inside the verifier. The published `package.json` lists no `devDependencies`.
+- On Windows, the trust lock's write check reads drive paths the way Git Bash and Cygwin spell them: `rm /c/work/app/.mcp.json`, `cd /cygdrive/c/work/app && ...` and globs over `C:/...` are checked at the drive path they write to. They used to resolve to a folder named `c` on the current drive and pass.
 
 ### Breaking changes
 
