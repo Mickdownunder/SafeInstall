@@ -147,6 +147,32 @@ describe("LocalSourceClassifier on real trees", () => {
     });
   });
 
+  it("reads a file URL with a host as the absolute path the package manager installs from", async () => {
+    const { dir } = await createRepoFixture(tempDirs);
+    await writeFiles(dir, {
+      "package.json": json({ name: "root", private: true, workspaces: ["packages/*", "srv/share/*"] }),
+      "packages/app/package.json": json({ name: "@repo/app" }),
+      "packages/shared/package.json": json({ name: "@repo/shared" }),
+      // Matches a workspace glob at the place a relative reading would land.
+      "srv/share/pkg/package.json": json({ name: "pkg" }),
+      "srv/share/pkg.tgz": "not really a tarball"
+    });
+    const classifier = new LocalSourceClassifier(dir);
+    const classify = (spec: string, type: RequestedPackage["sourceType"] = "directory") =>
+      classifier.classify(requested("pkg", spec, type));
+
+    // npm resolves these to /srv/share/pkg, pnpm on Windows to the share \\srv\share\pkg.
+    expect(await classify("file://srv/share/pkg")).toEqual({ kind: "directory", outsideRepository: true });
+    expect(await classify("link://srv/share/pkg")).toEqual({ kind: "directory", outsideRepository: true });
+    expect(await classify("//srv/share/pkg")).toEqual({ kind: "directory", outsideRepository: true });
+    expect(await classify("file://srv/share/pkg.tgz", "file")).toEqual({ kind: "file", outsideRepository: true });
+    // The relative spelling of the same directory is still the workspace member.
+    expect(await classify("file:srv/share/pkg")).toMatchObject({ kind: "member", outsideRepository: false });
+    expect(await classify("file://./srv/share/pkg")).toMatchObject({ kind: "member", outsideRepository: false });
+    // An empty host is an ordinary absolute path.
+    expect(await classify("file:///srv/share/pkg")).toEqual({ kind: "directory", outsideRepository: true });
+  });
+
   it("does not let an in-repository symlink to the outside pass as a member", async () => {
     const dir = await monorepo("pnpm");
     const outside = await mkdtemp(path.join(os.tmpdir(), "safeinstall-outside-"));
@@ -345,6 +371,35 @@ importers:
     await writeFiles(dir, files("file:../../vendor/evil"));
     const outsideWorkspace = await runCheckFlow(path.join(dir, "packages", "app"), ["check"]);
     expect(outsideWorkspace.reasons.map((reason) => reason.code)).toContain("untrusted-source");
+  });
+
+  it("does not exempt a file URL with a host that a relative reading would place on a workspace member", async () => {
+    const { dir } = await createRepoFixture(tempDirs);
+    const spec = "file://srv/share/pkg";
+    const workspaces = ["packages/*", "packages/app/srv/share/*"];
+    await writeFiles(dir, {
+      "package.json": json({ name: "root", private: true, workspaces, packageManager: "npm@10.8.0" }),
+      "safeinstall.config.json": configJson({ allowedSources: ["registry"] }),
+      "packages/app/package.json": json({ name: "@repo/app", dependencies: { pkg: spec } }),
+      // A workspace member exactly where `srv/share/pkg` would be relative to the manifest.
+      "packages/app/srv/share/pkg/package.json": json({ name: "pkg", version: "1.0.0" }),
+      "package-lock.json": json({
+        name: "root",
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "root", workspaces },
+          "node_modules/pkg": { resolved: "packages/app/srv/share/pkg", link: true },
+          "packages/app/srv/share/pkg": { name: "pkg", version: "1.0.0" },
+          "packages/app": { name: "@repo/app", dependencies: { pkg: spec } }
+        }
+      })
+    });
+    commitAll(dir, "head");
+
+    const result = await runCheckFlow(path.join(dir, "packages", "app"), ["check"]);
+
+    expect(result.decision).toBe("block");
+    expect(result.reasons.map((reason) => reason.code)).toContain("untrusted-source");
   });
 });
 

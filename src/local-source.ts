@@ -276,11 +276,22 @@ export class LocalSourceClassifier {
         break;
       }
     }
+    const artifactByName = TARBALL_PATTERN.test(spec);
     if (spec.startsWith("//")) {
-      spec = spec.slice(2); // file://host-less URL form
+      if (/^\/\/\.\.?(?:[\\/]|$)/.test(spec)) {
+        spec = spec.slice(2); // file://./x and file://../x are relative paths
+      } else if (spec.startsWith("///")) {
+        spec = spec.slice(2); // file:///x has an empty host: the absolute path /x
+      } else if (process.platform === "win32") {
+        // file://host/share is a network share for a package manager on Windows.
+        return { kind: artifactByName ? "file" : "directory", outsideRepository: true };
+      } else {
+        // A host is not a path segment of the project: npm installs
+        // file://host/dir from the absolute path /host/dir.
+        spec = spec.slice(1);
+      }
     }
 
-    const artifactByName = TARBALL_PATTERN.test(spec);
     if ((spec.startsWith("~") || WINDOWS_ABSOLUTE.test(spec)) && !path.isAbsolute(spec)) {
       // Home-relative and foreign-platform absolute paths are never in the repository.
       return { kind: artifactByName ? "file" : "directory", outsideRepository: true };
