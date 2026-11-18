@@ -78,20 +78,26 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "8.71.0",
     "vite": "8.3.8",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12",
+    "zod": "4.6.7"
   },
   "pnpm": {
     "overrides": {
       "postcss": "8.5.23",
-      "ip-address": "10.7.1",
+      "ip-address": "10.7.6",
       "brace-expansion": "5.0.12",
-      "fast-uri": "3.1.8",
-      "hono": "4.13.7",
+      "fast-uri": "3.1.9",
+      "hono": "4.13.18",
       "js-yaml": "4.3.2",
       "nanoid": "3.3.18",
-      "@hono/node-server": "1.19.17",
-      "qs": "6.16.0",
-      "esbuild": ">=0.28.1"
+      "@hono/node-server": "2.1.8",
+      "qs": "6.16.1",
+      "esbuild": ">=0.28.1",
+      "proxy-addr": "2.0.8",
+      "source-map-js": "1.2.2",
+      "cacache": "21.0.2",
+      "minimatch@>=7": "11.0.8",
+      "body-parser": "2.4.0"
     }
   }
 }
