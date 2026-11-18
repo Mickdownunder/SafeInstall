@@ -50,6 +50,19 @@ describe("CLI end-to-end", () => {
     expect(result.stderr).toBe("");
   });
 
+  // `check` judges the project. A package name after it used to be ignored,
+  // so `check typescript@next` answered "allow" for the project.
+  it("refuses package names after check instead of answering for the project", async () => {
+    const cwd = await createTempDir("safeinstall-check-args-");
+    await writeJson(path.join(cwd, "package.json"), { name: "probe", version: "1.0.0" });
+    for (const args of [["check", "typescript@next"], ["check", "--json", "left-pad"], ["check", "--record", "x"]]) {
+      const result = await runCli(args, { cwd });
+      expect(result.code, args.join(" ")).toBe(1);
+      expect(result.stdout + result.stderr, args.join(" ")).toContain("safeinstall check takes no package names");
+      expect(result.stdout + result.stderr, args.join(" ")).not.toContain("Check passed");
+    }
+  });
+
   it("prints the current SafeInstall version", async () => {
     // The single source of truth for the version is package.json; the
     // release-metadata test pins the concrete release number.
