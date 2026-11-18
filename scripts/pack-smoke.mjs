@@ -25,7 +25,10 @@ async function main() {
     if (suppliedTarball) {
       tarballPath = path.resolve(projectRoot, suppliedTarball);
     } else {
-      await execFileAsync("pnpm", ["pack", "--pack-destination", packDir], {
+      await execFileAsync("pnpm", ["build"], {
+        cwd: projectRoot
+      });
+      await execFileAsync(process.execPath, [path.join(projectRoot, "scripts", "pack-release.mjs"), packDir], {
         cwd: projectRoot
       });
 
@@ -52,6 +55,8 @@ async function main() {
     await execFileAsync("npm", ["ci", "--ignore-scripts"], {
       cwd: installDir
     });
+
+    await assertBundledClosure(installDir);
 
     const initResult = await execFileAsync(
       process.execPath,
@@ -110,6 +115,37 @@ async function main() {
     }
     await rm(installDir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Every runtime dependency came out of the tarball: npm resolved nothing from
+ * the registry, so the digest of the tarball covers all code that runs.
+ */
+async function assertBundledClosure(installDir) {
+  const manifest = JSON.parse(
+    await readFile(path.join(installDir, "node_modules", "safeinstall-cli", "package.json"), "utf8")
+  );
+  const direct = Object.keys(manifest.dependencies ?? {}).sort();
+  if (direct.length === 0 || JSON.stringify([...(manifest.bundleDependencies ?? [])].sort()) !== JSON.stringify(direct)) {
+    throw new Error("The installed package does not bundle its runtime dependencies.");
+  }
+
+  const lock = JSON.parse(await readFile(path.join(installDir, "package-lock.json"), "utf8"));
+  const prefix = "node_modules/safeinstall-cli/node_modules/";
+  const dependencies = Object.entries(lock.packages).filter(
+    ([key]) => key !== "" && key !== "node_modules/safeinstall-cli"
+  );
+  for (const [key, entry] of dependencies) {
+    if (!key.startsWith(prefix) || entry.inBundle !== true || entry.resolved !== undefined) {
+      throw new Error(`${key} was resolved outside the tarball.`);
+    }
+  }
+  const bundled = new Set(dependencies.map(([key]) => key.slice(prefix.length)));
+  const missing = direct.filter((name) => !bundled.has(name));
+  if (missing.length > 0) {
+    throw new Error(`The tarball does not bundle ${missing.join(", ")}.`);
+  }
+  console.log(`${bundled.size} runtime dependencies installed from inside the tarball.`);
 }
 
 void main();

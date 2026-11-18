@@ -47,6 +47,7 @@
 - MCP servers started through `npm exec`, `npm x`, `bun x` or `pnpm`/`yarn dlx` behind global options, or launched through `cmd /c`, `env`, `sh -c`, `timeout` or `nice`, are checked for a floating version like `npx` servers. A launcher whose command cannot be read as plain words and mentions a runner counts as unpinned.
 - `guard install` and `init` report the guard as already registered only for an entry that runs: the exact guard command, a `command` hook, a matcher that selects Bash, a timeout of at least five seconds and, for Cursor, `failClosed: true`. A near match is left in place and a working entry is added next to it.
 - The signature and credential of Google Cloud Storage signed URLs (`X-Goog-Signature`, `X-Goog-Credential`) are redacted in output and decision records, and such a URL on the command line is rejected like other credential-bearing specs.
+- The published package bundles its runtime dependencies (`npm-package-arg`, `semver`, `yaml` and what they depend on) at the versions and SHA-512 digests of the repository lockfile. The GitHub Action and the workflow from `trust lock --ci` check the tarball's SHA-512 and then install it; npm used to resolve the dependencies from their caret ranges at that point, so code outside the checked digest ran inside the verifier. The published `package.json` lists no `devDependencies`.
 
 ### Breaking changes
 
