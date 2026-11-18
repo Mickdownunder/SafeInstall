@@ -429,9 +429,14 @@ describe("analyzeShellCommand", () => {
       "timeout 60 npm 'install' evil",
       "nice 'pnpm' \"add\" evil",
       "somewrapper 'npm' i evil",
-      // A manager name that only exists after expansion.
+      // A manager name that only exists after expansion, in the command position of a command runner.
       "timeout 60 $NPM install evil",
-      "timeout 60 npm$EMPTY install evil"
+      "timeout 60 npm$EMPTY install evil",
+      "nice -n 10 $NPM install evil",
+      "timeout $SECS $NPM install evil",
+      "echo evil | xargs -n 1 $NPM install",
+      "stdbuf -oL $PM add evil",
+      "pnpm exec $NPM install evil"
     ])("fails closed on %j", (command) => {
       const analysis = analyzeShellCommand(command);
       expect(analysis.unanalyzable).toHaveLength(1);
@@ -466,6 +471,14 @@ describe("analyzeShellCommand", () => {
         "pnpm exec install-tool",
         "timeout 60 echo \"npx cowsay\"",
         "timeout 600 $PYTHON -m pip install requests",
+        // A computed argument of a build tool is not a command.
+        "cmake --build \"$BUILD_DIR\" --target install",
+        "make PREFIX=\"$PREFIX\" install",
+        "make -C \"$DIR\" install",
+        "mvn $MAVEN_OPTS install",
+        "pip $PIP_FLAGS install requests",
+        "./gradlew $ARGS install",
+        "timeout 60 make $FLAGS install",
         "brew install npx",
         "chmod +x ./npx",
         "docker run --rm node:22 npx cowsay"
