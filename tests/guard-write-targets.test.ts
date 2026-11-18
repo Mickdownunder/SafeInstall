@@ -323,7 +323,7 @@ describe("guard write targets under an active trust lock", () => {
       "echo x > ROOT/safeinstall.config.json",
       "cd ROOT && rm .mcp.json",
       "cd ROOT/.claude && echo {} > settings.json",
-      "rm ROOT/.mcp.js?",
+      "rm ROOT/.mcp.js*",
       "rm -rf ROOT/.safeinstall"
     ])("denies %j from inside and outside the project", async (template) => {
       const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
@@ -335,7 +335,7 @@ describe("guard write targets under an active trust lock", () => {
     });
 
     it("denies a glob over a native drive path and leaves other writes alone", async () => {
-      expect((await decideGuard(`rm ${shellPath(root)}/.mcp.js?`, root)).action).toBe("deny");
+      expect((await decideGuard(`rm ${shellPath(root)}/.mcp.js*`, root)).action).toBe("deny");
       expect(await decideGuard(`echo x > ${gitBash("/")}/sub/notes.txt`, root)).toEqual({ action: "allow" });
     });
   });
