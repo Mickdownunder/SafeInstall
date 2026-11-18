@@ -7,8 +7,8 @@ import type { GuardRunnerMatch } from "./guard-commands";
 import { findNearestUpward } from "./project-discovery";
 import { findProtectedWrite } from "./guard-write-match";
 import type { ProtectedWrite } from "./guard-write-match";
+import { findProtectedWriteInReachedRoots } from "./guard-write-roots";
 import { redactSensitiveText } from "./redaction";
-import { findTrustContext } from "./trust-surface";
 import type { TrustSurfaceStatus } from "./trust-surface";
 import { checkTrustSurface, partitionTrustFindings } from "./trust-surface-check";
 
@@ -142,62 +142,6 @@ function protectedWriteDecision(protectedWrite: ProtectedWrite | undefined): Gua
       "(SafeInstall policy, agent hooks, rules files, MCP configs). Agents must not modify it. " +
       "If the user wants this change, they can make it themselves and approve it with `safeinstall trust approve`."
   };
-}
-
-/**
- * Directories a command writes in, as far as they are spelled out: every
- * working directory it can `cd` to, and the directory of every literal target
- * resolved against each of them.
- */
-function reachedDirectories(analysis: ReturnType<typeof analyzeShellCommand>, cwd: string): Set<string> {
-  const directories = new Set<string>();
-  for (const operation of analysis.writeOperations) {
-    const workingDirectories = operation.cwdVariants.map((changes) =>
-      changes.reduce((directory, change) => path.resolve(directory, change), cwd)
-    );
-    for (const directory of workingDirectories) {
-      directories.add(directory);
-    }
-    for (const parts of operation.words) {
-      if (!parts.every((part) => part.kind === "text")) continue;
-      const literal = parts.map((part) => (part.kind === "text" ? part.value : "")).join("");
-      if (literal === "") continue;
-      for (const directory of path.isAbsolute(literal) ? [cwd] : workingDirectories) {
-        const target = path.resolve(directory, literal);
-        directories.add(path.dirname(target));
-        // `rm -r dir` removes what is below the target itself.
-        if (operation.recursive) directories.add(target);
-      }
-    }
-  }
-  return directories;
-}
-
-/**
- * The lock is found from the hook event's cwd. A command can still write into
- * another locked project by absolute path or after a `cd`, and that write is
- * judged by the lock of the project it lands in.
- */
-async function findProtectedWriteInReachedRoots(
-  analysis: ReturnType<typeof analyzeShellCommand>,
-  cwd: string,
-  checkedRoot: string | undefined
-): Promise<ProtectedWrite | undefined> {
-  if (analysis.writeOperations.length === 0) {
-    return undefined;
-  }
-  const roots = new Set<string>();
-  for (const directory of reachedDirectories(analysis, cwd)) {
-    const context = await findTrustContext(directory);
-    for (const root of context?.conflictingRoots ?? (context ? [context.root] : [])) {
-      if (root !== checkedRoot) roots.add(root);
-    }
-  }
-  for (const root of roots) {
-    const hit = await findProtectedWrite(analysis.writeOperations, { root, cwd });
-    if (hit) return hit;
-  }
-  return undefined;
 }
 
 /**

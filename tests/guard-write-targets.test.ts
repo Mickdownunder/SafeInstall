@@ -281,7 +281,12 @@ describe("guard write targets under an active trust lock", () => {
       "cd ROOT && rm .mcp.json",
       "cd ROOT/.claude && echo {} > settings.json",
       "cd ROOT/sub && echo x > ../AGENTS.md",
-      "rm -rf ROOT/.safeinstall"
+      "rm -rf ROOT/.safeinstall",
+      // A glob or expansion after a literal directory still names the project.
+      "rm ROOT/.mcp.js*",
+      "rm ROOT/*.json",
+      "rm -rf ROOT/.safe*",
+      "echo {} > ROOT/.claude/$NAME"
     ])("denies %j", async (template) => {
       const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
       const command = template.replace("ROOT", shellPath(root));
@@ -292,6 +297,20 @@ describe("guard write targets under an active trust lock", () => {
       const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
       expect(await decideGuard(`echo x > ${shellPath(root)}/sub/notes.txt`, outside)).toEqual({ action: "allow" });
       expect(await decideGuard("echo x > .mcp.json", outside)).toEqual({ action: "allow" });
+      expect(await decideGuard(`rm ${shellPath(root)}/sub/*.txt`, outside)).toEqual({ action: "allow" });
+    });
+
+    it.skipIf(process.platform === "win32")("denies a write into the project spelled from the home directory", async () => {
+      const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
+      const home = process.env.HOME;
+      process.env.HOME = path.dirname(root);
+      try {
+        for (const command of [`rm ~/${path.basename(root)}/.mcp.json`, `rm $HOME/${path.basename(root)}/.mcp.js*`]) {
+          expect((await decideGuard(command, outside)).action, command).toBe("deny");
+        }
+      } finally {
+        process.env.HOME = home;
+      }
     });
   });
 
@@ -309,5 +328,34 @@ describe("guard write targets under an active trust lock", () => {
     ]) {
       expect((await decideGuard(command, planted)).action, command).toBe("deny");
     }
+  });
+
+  // Git Bash spells `C:\dir` as `/c/dir`, Cygwin as `/cygdrive/c/dir`.
+  describe.runIf(process.platform === "win32")("with drive paths as Git Bash writes them", () => {
+    const gitBash = (prefix: string): string => {
+      const posix = shellPath(root);
+      return `${prefix}${posix[0]?.toLowerCase()}${posix.slice(2)}`;
+    };
+
+    it.each([
+      "rm ROOT/.mcp.json",
+      "echo x > ROOT/safeinstall.config.json",
+      "cd ROOT && rm .mcp.json",
+      "cd ROOT/.claude && echo {} > settings.json",
+      "rm ROOT/.mcp.js*",
+      "rm -rf ROOT/.safeinstall"
+    ])("denies %j from inside and outside the project", async (template) => {
+      const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
+      for (const prefix of ["/", "/cygdrive/"]) {
+        const command = template.replace("ROOT", gitBash(prefix));
+        expect((await decideGuard(command, root)).action, command).toBe("deny");
+        expect((await decideGuard(command, outside)).action, command).toBe("deny");
+      }
+    });
+
+    it("denies a glob over a native drive path and leaves other writes alone", async () => {
+      expect((await decideGuard(`rm ${shellPath(root)}/.mcp.js*`, root)).action).toBe("deny");
+      expect(await decideGuard(`echo x > ${gitBash("/")}/sub/notes.txt`, root)).toEqual({ action: "allow" });
+    });
   });
 });

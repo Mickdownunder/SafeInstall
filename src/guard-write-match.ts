@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { GuardWriteOperation, WordPart } from "./guard-types";
+import { nativeShellPath, shellDrivePrefix } from "./shell-drive-paths";
 import { isTrustSurfacePath, trustSurfaceProtectedPaths } from "./trust-surface";
 
 /**
@@ -120,7 +121,8 @@ function resolveWord(
       cells.push({ t: "wild" });
       unresolved = true;
     } else {
-      cells.push(...literalCells(value));
+      // Home and environment values are native paths: `C:\Users\x` on Windows.
+      cells.push(...literalCells(process.platform === "win32" ? value.replace(/\\/g, "/") : value));
     }
   };
   for (const part of parts) {
@@ -144,7 +146,35 @@ function resolveWord(
         break;
     }
   }
-  return { cells, unresolved, globbed };
+  return { cells: withNativeDrive(cells), unresolved, globbed };
+}
+
+/**
+ * On Windows, a target that starts the way Git Bash or Cygwin spell a drive
+ * (`/c/...`, `/cygdrive/c/...`) is rewritten to `C:/...`, where the shell
+ * writes it.
+ */
+function withNativeDrive(cells: PatternCell[]): PatternCell[] {
+  let prefix = "";
+  for (const cell of cells) {
+    if (cell.t !== "lit") break;
+    prefix += cell.ch;
+  }
+  const drive = shellDrivePrefix(prefix);
+  // `/c` names the drive only as a whole component: not in `/c*`.
+  if (!drive || (drive.length === prefix.length && !prefix.endsWith("/") && cells.length > prefix.length)) {
+    return cells;
+  }
+  return [...literalCells(`${drive.letter}:/`), ...cells.slice(drive.length)];
+}
+
+/** On Windows, the drive root of a `C:/...` pattern and the cells after it. */
+function driveRooted(cells: PatternCell[]): { root: string; rest: PatternCell[] } | undefined {
+  if (process.platform !== "win32") return undefined;
+  const [letter, colon, slash] = cells;
+  if (letter?.t !== "lit" || !/^[A-Za-z]$/.test(letter.ch)) return undefined;
+  if (colon?.t !== "lit" || colon.ch !== ":" || slash?.t !== "lit" || slash.ch !== "/") return undefined;
+  return { root: `${letter.ch.toUpperCase()}:\\`, rest: cells.slice(3) };
 }
 
 function matchCells(cells: PatternCell[], text: string, prefix: boolean): boolean {
@@ -375,7 +405,8 @@ export async function findProtectedWrite(
       exactWhenLiteral: boolean
     ): Promise<ProtectedWrite | undefined> => {
       if (cells.length === 0) return undefined;
-      const absolute = cells[0]?.t === "lit" && cells[0].ch === "/";
+      const drive = driveRooted(cells);
+      const absolute = drive !== undefined || (cells[0]?.t === "lit" && cells[0].ch === "/");
       const floating = cells[0]?.t === "wild" || (!absolute && cwd === undefined);
       const guarded = (matched: boolean): boolean => matched && (!guard || hasProtectedLiteralComponent(cells));
 
@@ -388,8 +419,8 @@ export async function findProtectedWrite(
           : undefined;
       }
 
-      const components = splitComponents(cells);
-      const starts = absolute ? ["/"] : [cwd as string, await realDeepest(cwd as string)];
+      const components = splitComponents(drive ? drive.rest : cells);
+      const starts = drive ? [drive.root] : absolute ? ["/"] : [cwd as string, await realDeepest(cwd as string)];
       for (const start of new Set(starts)) {
         const { directory, rest } = walkLiteralPrefix(start, components);
         if (rest.length === 0) {
@@ -448,7 +479,7 @@ export async function findProtectedWrite(
   for (const operation of operations) {
     const cwds = new Set<string>();
     for (const changes of operation.cwdVariants) {
-      cwds.add(changes.reduce((directory, change) => path.resolve(directory, change), context.cwd));
+      cwds.add(changes.reduce((directory, change) => path.resolve(directory, nativeShellPath(change)), context.cwd));
     }
     const hits: (ProtectedWrite | undefined)[] = [];
     for (const cwd of cwds) hits.push(await evaluate(operation, path.resolve(cwd)));
