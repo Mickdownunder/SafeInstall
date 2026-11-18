@@ -6,6 +6,8 @@ export interface ShellToken {
   end: number;
   quoted: boolean;
   hasExpansion: boolean;
+  /** True when the word holds an unquoted `*`, `?` or `[`, which pathname expansion can complete. */
+  hasGlob?: boolean;
 }
 
 export interface ShellSegment {
@@ -135,16 +137,25 @@ export function splitShellSegments(command: string): ShellSegment[] {
   let tokenQuoted = false;
   let tokenHasExpansion = false;
   let tokenHasUnquotedBrace = false;
+  let tokenHasGlob = false;
 
   const flushToken = (end: number): void => {
     if (tokenStart === -1) return;
     if (tokenHasUnquotedBrace && BRACE_EXPANSION_PATTERN.test(tokenValue)) tokenHasExpansion = true;
     tokenHasUnquotedBrace = false;
-    tokens.push({ value: tokenValue, start: tokenStart, end, quoted: tokenQuoted, hasExpansion: tokenHasExpansion });
+    tokens.push({
+      value: tokenValue,
+      start: tokenStart,
+      end,
+      quoted: tokenQuoted,
+      hasExpansion: tokenHasExpansion,
+      ...(tokenHasGlob ? { hasGlob: true } : {})
+    });
     tokenValue = "";
     tokenStart = -1;
     tokenQuoted = false;
     tokenHasExpansion = false;
+    tokenHasGlob = false;
   };
 
   const flushSegment = (end: number): void => {
@@ -302,6 +313,7 @@ export function splitShellSegments(command: string): ShellSegment[] {
         tokenQuoted = false;
         tokenHasExpansion = false;
         tokenHasUnquotedBrace = false;
+        tokenHasGlob = false;
       } else {
         flushToken(index);
       }
@@ -337,6 +349,7 @@ export function splitShellSegments(command: string): ShellSegment[] {
     }
     if (tokenStart === -1) tokenStart = index;
     if (character === "{") tokenHasUnquotedBrace = true;
+    if (character === "*" || character === "?" || character === "[") tokenHasGlob = true;
     tokenValue += character;
     index += 1;
   }
