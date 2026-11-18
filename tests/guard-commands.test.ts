@@ -436,7 +436,12 @@ describe("analyzeShellCommand", () => {
       "timeout $SECS $NPM install evil",
       "echo evil | xargs -n 1 $NPM install",
       "stdbuf -oL $PM add evil",
-      "pnpm exec $NPM install evil"
+      "pnpm exec $NPM install evil",
+      // A runner that runs another runner or wrapper.
+      "timeout 60 nice $PM install evil",
+      "timeout 60 nice -n 5 stdbuf -oL $PM install evil",
+      "timeout 60 sudo $PM install evil",
+      "timeout 60 env FOO=1 $PM install evil"
     ])("fails closed on %j", (command) => {
       const analysis = analyzeShellCommand(command);
       expect(analysis.unanalyzable).toHaveLength(1);
@@ -479,6 +484,8 @@ describe("analyzeShellCommand", () => {
         "pip $PIP_FLAGS install requests",
         "./gradlew $ARGS install",
         "timeout 60 make $FLAGS install",
+        "timeout 60 nice make $FLAGS install",
+        "timeout 60 env CC=gcc make $FLAGS install",
         "brew install npx",
         "chmod +x ./npx",
         "docker run --rm node:22 npx cowsay"

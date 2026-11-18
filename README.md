@@ -478,7 +478,7 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `provenance.mode` | `"off"` / `"warn"` / `"require"` — whether to verify Sigstore attestations |
 | `provenance.requireFor` | Package names (glob supported) for which provenance is required even in `"warn"` mode |
 | `provenance.trustedPublishers` | Map of package name pattern → expected `owner/repo` slug; mismatches always block |
-| `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cryptographically verified cached attestation whose signed subject matches the exact package and version |
+| `provenance.offlineBehavior` | `"fail-closed"` blocks on fetch failure, `"allow-cached"` falls back to a cryptographically verified cached attestation whose signed subject matches the exact package and version. Without such a cached attestation, a package whose provenance is required (`mode: "require"`, `requireFor`) or pinned (`trustedPublishers`) is still blocked; any other package gets a warning |
 | `provenance.toolingUnavailable` | `"warn"` (default) proceeds with a loud warning when the `sigstore` verifier is not installed; `"fail-closed"` treats a missing verifier as suspicious and blocks every install until it is present (installing `sigstore` itself stays exempt, so it can never deadlock) |
 | `transitive.mode` | `"off"` / `"warn"` / `"block"` — transitive install-script check, and whether a missing or unreadable lockfile warns or blocks. Lockfile sources are checked against `allowedSources` in every mode |
 | `transitive.checks` | `"install-script"` enables the install-script check. `"untrusted-source"` is accepted but has no effect: that check always runs |

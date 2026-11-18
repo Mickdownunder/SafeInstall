@@ -26,36 +26,76 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Flags that name a package to resolve, per runner. They are not
+ * interchangeable: `npx --from=a@1.2.3 floating` ignores `--from` and
+ * resolves `floating`, so a flag only counts for the runner that defines it.
+ */
+const NODE_RUNNER_PACKAGE_FLAGS: ReadonlySet<string> = new Set(["-p", "--package"]);
+const UVX_PACKAGE_FLAGS: ReadonlySet<string> = new Set(["--from", "--with"]);
 /** Runner flags that consume the following token as their value. */
 const RUNNER_VALUE_FLAGS = new Set(["-c", "--call", "--shell", "--cwd"]);
+/** Runner flags known to take no value. */
+const RUNNER_BOOLEAN_FLAGS = new Set([
+  "-y", "--yes", "--no", "-q", "--quiet", "--no-install", "--ignore-existing",
+  "--offline", "--prefer-offline", "--prefer-online", "--bun"
+]);
 
 /**
- * The package spec a runner would resolve. An explicit `-p/--package <spec>`
- * (npm exec / npx) names the package directly and wins; otherwise it is the
- * first positional argument, skipping flags and the values of other
- * value-taking flags (so `--shell bash pkg` resolves to `pkg`, not `bash`).
+ * The package specs a runner would resolve, or undefined when the arguments
+ * cannot be read with certainty. Explicit `-p/--package <spec>` options name
+ * the packages and all of them count; otherwise it is the first positional
+ * argument, skipping flags and the values of value-taking flags (so
+ * `--shell bash pkg` resolves to `pkg`, not `bash`).
+ *
+ * A separate-value option this parser does not know could consume the next
+ * token (`--cache cache@1.2.3 floating`), so the exact-looking token after it
+ * proves nothing: the result is undefined and the caller treats the server as
+ * unpinned. `--option=value` is unambiguous and skipped.
  */
-function runnerSpec(args: string[]): string | undefined {
+function runnerSpecs(args: string[], packageFlags: ReadonlySet<string>): string[] | undefined {
+  const packages: string[] = [];
+  let positional: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === undefined) {
       continue;
     }
-    if (arg === "-p" || arg === "--package") {
-      return args[index + 1];
+    if (arg === "--") {
+      positional = args[index + 1];
+      break;
     }
-    if (arg.startsWith("--package=")) {
-      return arg.slice("--package=".length);
-    }
-    if (arg.startsWith("-")) {
-      if (!arg.includes("=") && RUNNER_VALUE_FLAGS.has(arg)) {
-        index += 1;
+    if (packageFlags.has(arg)) {
+      const value = args[index + 1];
+      if (value === undefined) {
+        return undefined;
       }
+      packages.push(value);
+      index += 1;
       continue;
     }
-    return arg;
+    const attached = [...packageFlags].find((flag) => flag.startsWith("--") && arg.startsWith(`${flag}=`));
+    if (attached) {
+      packages.push(arg.slice(attached.length + 1));
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      if (arg.includes("=") || RUNNER_BOOLEAN_FLAGS.has(arg)) {
+        continue;
+      }
+      if (RUNNER_VALUE_FLAGS.has(arg)) {
+        index += 1;
+        continue;
+      }
+      return undefined;
+    }
+    positional = arg;
+    break;
   }
-  return undefined;
+  if (packages.length > 0) {
+    return packages;
+  }
+  return positional === undefined ? undefined : [positional];
 }
 
 /**
@@ -83,15 +123,15 @@ function isUnpinnedMcpServer(command: string | undefined, args: string[]): boole
     return false;
   }
   const binary = path.basename(command).toLowerCase().replace(/\.(cmd|exe)$/, "");
-  let spec: string | undefined;
+  let specs: string[] | undefined;
   if (RUNNER_BINARIES.has(binary)) {
-    spec = runnerSpec(args);
+    specs = runnerSpecs(args, binary === "uvx" ? UVX_PACKAGE_FLAGS : NODE_RUNNER_PACKAGE_FLAGS);
   } else if ((binary === "pnpm" || binary === "yarn") && args[0] === "dlx") {
-    spec = runnerSpec(args.slice(1));
+    specs = runnerSpecs(args.slice(1), NODE_RUNNER_PACKAGE_FLAGS);
   } else {
     return false;
   }
-  return spec === undefined || isFloatingSpec(spec);
+  return specs === undefined || specs.some(isFloatingSpec);
 }
 
 /** Parse the `mcpServers` block of one config file into tracked entries. */

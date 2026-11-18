@@ -150,7 +150,10 @@ async function fetchVerifierDistribution(
 
   let response: Response;
   try {
+    // "manual": the recorded integrity has to come from the registry itself,
+    // not from wherever a redirect points; a redirect counts as a failed fetch.
     response = await fetchImpl(`${registryUrl}/${encodedName}/${encodeURIComponent(version)}`, {
+      redirect: "manual",
       signal: AbortSignal.timeout(REGISTRY_FETCH_TIMEOUT_MS)
     });
   } catch (error) {

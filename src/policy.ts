@@ -416,12 +416,27 @@ function applyProvenanceDecision(
   }
 
   if (result.status === "unreachable") {
+    // allow-cached falls back to a verified cached attestation and only gets
+    // here when there is none. Availability may win over a check nobody asked
+    // for, never over one that policy requires or pins: otherwise a registry
+    // that fails only its attestation endpoint turns the requirement into a
+    // warning.
+    const enforced = required || lookupGlobPattern(config.trustedPublishers, requested) !== undefined;
     if (config.offlineBehavior === "fail-closed") {
       evaluation.blockedReasons.push({
         code: "attestation-unreachable",
         message: `Blocked: could not fetch provenance attestation for ${requested}${result.error ? ` (${result.error})` : ""}.`,
         suggestion:
           "Retry when the network is available, or set provenance.offlineBehavior to allow-cached."
+      });
+    } else if (enforced) {
+      evaluation.blockedReasons.push({
+        code: "attestation-unreachable",
+        message:
+          `Blocked: could not fetch provenance attestation for ${requested}${result.error ? ` (${result.error})` : ""}, ` +
+          "no verified attestation for this version is cached, and policy requires or pins its provenance.",
+        suggestion:
+          "Retry when the network is available. allow-cached only covers versions whose attestation was verified and cached before."
       });
     } else {
       evaluation.warnings.push(

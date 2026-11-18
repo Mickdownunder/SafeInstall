@@ -105,6 +105,40 @@ describe("parseMcpServers", () => {
     expect(present(servers[0]).unpinned).toBe(false);
   });
 
+  it.each([
+    // The value of an option the parser does not know must not pass as the package.
+    [["--cache", "cache@1.2.3", "floating-mcp"], true],
+    [["--registry", "r@1.0.0", "floating-mcp"], true],
+    [["--userconfig", "rc@1.0.0", "floating-mcp@latest"], true],
+    // An attached value is unambiguous, and known boolean options are skipped.
+    [["--cache=/tmp/c", "good-mcp@1.2.3"], false],
+    [["-y", "--prefer-offline", "good-mcp@1.2.3"], false],
+    [["--", "good-mcp@1.2.3"], false],
+    [["--", "floating-mcp"], true],
+    // Every requested package has to be pinned, not only the first.
+    [["--package", "a@1.0.0", "--package", "floating", "bin"], true],
+    [["-p", "a@1.0.0", "-p", "b@2.0.0", "bin"], false],
+    [["--package=a@1.0.0", "bin"], false],
+    // --from belongs to uvx; npx ignores it and resolves the positional package.
+    [["--from=innocent@1.2.3", "floating-mcp"], true],
+    [["--from", "innocent@1.2.3", "floating-mcp"], true],
+    [["--from=innocent@1.2.3", "good-mcp@1.2.3"], false]
+  ])("decides whether npx %j is unpinned", (args, unpinned) => {
+    const servers = parseMcpServers(".mcp.json", JSON.stringify({ mcpServers: { s: { command: "npx", args } } }));
+    expect(present(servers[0]).unpinned).toBe(unpinned);
+  });
+
+  it("reads the package of a uvx --from invocation", () => {
+    const unpinned = (args: string[]): boolean =>
+      present(parseMcpServers(".mcp.json", JSON.stringify({ mcpServers: { s: { command: "uvx", args } } }))[0]).unpinned;
+
+    expect(unpinned(["--from", "tool@1.2.3", "tool"])).toBe(false);
+    expect(unpinned(["--from", "tool", "tool"])).toBe(true);
+    // Every package uvx is told to add has to be pinned, and npx's flag means nothing to it.
+    expect(unpinned(["--from", "tool@1.2.3", "--with", "extra", "tool"])).toBe(true);
+    expect(unpinned(["--package", "tool@1.2.3", "floating"])).toBe(true);
+  });
+
   it("treats a full SemVer 2.0 pin (prerelease + build metadata) as pinned", () => {
     const json = JSON.stringify({
       mcpServers: {

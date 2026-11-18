@@ -773,13 +773,13 @@ describe("evaluatePackage", () => {
       expect(result.blockedReasons.map((reason) => reason.code)).toContain("attestation-unreachable");
     });
 
-    it("warns on unreachable when offlineBehavior is allow-cached", () => {
+    it("warns on unreachable when offlineBehavior is allow-cached and nothing requires provenance", () => {
       const result = evaluatePackage(
         createInput({
           config: createConfig({
             ...provenanceBase,
             provenance: {
-              mode: "require",
+              mode: "warn",
               requireFor: [],
               trustedPublishers: {},
               offlineBehavior: "allow-cached",
@@ -794,6 +794,27 @@ describe("evaluatePackage", () => {
       expect(result.warnings.some((warning) => warning.includes("unreachable"))).toBe(true);
     });
 
+    // allow-cached reaches "unreachable" only when no verified attestation is
+    // cached. A registry that fails just the attestation endpoint must not turn
+    // a required check or a publisher pin into a warning.
+    it.each([
+      ["mode is require", { mode: "require" as const, requireFor: [], trustedPublishers: {} }],
+      ["requireFor names the package", { mode: "warn" as const, requireFor: ["axios"], trustedPublishers: {} }],
+      ["a publisher is pinned for the package", { mode: "warn" as const, requireFor: [], trustedPublishers: { axios: "axios/axios" } }]
+    ])("blocks on unreachable under allow-cached when %s", (_label, provenance) => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: { ...provenance, offlineBehavior: "allow-cached", toolingUnavailable: "warn" }
+          }),
+          provenanceResult: { status: "unreachable", error: "ETIMEDOUT" }
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toEqual(["attestation-unreachable"]);
+    });
+
     it("blocks on publisher mismatch even when mode is warn", () => {
       const result = evaluatePackage(
         createInput({
@@ -803,6 +824,32 @@ describe("evaluatePackage", () => {
               mode: "warn",
               requireFor: [],
               trustedPublishers: { axios: "axios/axios" },
+              offlineBehavior: "fail-closed",
+              toolingUnavailable: "warn"
+            }
+          }),
+          provenanceResult: {
+            status: "verified",
+            sourceRepository: "evil-org/axios"
+          }
+        })
+      );
+
+      expect(result.blockedReasons.map((reason) => reason.code)).toContain("publisher-mismatch");
+    });
+
+    it.each([
+      ["before", { "ax*": "evil-org/*", axios: "axios/axios" }],
+      ["after", { axios: "axios/axios", "ax*": "evil-org/*" }]
+    ])("enforces an exact publisher pin when a broad rule is listed %s it", (_label, trustedPublishers) => {
+      const result = evaluatePackage(
+        createInput({
+          config: createConfig({
+            ...provenanceBase,
+            provenance: {
+              mode: "warn",
+              requireFor: [],
+              trustedPublishers,
               offlineBehavior: "fail-closed",
               toolingUnavailable: "warn"
             }
