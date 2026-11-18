@@ -41,6 +41,65 @@ The following are explicitly out of scope:
 - Social engineering attacks that require the user to intentionally misconfigure SafeInstall
 - Denial-of-service through extremely large lockfiles or dependency trees (SafeInstall inherits the performance characteristics of the underlying package manager)
 
+## What counts as a vulnerability
+
+A report is a vulnerability when it breaks a guarantee this file or the
+README states: a package that policy blocks gets installed, a protected file
+changes without the approval the trust lock requires, a credential reaches
+output or a decision record, or the verifier runs code its pinned digest
+does not cover. Behavior listed below as an accepted limit, or in the
+README's [Guard limitations](README.md#guard-limitations),
+[Trust surface limitations](README.md#trust-surface-limitations--read-honestly)
+and [Limitations](README.md#limitations), is not a vulnerability unless the
+report shows a cheaper way to reach it than the one described there.
+
+### The shell guard
+
+The guard reads each shell command an agent is about to run, routes package
+installs through the policy engine, and fails closed when it cannot tell
+whether a command installs anything. That includes an install hidden in a
+substitution, in `sh -c "..."`, in text piped or here-stringed into a shell,
+in a git alias that runs a shell command, or behind a command word that a
+glob could complete to a package manager.
+
+It is not a sandbox. Code the agent writes to a file and runs, `node -e`,
+`python -c` and any other interpreter can install packages without a
+package-manager command line, and the guard does not read script files or
+the contents of files fed to a shell. The trust lock and CI re-verification
+catch the effects on the next run; the guard does not prevent them at the
+moment of the call.
+
+### Accepted limits
+
+- **Registry configuration from the project.** A project `.npmrc` can map a
+  scope, a proxy or a certificate authority to another host and reference a
+  token from the environment. npm and pnpm read it themselves, and
+  SafeInstall leaves credentials and registry scopes in place because
+  private registries depend on them (settings that move files, disable
+  checks or load code do block, see the README's Configuration section). A
+  repository change can therefore send a token that the environment provides
+  to a host the change names, before any artifact is checked. Review
+  `.npmrc` changes like code, and do not give registry tokens to jobs that
+  run untrusted pull requests.
+- **Buried provenance history.** Provenance continuity looks back at most
+  three times `continuity.baselineSize` versions (15 by default) for an
+  attested baseline. An attacker who holds publish rights and releases that
+  many versions without provenance leaves no baseline, and continuity reports
+  `no-baseline` instead of a downgrade. Searching an unbounded history would
+  make every check cost unbounded registry requests. Packages whose
+  provenance must never be missing belong under `provenance.mode: "require"`
+  or `provenance.requireFor`, which block a version without provenance
+  regardless of history.
+- **Tarball addresses from the registry.** SafeInstall binds an install to
+  the tarball URL and SHA-512 that the configured registry returns and
+  checks the digest; it does not restrict which host the URL names, because
+  registries serve tarballs from CDNs and other origins. A registry or mirror
+  under an attacker's control can make the package manager request any HTTPS
+  address from the machine that installs, but cannot change the bytes that
+  get installed. The configured registry is trusted for metadata by design;
+  use one you control or trust, and restrict outbound network access where
+  that matters.
+
 ## Trust surface guarantee (current scope)
 
 The Agent Trust Surface (`safeinstall trust lock` / `trust status`) currently
