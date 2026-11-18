@@ -1,7 +1,7 @@
 {
   "name": "safeinstall-cli",
   "mcpName": "io.github.Mickdownunder/safeinstall",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Local-first policy and artifact-bound install gate for npm and pnpm. Open source.",
   "packageManager": "pnpm@10.17.0",
   "license": "MIT",
