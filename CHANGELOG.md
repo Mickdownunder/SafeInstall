@@ -52,6 +52,7 @@
 - The published package bundles its runtime dependencies (`npm-package-arg`, `semver`, `yaml` and what they depend on) at the versions and SHA-512 digests of the repository lockfile. The GitHub Action and the workflow from `trust lock --ci` check the tarball's SHA-512 and then install it; npm used to resolve the dependencies from their caret ranges at that point, so code outside the checked digest ran inside the verifier. The published `package.json` lists no `devDependencies`.
 - On Windows, the trust lock's write check reads drive paths the way Git Bash and Cygwin spell them: `rm /c/work/app/.mcp.json`, `cd /cygdrive/c/work/app && ...` and globs over `C:/...` are checked at the drive path they write to. They used to resolve to a folder named `c` on the current drive and pass.
 - With a trust lock, a write from outside the project into it is also found when the target holds a glob or an expansion after a literal directory (`rm /path/to/project/.mcp.js*`, `rm -rf /path/to/project/.safe*`) or is spelled from the home directory (`~/project/.mcp.json`, `$HOME/project/...`). Only fully literal paths were matched with the project's lock.
+- `safeinstall check` refuses package names and other arguments. It checks the project in the current directory and used to ignore them, so `safeinstall check typescript@next` reported the project's result, which read like a verdict on that package.
 
 ### Breaking changes
 
@@ -76,6 +77,7 @@
 - In strict trust mode, MCP servers started through `npm exec`, `npm x`, `bun x` or a launcher around a runner with a floating version now block, as `npx` servers already did. Pin the version (`npm exec --package=server@1.2.3 -- server`).
 - `guard install` and `init` stop with an error when Claude Code settings set `disableAllHooks`, instead of registering a hook that never runs.
 - The shell guard denies a shell that reads text naming a package manager or runner from a pipe or here-string, even for commands that install nothing (`echo 'npm test' | bash`), a git alias whose shell command names one, and a globbed command name that could complete to one. Run such commands directly (`npm test`).
+- `safeinstall check` with a package name or an unknown option exits with 1 instead of checking the project. Pass no arguments except `--record`.
 
 ## 0.15.0 - 2026-10-01
 

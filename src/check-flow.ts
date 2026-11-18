@@ -84,6 +84,35 @@ async function runCheckFlowInternal(
   const versionWarning = cliVersionWarning(config.minimumCliVersion);
   const cliVersionWarnings = versionWarning ? [versionWarning] : [];
 
+  // `check` judges the project's own dependencies. A package name here used
+  // to be ignored, so `check some-package` answered for the project and read
+  // like a verdict on that package.
+  if (argv.slice(1).some((arg) => arg !== "--record")) {
+    return {
+      mode: "check",
+      decision: "error",
+      exitCode: 1,
+      exitCodeMeaning: "Invalid check arguments.",
+      command: argv,
+      commandString,
+      configPath: path,
+      configLabel: configLabel(path),
+      reasons: [
+        {
+          code: "check-invalid-arguments",
+          message:
+            "safeinstall check takes no package names or other arguments. It checks the dependencies of the project in the current directory.",
+          suggestion:
+            "To check a package, run safeinstall npm install <package>, which blocks before anything is installed, or use the check_package tool of safeinstall mcp. Usage: safeinstall check [--record]"
+        }
+      ],
+      summary: "Check not run.",
+      warnings: cliVersionWarnings,
+      infos: [],
+      affectedPackages: []
+    };
+  }
+
   const trust = await trustSurfacePrecheck(invocation.effectiveCwd, path);
   if (trust.reasons.length > 0) {
     return {
