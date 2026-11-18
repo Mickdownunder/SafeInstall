@@ -102,11 +102,18 @@ function stripPnpmPeerSuffix(packageKey: string): string {
   return base;
 }
 
+/**
+ * Collapse records that policy cannot tell apart. A package name and version
+ * do not identify a lockfile record: two records can share both and still
+ * resolve from different sources, so the key carries every fact the checks
+ * below read. Collapsing by name and version alone would let a record from an
+ * untrusted source hide behind an earlier registry record.
+ */
 function dedupe(packages: TransitivePackage[]): TransitivePackage[] {
   const seen = new Set<string>();
   const result: TransitivePackage[] = [];
   for (const pkg of packages) {
-    const key = `${pkg.name}@${pkg.version}`;
+    const key = JSON.stringify([pkg.name, pkg.version, pkg.sourceType, pkg.hasInstallScript ?? null]);
     if (seen.has(key)) {
       continue;
     }

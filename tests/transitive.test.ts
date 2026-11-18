@@ -150,6 +150,68 @@ describe("collectNpmTransitivePackages", () => {
     const pinnedTarball = packages.find((p) => p.name === "integrity-pinned-tarball");
     expect(pinnedTarball?.sourceType).toBe("tarball");
   });
+
+  const registryRecord = {
+    version: "4.0.0",
+    resolved: "https://registry.npmjs.org/is-number/-/is-number-4.0.0.tgz",
+    integrity: "sha512-x"
+  };
+
+  it.each([
+    ["after", ["node_modules/is-number", "node_modules/parent/node_modules/is-number"]],
+    ["before", ["node_modules/parent/node_modules/is-number", "node_modules/is-number"]]
+  ])("keeps a same-name, same-version record from another source listed %s the registry record", (_label, order) => {
+    const records: Record<string, object> = {
+      "node_modules/is-number": registryRecord,
+      "node_modules/parent/node_modules/is-number": {
+        version: "4.0.0",
+        resolved: "https://evil.example.com/is-number-4.0.0.tgz",
+        integrity: "sha512-attacker-controlled"
+      }
+    };
+    const packages = collectNpmTransitivePackages(
+      { packages: { "": { version: "1.0.0" }, ...Object.fromEntries(order.map((key) => [key, records[key]])) } },
+      new Set()
+    );
+
+    expect(packages.map((p) => p.sourceType).sort()).toEqual(["registry", "tarball"]);
+    const result = evaluateTransitivePackages(packages, createConfig({ allowedSources: ["registry"] }));
+    expect(result.blockedReasons.map((reason) => reason.code)).toEqual(["transitive-untrusted-source"]);
+  });
+
+  it("keeps a same-name, same-version record that differs only in its install script flag", () => {
+    const packages = collectNpmTransitivePackages(
+      {
+        packages: {
+          "": { version: "1.0.0" },
+          "node_modules/is-number": registryRecord,
+          "node_modules/parent/node_modules/is-number": { ...registryRecord, hasInstallScript: true }
+        }
+      },
+      new Set()
+    );
+
+    const result = evaluateTransitivePackages(
+      packages,
+      createConfig({ transitive: { mode: "block", checks: ["install-script"] } })
+    );
+    expect(result.blockedReasons.map((reason) => reason.code)).toEqual(["transitive-install-script"]);
+  });
+
+  it("reports records that agree in name, version, source and install script flag once", () => {
+    const packages = collectNpmTransitivePackages(
+      {
+        packages: {
+          "": { version: "1.0.0" },
+          "node_modules/is-number": registryRecord,
+          "node_modules/parent/node_modules/is-number": registryRecord
+        }
+      },
+      new Set()
+    );
+
+    expect(packages).toHaveLength(1);
+  });
 });
 
 describe("collectPnpmTransitivePackages", () => {
@@ -215,6 +277,28 @@ describe("collectPnpmTransitivePackages", () => {
   it("leaves hasInstallScript unknown (pnpm lockfiles do not record it)", () => {
     const packages = collectPnpmTransitivePackages(lockfile, new Set());
     expect(packages.every((p) => p.hasInstallScript === undefined)).toBe(true);
+  });
+
+  it("keeps a same-name, same-version record that resolves from another source", () => {
+    const packages = collectPnpmTransitivePackages(
+      {
+        packages: {
+          "is-number@4.0.0": { resolution: { integrity: "sha512-x" } },
+          "is-number@https://evil.example.com/is-number-4.0.0.tgz": {
+            version: "4.0.0",
+            resolution: { tarball: "https://evil.example.com/is-number-4.0.0.tgz", integrity: "sha512-attacker-controlled" }
+          }
+        }
+      },
+      new Set()
+    );
+
+    expect(packages.map((p) => `${p.name}@${p.version} ${p.sourceType}`).sort()).toEqual([
+      "is-number@4.0.0 registry",
+      "is-number@4.0.0 tarball"
+    ]);
+    const result = evaluateTransitivePackages(packages, createConfig({ allowedSources: ["registry"] }));
+    expect(result.blockedReasons.map((reason) => reason.code)).toEqual(["transitive-untrusted-source"]);
   });
 });
 
@@ -506,6 +590,31 @@ describe("evaluateTransitiveDependencies evidence failures", () => {
         packages: {
           "": { name: "demo", version: "1.0.0" },
           "node_modules/is-number": { version: "4.0.0", resolved }
+        }
+      })
+    );
+
+    const result = await evaluate(lockfilePath, createConfig());
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toEqual(["transitive-untrusted-source"]);
+    expect(result.blockedReasons[0]?.message).toContain("is-number@4.0.0");
+  });
+
+  it("blocks a nested npm lockfile record from another host that shares name and version with a registry record", async () => {
+    const lockfilePath = await createLockfile(
+      "package-lock.json",
+      JSON.stringify({
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "demo", version: "1.0.0" },
+          "node_modules/is-number": {
+            version: "4.0.0",
+            resolved: "https://registry.npmjs.org/is-number/-/is-number-4.0.0.tgz"
+          },
+          "node_modules/parent/node_modules/is-number": {
+            version: "4.0.0",
+            resolved: "https://evil.example/is-number-4.0.0.tgz"
+          }
         }
       })
     );
