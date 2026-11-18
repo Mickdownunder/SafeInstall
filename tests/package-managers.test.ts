@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -181,4 +181,41 @@ setTimeout(() => process.exit(97), 2000);
 
     await expect(execution).rejects.toThrow("Interrupted by SIGINT.");
   });
+
+  // Windows looks for a program started by bare name in the working directory
+  // before PATH. The working directory of an install is the project, which is
+  // the input SafeInstall does not trust.
+  it.skipIf(process.platform !== "win32")(
+    "does not start a cmd.exe that the project directory supplies",
+    async () => {
+      const stubDir = await createTempDir("safeinstall-shim-");
+      const project = await createTempDir("safeinstall-planted-cmd-");
+      const marker = path.join(stubDir, "shim-ran");
+      await writeStubExecutable(
+        stubDir,
+        "npm",
+        `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n`
+      );
+      // Any program under the name cmd.exe shows the effect. Had this copy of
+      // Node been started in place of the command processor, it would take
+      // "/d" for a script, fail, and the shim would never run.
+      await copyFile(process.execPath, path.join(project, "cmd.exe"));
+
+      const result = await runPackageManager({
+        manager: "npm",
+        managerArgs: [],
+        command: "install",
+        forwardedArgs: [],
+        config,
+        cwd: project,
+        // No ComSpec: the set of variables an MCP client passes on to the
+        // programs it starts on Windows does not include it.
+        env: { PATH: stubDir, PATHEXT: ".CMD", SystemRoot: process.env.SystemRoot },
+        stdio: "pipe"
+      });
+
+      expect({ code: result.code, stderr: result.stderr }).toEqual({ code: 0, stderr: "" });
+      expect(await readFile(marker, "utf8")).toBe("ran");
+    }
+  );
 });
