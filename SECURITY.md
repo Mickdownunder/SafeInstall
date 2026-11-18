@@ -133,11 +133,12 @@ Status of the decided fix (2026-07-10; decisions in RFC-001 §14):
   change (tampered workflow, policy, registry URL, forged lock,
   name-spoofed check, removed baseline, naive consistent rewrite, corrupt
   tarball — all must fail), and its own branch ruleset.
-- **Pending (owner-gated):** switching this repository's trust workflow to
-  invoke that verifier by full commit SHA. The switch edits an
-  enforcement-zone file, so it deliberately requires the owner's
-  interactive `safeinstall trust approve` — the same human gate it
-  protects.
+- **Shipped:** this repository's trust workflow invokes that verifier by
+  full commit SHA, never a branch or tag
+  ([#59](https://github.com/Mickdownunder/SafeInstall/pull/59)). Moving
+  the pin edits an enforcement-zone file, so every bump deliberately
+  requires the owner's interactive `safeinstall trust approve`, the same
+  human gate it protects.
 
 **Maintainer model (decided 2026-07-11,
 [#41](https://github.com/Mickdownunder/SafeInstall/issues/41)):** SafeInstall
