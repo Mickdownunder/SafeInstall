@@ -73,6 +73,56 @@ describe("parsePnpmPackageKey", () => {
     expect(parsePnpmPackageKey("@scope")).toBeUndefined();
     expect(parsePnpmPackageKey("")).toBeUndefined();
   });
+
+  // Lockfile v6 (pnpm 8) writes `/name@version`, with the peer context in
+  // parentheses; v5 writes `/name/version` with the peer context after `_`.
+  it.each([
+    ["/axios@1.14.0", { name: "axios", version: "1.14.0" }],
+    ["/@scope/pkg@1.2.3", { name: "@scope/pkg", version: "1.2.3" }],
+    ["/foo@1.0.0(react@18.0.0)", { name: "foo", version: "1.0.0" }],
+    ["/@scope/pkg@1.2.3(react@18.0.0)(react-dom@18.0.0)", { name: "@scope/pkg", version: "1.2.3" }]
+  ])("parses the lockfile v6 key %s", (key, expected) => {
+    expect(parsePnpmPackageKey(key)).toEqual(expected);
+  });
+
+  it("keeps the name of a v5 key whose peer context contains an @", () => {
+    expect(parsePnpmPackageKey("/foo/1.0.0_react@18.0.0")?.name).toBe("foo");
+    expect(parsePnpmPackageKey("/@scope/pkg/1.2.3_react@18.0.0")?.name).toBe("@scope/pkg");
+  });
+});
+
+describe("sources the lockfile spells in other ways", () => {
+  it.each([
+    ["git://github.com/evil/a.git", "git"],
+    ["ssh://git@evil.example/b.git", "git"],
+    ["ftp://evil.example/c.tgz", "url"],
+    ["evil/x", "unknown"],
+    ["github:evil/x", "unknown"]
+  ])("does not take an npm record resolved from %s for the registry", (resolved, sourceType) => {
+    const packages = collectNpmTransitivePackages(
+      { packages: { "": {}, "node_modules/a": { version: "1.0.0", resolved } } },
+      new Set()
+    );
+    expect(packages.map((p) => p.sourceType)).toEqual([sourceType]);
+  });
+
+  it("reads the git and directory resolutions of a pnpm record", () => {
+    const packages = collectPnpmTransitivePackages(
+      {
+        packages: {
+          "a@1.0.0": { resolution: { type: "git", repo: "https://github.com/evil/a.git", commit: "0123abc" } },
+          "b@file:../b": { version: "1.0.0", resolution: { type: "directory", directory: "../b" } },
+          "c@1.0.0": { resolution: { integrity: "sha512-x" } }
+        }
+      },
+      new Set()
+    );
+    expect(Object.fromEntries(packages.map((p) => [p.name, p.sourceType]))).toEqual({
+      a: "git",
+      b: "directory",
+      c: "registry"
+    });
+  });
 });
 
 describe("collectNpmTransitivePackages", () => {
@@ -640,6 +690,27 @@ describe("evaluateTransitiveDependencies evidence failures", () => {
     const result = await evaluate(lockfilePath, createConfig());
 
     expect(result.blockedReasons.map((reason) => reason.code)).toEqual(["transitive-untrusted-source"]);
+  });
+
+  it("blocks a transitive entry from another host in a lockfile v6", async () => {
+    const lockfilePath = await createLockfile(
+      "pnpm-lock.yaml",
+      [
+        "lockfileVersion: '6.0'",
+        "packages:",
+        "  /is-number@4.0.0:",
+        "    resolution: {integrity: sha512-x, tarball: https://evil.example/is-number-4.0.0.tgz}",
+        "  /@scope/kind-of@6.0.3(react@18.0.0):",
+        "    resolution: {type: git, repo: 'git://evil.example/kind-of.git', commit: 0123abc}",
+        ""
+      ].join("\n")
+    );
+
+    const result = await evaluate(lockfilePath, createConfig());
+
+    expect(result.blockedReasons.map((reason) => reason.code)).toEqual(["transitive-untrusted-source"]);
+    expect(result.blockedReasons[0]?.message).toContain("is-number@4.0.0");
+    expect(result.blockedReasons[0]?.message).toContain("@scope/kind-of@6.0.3");
   });
 
   it("accepts entries from the public registry and from the configured registry", async () => {

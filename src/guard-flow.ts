@@ -6,7 +6,9 @@ import { analyzeShellCommand } from "./guard-commands";
 import type { GuardRunnerMatch } from "./guard-commands";
 import { findNearestUpward } from "./project-discovery";
 import { findProtectedWrite } from "./guard-write-match";
+import type { ProtectedWrite } from "./guard-write-match";
 import { redactSensitiveText } from "./redaction";
+import { findTrustContext } from "./trust-surface";
 import type { TrustSurfaceStatus } from "./trust-surface";
 import { checkTrustSurface, partitionTrustFindings } from "./trust-surface-check";
 
@@ -116,6 +118,88 @@ const TRUST_APPROVE_INSTRUCTION =
   "approve it with `safeinstall trust approve` in their own terminal. Do not attempt to run the " +
   "approval yourself — it refuses non-interactive contexts.";
 
+function protectedWriteDecision(protectedWrite: ProtectedWrite | undefined): GuardDecision | undefined {
+  if (!protectedWrite) {
+    return undefined;
+  }
+  const target = protectedWrite.operation.target;
+  if (!protectedWrite.exact) {
+    return {
+      action: "deny",
+      userMessage: `SafeInstall blocked a write whose target could not be resolved safely: ${target}.`,
+      agentMessage:
+        `SafeInstall guard: ${JSON.stringify(target)} could land on the Agent Trust Surface (SafeInstall policy, ` +
+        "agent hooks, rules files, MCP configs): its path depends on a glob, a shell expansion, or a " +
+        "working-directory change the guard cannot follow. Agents must not modify the surface. Spell the " +
+        "destination out literally, or ask the user to make the change and approve it with `safeinstall trust approve`."
+    };
+  }
+  return {
+    action: "deny",
+    userMessage: `SafeInstall blocked a write to the protected file ${target}.`,
+    agentMessage:
+      `SafeInstall guard: ${JSON.stringify(target)} is part of the Agent Trust Surface ` +
+      "(SafeInstall policy, agent hooks, rules files, MCP configs). Agents must not modify it. " +
+      "If the user wants this change, they can make it themselves and approve it with `safeinstall trust approve`."
+  };
+}
+
+/**
+ * Directories a command writes in, as far as they are spelled out: every
+ * working directory it can `cd` to, and the directory of every literal target
+ * resolved against each of them.
+ */
+function reachedDirectories(analysis: ReturnType<typeof analyzeShellCommand>, cwd: string): Set<string> {
+  const directories = new Set<string>();
+  for (const operation of analysis.writeOperations) {
+    const workingDirectories = operation.cwdVariants.map((changes) =>
+      changes.reduce((directory, change) => path.resolve(directory, change), cwd)
+    );
+    for (const directory of workingDirectories) {
+      directories.add(directory);
+    }
+    for (const parts of operation.words) {
+      if (!parts.every((part) => part.kind === "text")) continue;
+      const literal = parts.map((part) => (part.kind === "text" ? part.value : "")).join("");
+      if (literal === "") continue;
+      for (const directory of path.isAbsolute(literal) ? [cwd] : workingDirectories) {
+        const target = path.resolve(directory, literal);
+        directories.add(path.dirname(target));
+        // `rm -r dir` removes what is below the target itself.
+        if (operation.recursive) directories.add(target);
+      }
+    }
+  }
+  return directories;
+}
+
+/**
+ * The lock is found from the hook event's cwd. A command can still write into
+ * another locked project by absolute path or after a `cd`, and that write is
+ * judged by the lock of the project it lands in.
+ */
+async function findProtectedWriteInReachedRoots(
+  analysis: ReturnType<typeof analyzeShellCommand>,
+  cwd: string,
+  checkedRoot: string | undefined
+): Promise<ProtectedWrite | undefined> {
+  if (analysis.writeOperations.length === 0) {
+    return undefined;
+  }
+  const roots = new Set<string>();
+  for (const directory of reachedDirectories(analysis, cwd)) {
+    const context = await findTrustContext(directory);
+    for (const root of context?.conflictingRoots ?? (context ? [context.root] : [])) {
+      if (root !== checkedRoot) roots.add(root);
+    }
+  }
+  for (const root of roots) {
+    const hit = await findProtectedWrite(analysis.writeOperations, { root, cwd });
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 /**
  * Trust-surface reconciliation, evaluated before any command analysis.
  * Inactive projects (no trust lock) return undefined and cost only a few
@@ -143,7 +227,7 @@ async function decideTrustSurface(
   }
 
   if (!status.active || !status.root) {
-    return undefined;
+    return protectedWriteDecision(await findProtectedWriteInReachedRoots(analysis, cwd, undefined));
   }
 
   const { lockdown, tool } = partitionTrustFindings(status.findings);
@@ -159,32 +243,12 @@ async function decideTrustSurface(
     };
   }
 
-  const protectedWrite = await findProtectedWrite(analysis.writeOperations, {
-    root: status.root,
-    cwd
-  });
-  if (protectedWrite?.exact === false) {
-    const target = protectedWrite.operation.target;
-    return {
-      action: "deny",
-      userMessage: `SafeInstall blocked a write whose target could not be resolved safely: ${target}.`,
-      agentMessage:
-        `SafeInstall guard: ${JSON.stringify(target)} could land on the Agent Trust Surface (SafeInstall policy, ` +
-        "agent hooks, rules files, MCP configs): its path depends on a glob, a shell expansion, or a " +
-        "working-directory change the guard cannot follow. Agents must not modify the surface. Spell the " +
-        "destination out literally, or ask the user to make the change and approve it with `safeinstall trust approve`."
-    };
-  }
-  if (protectedWrite) {
-    const target = protectedWrite.operation.target;
-    return {
-      action: "deny",
-      userMessage: `SafeInstall blocked a write to the protected file ${target}.`,
-      agentMessage:
-        `SafeInstall guard: ${JSON.stringify(target)} is part of the Agent Trust Surface ` +
-        "(SafeInstall policy, agent hooks, rules files, MCP configs). Agents must not modify it. " +
-        "If the user wants this change, they can make it themselves and approve it with `safeinstall trust approve`."
-    };
+  const protectedWrite =
+    (await findProtectedWrite(analysis.writeOperations, { root: status.root, cwd })) ??
+    (await findProtectedWriteInReachedRoots(analysis, cwd, status.root));
+  const writeDecision = protectedWriteDecision(protectedWrite);
+  if (writeDecision) {
+    return writeDecision;
   }
 
   if (tool.length > 0 && (analysis.installs.length > 0 || analysis.runners.length > 0 || analysis.unanalyzable.length > 0)) {

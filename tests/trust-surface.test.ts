@@ -151,6 +151,36 @@ describe("parseMcpServers", () => {
     expect(byName.get("alpha")).toBe(false);
   });
 
+  // The same registry runners under other names, and behind the launchers
+  // MCP configs commonly use (cmd /c on Windows, env, a shell).
+  it.each([
+    ["npm", ["exec", "evil-mcp"], true],
+    ["npm", ["exec", "--package=evil-mcp", "--", "evil-mcp"], true],
+    ["npm", ["exec", "--yes", "--package", "good-mcp@1.2.3", "--", "good-mcp"], false],
+    ["npm", ["x", "-y", "evil-mcp"], true],
+    ["npm", ["x", "-y", "good-mcp@1.2.3"], false],
+    ["npm", ["--yes", "exec", "evil-mcp"], true],
+    ["bun", ["x", "evil-mcp"], true],
+    ["bun", ["x", "good-mcp@1.2.3"], false],
+    ["cmd", ["/c", "npx", "-y", "evil-mcp"], true],
+    ["cmd.exe", ["/d", "/s", "/c", "npx", "-y", "good-mcp@1.2.3"], false],
+    ["env", ["npx", "-y", "evil-mcp"], true],
+    ["env", ["NODE_ENV=production", "npx", "-y", "good-mcp@1.2.3"], false],
+    ["sh", ["-c", "npx -y evil-mcp"], true],
+    ["bash", ["-lc", "npx -y good-mcp@1.2.3"], false],
+    ["sh", ["-c", "cd /srv && npx -y good-mcp@1.2.3"], true],
+    ["timeout", ["300", "npx", "evil-mcp"], true],
+    // Local commands stay local.
+    ["npm", ["run", "mcp"], false],
+    ["pnpm", ["exec", "local-mcp"], false],
+    ["node", ["dist/server.js"], false],
+    ["env", ["node", "server.js"], false],
+    ["sh", ["-c", "node server.js"], false]
+  ] as const)("decides whether %s %j is unpinned", (command, args, unpinned) => {
+    const servers = parseMcpServers(".mcp.json", JSON.stringify({ mcpServers: { s: { command, args } } }));
+    expect(present(servers[0]).unpinned).toBe(unpinned);
+  });
+
   it("returns nothing for malformed or server-less configs", () => {
     expect(parseMcpServers("x", "not json")).toEqual([]);
     expect(parseMcpServers("x", JSON.stringify({ other: true }))).toEqual([]);
@@ -475,9 +505,41 @@ describe("findTrustContext", () => {
     await lockAt(outer);
     const worktree = path.join(outer, ".claude", "worktrees", "wt");
     await mkdir(worktree, { recursive: true });
-    await writeFile(path.join(worktree, ".git"), "gitdir: /elsewhere\n");
+    // A worktree's pointer names a git directory that holds HEAD.
+    const gitDir = path.join(await createTempDir("safeinstall-ctx-gitdir-"), "worktrees", "wt");
+    await mkdir(gitDir, { recursive: true });
+    await writeFile(path.join(gitDir, "HEAD"), "ref: refs/heads/wt\n");
+    await writeFile(path.join(worktree, ".git"), `gitdir: ${gitDir}\n`);
 
     expect(await findTrustContext(worktree)).toBeUndefined();
+  });
+
+  it.each([
+    ["a directory that does not exist", "gitdir: /nonexistent/safeinstall-git-dir\n"],
+    ["a directory without HEAD", "gitdir: ../no-head\n"],
+    ["nothing", "gitdir:\n"]
+  ])("is not stopped by a .git file that points to %s", async (_label, pointer) => {
+    const outer = await createTempDir("safeinstall-ctx-");
+    await initGit(outer);
+    await lockAt(outer);
+    await mkdir(path.join(outer, "no-head"), { recursive: true });
+    const planted = path.join(outer, "planted");
+    await mkdir(planted, { recursive: true });
+    await writeFile(path.join(planted, ".git"), pointer);
+
+    expect(await findTrustContext(planted)).toEqual({ root: outer, hasLock: true });
+  });
+
+  it("follows a relative gitdir pointer to a real git directory", async () => {
+    const outer = await createTempDir("safeinstall-ctx-");
+    await lockAt(outer);
+    const nested = path.join(outer, "vendor", "module");
+    await mkdir(path.join(outer, ".git-modules", "module"), { recursive: true });
+    await writeFile(path.join(outer, ".git-modules", "module", "HEAD"), "0123abc\n");
+    await mkdir(nested, { recursive: true });
+    await writeFile(path.join(nested, ".git"), "gitdir: ../../.git-modules/module\n");
+
+    expect(await findTrustContext(nested)).toBeUndefined();
   });
 
   it("uses a nested checkout's own lock", async () => {

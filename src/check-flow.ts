@@ -152,7 +152,10 @@ async function runCheckFlowInternal(
         parseManifestDependency(name, spec)
       );
 
-  if (requestedPackages.length === 0) {
+  // A workspace root often declares no dependencies of its own, but the
+  // lockfile it shares with the workspaces still decides what is installed.
+  // Only without a lockfile is there nothing left to check.
+  if (requestedPackages.length === 0 && !projectTargets?.lockfilePath) {
     return {
       mode: "check",
       decision: "allow",

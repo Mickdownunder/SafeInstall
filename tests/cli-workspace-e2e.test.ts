@@ -240,4 +240,92 @@ packages:
     expect(result.stderr).toContain(path.join("packages", "app", "safeinstall.config.json"));
     expect(result.stderr).toContain("Blocked: release too new");
   });
+
+  // A monorepo root often declares no dependencies of its own. The lockfile
+  // it shares with the workspaces still decides what gets installed.
+  describe("check from a workspace root without direct dependencies", () => {
+    const evilTarball = "https://evil.example.com/evil-1.0.0.tgz";
+
+    async function workspace(lockfile: { name: string; content: string }, rootManifest: Record<string, unknown>) {
+      const cwd = await createTempDir("safeinstall-e2e-empty-root-");
+      await writeDefaultConfig(cwd);
+      await writeJson(path.join(cwd, "package.json"), rootManifest);
+      await mkdirp(path.join(cwd, "packages", "app"));
+      await writeJson(path.join(cwd, "packages", "app", "package.json"), {
+        name: "@repo/app",
+        version: "1.0.0",
+        dependencies: { evil: "1.0.0" }
+      });
+      await writeFile(path.join(cwd, lockfile.name), lockfile.content);
+      return cwd;
+    }
+
+    it.each([
+      {
+        manager: "pnpm",
+        root: { name: "root", version: "1.0.0" },
+        lockfile: {
+          name: "pnpm-lock.yaml",
+          content: `lockfileVersion: '9.0'
+
+importers:
+
+  .: {}
+
+  packages/app:
+    dependencies:
+      evil:
+        specifier: 1.0.0
+        version: 1.0.0
+
+packages:
+
+  evil@1.0.0:
+    resolution: {tarball: ${evilTarball}, integrity: sha512-test}
+
+snapshots:
+
+  evil@1.0.0: {}
+`
+        }
+      },
+      {
+        manager: "npm",
+        root: { name: "root", version: "1.0.0", workspaces: ["packages/*"] },
+        lockfile: {
+          name: "package-lock.json",
+          content: JSON.stringify({
+            name: "root",
+            lockfileVersion: 3,
+            packages: {
+              "": { name: "root", workspaces: ["packages/*"] },
+              "node_modules/@repo/app": { resolved: "packages/app", link: true },
+              "packages/app": { name: "@repo/app", version: "1.0.0", dependencies: { evil: "1.0.0" } },
+              "node_modules/evil": { version: "1.0.0", resolved: evilTarball, integrity: "sha512-test" }
+            }
+          })
+        }
+      }
+    ])("still checks the shared $manager lockfile", async ({ root, lockfile }) => {
+      const cwd = await workspace(lockfile, root);
+
+      const result = await runCli(["--json", "check"], { cwd });
+
+      expect(result.code).toBe(2);
+      const payload = JSON.parse(result.stdout);
+      expect(payload).toMatchObject({ mode: "check", decision: "block" });
+      expect(payload.reasons.map((reason: { code: string }) => reason.code)).toContain("transitive-untrusted-source");
+    });
+
+    it("passes without a lockfile when there is nothing to check", async () => {
+      const cwd = await createTempDir("safeinstall-e2e-empty-root-nolock-");
+      await writeDefaultConfig(cwd);
+      await writeJson(path.join(cwd, "package.json"), { name: "root", version: "1.0.0" });
+
+      const result = await runCli(["--json", "check"], { cwd });
+
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ decision: "allow" });
+    });
+  });
 });

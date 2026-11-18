@@ -32,6 +32,9 @@ const SENSITIVE_QUERY_PARAMETERS = new Set([
   "x-amz-signature",
   "x-amz-credential",
   "x-amz-security-token",
+  // Google Cloud Storage V4 signed URLs.
+  "x-goog-signature",
+  "x-goog-credential",
   "private_token",
   "jwt"
 ]);

@@ -611,10 +611,12 @@ export interface TrustSurfaceStatus {
 
 /**
  * True when `candidate/.git` looks like a real git checkout: a directory
- * containing `HEAD`, or a file (worktree/submodule pointer) starting with
- * `gitdir:`. An empty `.git` directory is NOT a boundary: otherwise anyone who
- * can create a directory could declare any subfolder its own "repository" and
- * thereby make a planted lock authoritative.
+ * containing `HEAD`, or a file (worktree/submodule pointer) whose `gitdir:`
+ * names a directory containing `HEAD`. An empty `.git` directory, or a
+ * pointer to a directory that does not exist, is NOT a boundary: otherwise
+ * anyone who can create a file could declare any subfolder its own
+ * "repository", making a planted lock authoritative or hiding the lock of
+ * the enclosing checkout.
  *
  * Documented limit: a real `git init` inside a locked repository creates a
  * genuinely independent checkout, and is treated as one by design (that is
@@ -626,12 +628,17 @@ async function isGitBoundary(candidate: string): Promise<boolean> {
   const gitPath = path.join(candidate, ".git");
   // Read first and let the failure tell file from directory: a separate
   // stat-then-read would leave a window in which the entry can be swapped.
+  let pointer: string;
   try {
-    return (await readFile(gitPath, "utf8")).slice(0, 512).startsWith("gitdir:");
+    pointer = (await readFile(gitPath, "utf8")).slice(0, 4096);
   } catch {
     // A directory (or no entry at all): a checkout only if it holds HEAD.
     return fileExists(path.join(gitPath, "HEAD"));
   }
+  // git reads the first line; a relative gitdir is relative to the .git file.
+  const match = /^gitdir:[ \t]*([^\r\n]+)/.exec(pointer);
+  const gitDir = match?.[1]?.trim();
+  return gitDir !== undefined && gitDir !== "" && fileExists(path.join(path.resolve(candidate, gitDir), "HEAD"));
 }
 
 /** The nearest repository root, recognizing normal checkouts and worktrees. */
