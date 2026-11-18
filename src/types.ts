@@ -89,6 +89,12 @@ export interface ContinuityResult {
   baselineRepository?: string | undefined;
   targetHasProvenance?: boolean;
   targetRepository?: string | undefined;
+  /**
+   * How many of the most recent versions have no provenance and were passed
+   * over because the versions before them form an established, attested
+   * baseline.
+   */
+  skippedRecentVersions?: number;
   error?: string;
 }
 

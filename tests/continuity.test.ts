@@ -87,6 +87,47 @@ describe("createDefaultContinuityDependencies", () => {
     expect(records).toEqual([version("1.0.0", "2026-01-01T00:00:00.000Z")]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("notes which versions the registry lists with a provenance attestation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            versions: {
+              "1.0.0": {
+                dist: {
+                  attestations: {
+                    url: "https://registry.npmjs.org/-/npm/v1/attestations/demo@1.0.0",
+                    provenance: { predicateType: "https://slsa.dev/provenance/v1" }
+                  }
+                }
+              },
+              "1.1.0": { dist: { attestations: { url: "https://registry.npmjs.org/-/npm/v1/attestations/demo@1.1.0" } } },
+              "1.2.0": { dist: {} }
+            },
+            time: {
+              "1.0.0": "2026-01-01T00:00:00.000Z",
+              "1.1.0": "2026-02-01T00:00:00.000Z",
+              "1.2.0": "2026-03-01T00:00:00.000Z"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+    );
+
+    const records = await createDefaultContinuityDependencies(await createDiskCache()).fetchVersionHistory(
+      "demo",
+      "https://registry.npmjs.org"
+    );
+
+    expect(records.map((record) => [record.version, record.claimsProvenance ?? false])).toEqual([
+      ["1.0.0", true],
+      ["1.1.0", false],
+      ["1.2.0", false]
+    ]);
+  });
 });
 
 describe("selectBaseline", () => {
@@ -265,6 +306,95 @@ describe("evaluateContinuity", () => {
 
     expect(result.status).toBe("unevaluated");
     expect(result.error).toContain("registry unreachable");
+  });
+});
+
+describe("evaluateContinuity against releases that bury an attested history", () => {
+  const month = (index: number): string => `2025-${String(index + 1).padStart(2, "0")}-01T00:00:00Z`;
+  // 1.0.0 to 1.9.0: ten releases the registry lists with provenance.
+  const attested = Array.from({ length: 10 }, (_, index) => ({
+    ...version(`1.${index}.0`, month(index)),
+    claimsProvenance: true
+  }));
+  const attestedIdentities = Object.fromEntries(attested.map((record) => [record.version, provFrom("demo/demo")]));
+  const filler = (count: number): VersionRecord[] =>
+    Array.from({ length: count }, (_, index) => version(`2.0.${index}`, `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`));
+
+  async function run(
+    history: VersionRecord[],
+    targetVersion: string,
+    identities: Record<string, AttestationIdentity>
+  ): Promise<{ result: Awaited<ReturnType<typeof evaluateContinuity>>; verified: string[] }> {
+    const verified: string[] = [];
+    const stub = deps(history, identities);
+    const result = await evaluateContinuity({
+      packageName: "demo",
+      targetVersion,
+      registryUrl: "https://registry.npmjs.org",
+      config: config(),
+      diskCache: await createDiskCache(),
+      deps: {
+        fetchVersionHistory: stub.fetchVersionHistory,
+        async fetchIdentity(pkg, v, registryUrl) {
+          verified.push(v);
+          return stub.fetchIdentity(pkg, v, registryUrl);
+        }
+      }
+    });
+    return { result, verified };
+  }
+
+  it.each([3, 5, 9])("flags the downgrade behind %i releases without provenance", async (count) => {
+    const fillers = filler(count);
+    const target = version("2.1.0", "2026-02-01T00:00:00Z");
+
+    const { result } = await run([...attested, ...fillers, target], "2.1.0", attestedIdentities);
+
+    expect(result.status).toBe("provenance-downgrade");
+    expect(result.baselineRepository).toBe("demo/demo");
+    expect(result.skippedRecentVersions).toBe(Math.min(count, 5));
+  });
+
+  it("flags a change of repository behind releases without provenance", async () => {
+    const target = { ...version("2.1.0", "2026-02-01T00:00:00Z"), claimsProvenance: true };
+
+    const { result } = await run([...attested, ...filler(5), target], "2.1.0", {
+      ...attestedIdentities,
+      "2.1.0": provFrom("attacker/demo")
+    });
+
+    expect(result.status).toBe("identity-discontinuity");
+    expect(result.baselineRepository).toBe("demo/demo");
+  });
+
+  it("verifies the earlier versions instead of trusting the registry's listing", async () => {
+    // The listing claims provenance for the old releases; none verifies.
+    const target = version("2.1.0", "2026-02-01T00:00:00Z");
+
+    const { result } = await run([...attested, ...filler(5), target], "2.1.0", {});
+
+    expect(result.status).toBe("no-baseline");
+  });
+
+  it("spends no extra request on a package that never listed provenance", async () => {
+    const plain = Array.from({ length: 15 }, (_, index) => version(`1.${index}.0`, month(index % 12)));
+    const history = plain.map((record, index) => ({ ...record, publishedAt: new Date(Date.UTC(2024, index, 1)) }));
+    const target = version("2.0.0", "2026-02-01T00:00:00Z");
+
+    const { result, verified } = await run([...history, target], "2.0.0", {});
+
+    expect(result.status).toBe("no-baseline");
+    // The five most recent versions and the target, nothing further back.
+    expect(verified).toHaveLength(6);
+  });
+
+  it("looks back three baselines and no further", async () => {
+    // 15 releases without provenance push the attested history out of reach.
+    const target = version("2.1.0", "2026-03-01T00:00:00Z");
+
+    const { result } = await run([...attested, ...filler(15), target], "2.1.0", attestedIdentities);
+
+    expect(result.status).toBe("no-baseline");
   });
 });
 
