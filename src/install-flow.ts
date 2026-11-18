@@ -6,6 +6,7 @@ import { captureDecisionState, emitDecisionRecord } from "./decision-emit";
 import { evaluateRequestedPackages } from "./evaluations";
 import { formatCommand, printConfigInfo, printWarnings } from "./output";
 import { InstallBindingError, installOptionReasons, runBoundInstall } from "./install-binding";
+import { packageManagerConfigReasons } from "./package-manager-config";
 import { loadManifestDependencies } from "./project-state";
 import { hasAmbiguousWorkspaceFlags, resolveInvocationContext } from "./project-discovery";
 import { directLockfileKeys, loadProjectInstallTargetsForManager } from "./project-installs";
@@ -317,7 +318,8 @@ async function runInstallFlowInternal(
   const allBlockReasons = [
     ...directBlockReasons,
     ...(transitive?.blockedReasons ?? []),
-    ...installOptionReasons(plan, config)
+    ...installOptionReasons(plan, config),
+    ...(await packageManagerConfigReasons(plan.manager, invocation.packageDir ?? invocation.effectiveCwd))
   ];
 
   // Bind the repository state BEFORE the package manager can change it: the

@@ -37,6 +37,8 @@
 - `trustedPublishers` resolves to the most specific matching entry: the exact package name first, then the pattern with the most literal characters. A broad rule listed before an exact pin no longer replaces the pin.
 - Requests to the registry (package metadata, attestations, version history, the verifier distribution for `trust lock --ci`) do not follow redirects. A redirect could send the request, and the answer SafeInstall trusts, to any other address.
 - A floating MCP server is no longer taken for pinned when an option in front of it has an exact-looking value (`npx --cache cache@1.2.3 floating-mcp`). When `npx`, `pnpx`, `bunx`, `uvx` or `pnpm dlx` is called with a separate-value option SafeInstall does not know, the server counts as unpinned; every `--package` has to be pinned, not only the first.
+- Releases without provenance can no longer bury an attested history. When the most recent versions carry no provenance but the registry lists it for the versions before them, continuity verifies those earlier versions and uses them as the baseline, looking back three times `continuity.baselineSize`. A target published behind up to ten such releases is reported as a provenance downgrade instead of passing with no baseline.
+- Settings the package manager reads by itself can no longer redirect an install. A project `.npmrc`, `pnpm-workspace.yaml` or `npm_config_*` variable that moves where pnpm or npm reads or writes (`modules-dir`, `virtual-store-dir`, `lockfile-dir`, a project-supplied `store-dir`, `prefix`), switches off a check (`verify-store-integrity=false`, `ignore-scripts=false`) or makes it load code (`pnpmfile`, `use-node-version`, `git`, `script-shell`) blocks the install with `unsafe-package-manager-config`. Credentials and registry scopes are untouched.
 
 ### Breaking changes
 
@@ -54,6 +56,8 @@
 - `provenance.offlineBehavior: "allow-cached"` blocks a package whose provenance is required or pinned when the attestation cannot be fetched and none is cached. It used to warn. Packages without such a requirement still get a warning.
 - A registry or mirror that answers metadata or attestation requests with a redirect is treated as unreachable. Point `registryUrl` at the address that serves the data.
 - In strict trust mode, an MCP server started through `npx`, `pnpx`, `bunx`, `uvx` or `pnpm dlx` with an option SafeInstall does not know counts as unpinned and blocks. Write such options as `--option=value`, or pin the server another way.
+- A project whose `.npmrc` or `pnpm-workspace.yaml` sets one of the redirecting or check-disabling settings listed above is no longer installed. Remove the setting; a store directory belongs in the user's own configuration.
+- `continuity` in `block` mode now also blocks a version without provenance when only the versions before the most recent `baselineSize` releases were attested. A package that stopped publishing provenance is reported for ten further releases instead of three.
 
 ## 0.15.0 - 2026-10-01
 

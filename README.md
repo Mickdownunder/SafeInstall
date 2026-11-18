@@ -483,7 +483,14 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 | `transitive.mode` | `"off"` / `"warn"` / `"block"` — transitive install-script check, and whether a missing or unreadable lockfile warns or blocks. Lockfile sources are checked against `allowedSources` in every mode |
 | `transitive.checks` | `"install-script"` enables the install-script check. `"untrusted-source"` is accepted but has no effect: that check always runs |
 | `continuity.mode` | `"off"` / `"warn"` / `"block"` — detect provenance downgrades and source-repo changes against a learned per-package baseline |
-| `continuity.baselineSize` | How many recent versions to sample when learning the baseline (default 5) |
+| `continuity.baselineSize` | How many recent versions to sample when learning the baseline (default 5). When those carry no provenance but the registry lists it for earlier versions, the versions before them are verified and used instead, up to three times this size back |
+
+A project `.npmrc` or `pnpm-workspace.yaml` is read by the package manager itself, not by SafeInstall.
+Credentials and registry scopes belong there. Settings that move where the package manager reads or
+writes (`modules-dir`, `virtual-store-dir`, `lockfile-dir`, a project-supplied `store-dir`, npm's
+`prefix`), switch off one of its checks (`verify-store-integrity=false`, `ignore-scripts=false`) or make
+it load code (`pnpmfile`, `use-node-version`, `git`, `script-shell`) block the install, also when they
+arrive as `npm_config_*` environment variables.
 
 Keep private-registry authentication in an environment-backed `.npmrc` entry, such as an
 `_authToken=${NPM_TOKEN}` setting, rather than embedding authority material in `registryUrl`.
