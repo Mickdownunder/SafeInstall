@@ -51,6 +51,7 @@
 - An error while the guard analyzes a command now denies the command. The hook used to exit with an error instead of a decision, and clients that treat a failing hook as non-blocking, such as Claude Code, then ran the command unscreened.
 - The published package bundles its runtime dependencies (`npm-package-arg`, `semver`, `yaml` and what they depend on) at the versions and SHA-512 digests of the repository lockfile. The GitHub Action and the workflow from `trust lock --ci` check the tarball's SHA-512 and then install it; npm used to resolve the dependencies from their caret ranges at that point, so code outside the checked digest ran inside the verifier. The published `package.json` lists no `devDependencies`.
 - On Windows, the trust lock's write check reads drive paths the way Git Bash and Cygwin spell them: `rm /c/work/app/.mcp.json`, `cd /cygdrive/c/work/app && ...` and globs over `C:/...` are checked at the drive path they write to. They used to resolve to a folder named `c` on the current drive and pass.
+- With a trust lock, a write from outside the project into it is also found when the target holds a glob or an expansion after a literal directory (`rm /path/to/project/.mcp.js*`, `rm -rf /path/to/project/.safe*`) or is spelled from the home directory (`~/project/.mcp.json`, `$HOME/project/...`). Only fully literal paths were matched with the project's lock.
 
 ### Breaking changes
 

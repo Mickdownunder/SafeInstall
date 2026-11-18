@@ -281,7 +281,12 @@ describe("guard write targets under an active trust lock", () => {
       "cd ROOT && rm .mcp.json",
       "cd ROOT/.claude && echo {} > settings.json",
       "cd ROOT/sub && echo x > ../AGENTS.md",
-      "rm -rf ROOT/.safeinstall"
+      "rm -rf ROOT/.safeinstall",
+      // A glob or expansion after a literal directory still names the project.
+      "rm ROOT/.mcp.js*",
+      "rm ROOT/*.json",
+      "rm -rf ROOT/.safe*",
+      "echo {} > ROOT/.claude/$NAME"
     ])("denies %j", async (template) => {
       const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
       const command = template.replace("ROOT", shellPath(root));
@@ -292,6 +297,20 @@ describe("guard write targets under an active trust lock", () => {
       const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
       expect(await decideGuard(`echo x > ${shellPath(root)}/sub/notes.txt`, outside)).toEqual({ action: "allow" });
       expect(await decideGuard("echo x > .mcp.json", outside)).toEqual({ action: "allow" });
+      expect(await decideGuard(`rm ${shellPath(root)}/sub/*.txt`, outside)).toEqual({ action: "allow" });
+    });
+
+    it.skipIf(process.platform === "win32")("denies a write into the project spelled from the home directory", async () => {
+      const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
+      const home = process.env.HOME;
+      process.env.HOME = path.dirname(root);
+      try {
+        for (const command of [`rm ~/${path.basename(root)}/.mcp.json`, `rm $HOME/${path.basename(root)}/.mcp.js*`]) {
+          expect((await decideGuard(command, outside)).action, command).toBe("deny");
+        }
+      } finally {
+        process.env.HOME = home;
+      }
     });
   });
 
