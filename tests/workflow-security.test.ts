@@ -49,10 +49,15 @@ describe("GitHub workflow security boundaries", () => {
 
     expect(verifyJob).toContain("pnpm release:verify");
     expect(verifyJob).not.toContain("pack:smoke");
-    expect(verifyJob).toContain("npm pack --ignore-scripts --pack-destination release-artifact");
+    expect(verifyJob).toContain("node scripts/pack-release.mjs release-artifact");
     expect(verifyJob).toContain("actions/upload-artifact@");
-    expect(verifyJob.indexOf("npm pack --ignore-scripts --pack-destination release-artifact"))
+    expect(verifyJob.indexOf("node scripts/pack-release.mjs release-artifact"))
       .toBeLessThan(verifyJob.indexOf("actions/upload-artifact@"));
+    // The bundle is installed from the pinned lockfile and packed without
+    // lifecycle scripts.
+    const packScript = await readFile(path.join(root, "scripts", "pack-release.mjs"), "utf8");
+    expect(packScript).toContain('["ci", "--ignore-scripts", "--no-audit", "--no-fund"]');
+    expect(packScript).toContain('["pack", "--ignore-scripts", "--json", "--pack-destination", destination]');
 
     expect(smokeJob).toContain("needs: verify");
     expect(smokeJob).toContain("actions/download-artifact@");

@@ -32,10 +32,13 @@ jobs:
 
       - run: pnpm release:verify
 
+      # The runtime dependencies ship bundled inside the tarball, installed
+      # from the versions and SHA-512 digests of pnpm-lock.yaml, so the digest
+      # the Action and the trust workflow check covers all code that runs.
       - name: Build the immutable publish artifact
         run: |
           mkdir release-artifact
-          npm pack --ignore-scripts --pack-destination release-artifact
+          node scripts/pack-release.mjs release-artifact
 
       - name: Upload verified package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
