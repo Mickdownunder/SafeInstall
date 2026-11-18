@@ -36,6 +36,7 @@ async function createBinDir(files: string[]): Promise<string> {
 }
 
 const PATHEXT_DEFAULT = ".COM;.EXE;.BAT;.CMD";
+const COMSPEC = "C:\\Windows\\system32\\cmd.exe";
 
 describe("planPackageManagerSpawn on POSIX", () => {
   it("is the identity: same command, same args, no verbatim flag", () => {
@@ -108,9 +109,77 @@ describe("planPackageManagerSpawn on win32", () => {
 
   it("plans a .cmd shim with no arguments as a bare quoted script", async () => {
     const dir = await createBinDir(["npm.cmd"]);
-    const plan = planPackageManagerSpawn("npm", [], { PATH: dir, PATHEXT: ".CMD" }, "win32");
-    expect(plan.file).toBe("cmd.exe"); // ComSpec default when unset
+    const plan = planPackageManagerSpawn("npm", [], { PATH: dir, PATHEXT: ".CMD", ComSpec: COMSPEC }, "win32");
+    expect(plan.file).toBe(COMSPEC);
     expect(plan.args[3]).toBe(`""${path.resolve(dir, "npm.cmd")}""`);
+  });
+
+  // Windows looks for a program started by bare name in the working directory
+  // first, and the working directory of an install is the project. cmd.exe is
+  // therefore only ever started by a fully qualified path.
+  describe("locating cmd.exe", () => {
+    it("uses System32 under SystemRoot when ComSpec is not set", async () => {
+      const dir = await createBinDir(["npm.cmd"]);
+      const plan = planPackageManagerSpawn("npm", [], { PATH: dir, PATHEXT: ".CMD", SystemRoot: "C:\\Windows" }, "win32");
+      expect(plan.file).toBe("C:\\Windows\\System32\\cmd.exe");
+    });
+
+    it.each([
+      ["a bare name", "cmd.exe"],
+      ["a relative path", "tools\\cmd.exe"],
+      ["a drive-relative path", "C:cmd.exe"],
+      ["a path without a drive", "\\Windows\\System32\\cmd.exe"],
+      ["an empty value", ""]
+    ])("does not start a ComSpec that is %s", async (_label, comspec) => {
+      const dir = await createBinDir(["npm.cmd"]);
+      const plan = planPackageManagerSpawn(
+        "npm",
+        [],
+        { PATH: dir, PATHEXT: ".CMD", ComSpec: comspec, SystemRoot: "D:\\WinNT" },
+        "win32"
+      );
+      expect(plan.file).toBe("D:\\WinNT\\System32\\cmd.exe");
+    });
+
+    it("accepts a ComSpec on a network share", async () => {
+      const dir = await createBinDir(["npm.cmd"]);
+      const comspec = "\\\\server\\share\\cmd.exe";
+      const plan = planPackageManagerSpawn("npm", [], { PATH: dir, PATHEXT: ".CMD", ComSpec: comspec }, "win32");
+      expect(plan.file).toBe(comspec);
+    });
+
+    it.each([
+      ["neither variable is set", {}],
+      ["ComSpec is a bare name and SystemRoot is missing", { ComSpec: "cmd.exe" }],
+      ["SystemRoot is relative", { SystemRoot: "Windows" }]
+    ])("fails closed when %s", async (_label, extra) => {
+      const dir = await createBinDir(["npm.cmd"]);
+      const attempt = () => planPackageManagerSpawn("npm", [], { PATH: dir, PATHEXT: ".CMD", ...extra }, "win32");
+
+      expect(attempt).toThrow(WindowsCmdArgumentError);
+      expect(attempt).toThrow("cmd.exe");
+    });
+
+    it("needs no cmd.exe for a native executable", async () => {
+      const dir = await createBinDir(["pnpm.exe"]);
+      const plan = planPackageManagerSpawn("pnpm", [], { PATH: dir, PATHEXT: PATHEXT_DEFAULT }, "win32");
+      expect(plan.file).toBe(path.resolve(dir, "pnpm.exe"));
+    });
+  });
+
+  it("skips PATH entries that are relative to the working directory", async () => {
+    // A relative entry points into the project the install runs in.
+    const dir = await mkdtemp(path.join(process.cwd(), "node_modules", ".safeinstall-relative-path-"));
+    tempDirs.push(dir);
+    await writeFile(path.join(dir, "npm.cmd"), "");
+    const relative = path.relative(process.cwd(), dir);
+
+    expect(() =>
+      planPackageManagerSpawn("npm", [], { PATH: relative, PATHEXT: ".CMD", ComSpec: COMSPEC }, "win32")
+    ).toThrow(WindowsCommandResolutionError);
+    expect(() =>
+      planPackageManagerSpawn("npm", [], { PATH: `.;${relative}`, PATHEXT: ".CMD", ComSpec: COMSPEC }, "win32")
+    ).toThrow(WindowsCommandResolutionError);
   });
 
   it.each([
@@ -163,7 +232,8 @@ describe("planPackageManagerSpawn on win32", () => {
 
   it("reads PATH and PATHEXT case-insensitively", async () => {
     const dir = await createBinDir(["npm.cmd"]);
-    const plan = planPackageManagerSpawn("npm", [], { Path: dir, PathExt: ".CMD" }, "win32");
+    const plan = planPackageManagerSpawn("npm", [], { Path: dir, PathExt: ".CMD", comspec: COMSPEC }, "win32");
+    expect(plan.file).toBe(COMSPEC);
     expect(plan.args[3]).toContain(path.resolve(dir, "npm.cmd"));
   });
 
@@ -172,7 +242,12 @@ describe("planPackageManagerSpawn on win32", () => {
     const real = await createBinDir(["npm.cmd"]);
     // `{ ...process.env, PATH: override }` on Windows can leave both `Path`
     // (inherited) and `PATH` (override) on the object; the override must win.
-    const plan = planPackageManagerSpawn("npm", [], { Path: empty, PATH: real, PATHEXT: ".CMD" }, "win32");
+    const plan = planPackageManagerSpawn(
+      "npm",
+      [],
+      { Path: empty, PATH: real, PATHEXT: ".CMD", ComSpec: COMSPEC },
+      "win32"
+    );
     expect(plan.args[3]).toContain(path.resolve(real, "npm.cmd"));
   });
 

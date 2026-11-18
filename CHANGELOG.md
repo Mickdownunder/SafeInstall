@@ -40,6 +40,7 @@
 - Releases without provenance can no longer bury an attested history. When the most recent versions carry no provenance but the registry lists it for the versions before them, continuity verifies those earlier versions and uses them as the baseline, looking back three times `continuity.baselineSize`. A target published behind up to ten such releases is reported as a provenance downgrade instead of passing with no baseline.
 - Settings the package manager reads by itself can no longer redirect an install. A project `.npmrc`, `pnpm-workspace.yaml` or `npm_config_*` variable that moves where pnpm or npm reads or writes (`modules-dir`, `virtual-store-dir`, `lockfile-dir`, a project-supplied `store-dir`), switches off a check (`verify-store-integrity=false`, `ignore-scripts=false`) or makes it load code (`pnpmfile`, `use-node-version`, `git`, `script-shell`) blocks the install with `unsafe-package-manager-config`. Credentials and registry scopes are untouched.
 - The plugin bundle no longer carries third-party packages with open advisories. It is built from the lockfile, which now resolves `hono` 4.13.18, `@hono/node-server` 2.1.8, `fast-uri` 3.1.9, `qs` 6.16.1, `proxy-addr` 2.0.8, `body-parser` 2.4.0, `ip-address` 10.7.6, `zod` 4.6.7 and `minimatch` 11.0.8 (with `glob` 14.0.6 and `cacache` 21.0.2). They arrive through the MCP SDK and sigstore. SafeInstall starts only the SDK's stdio transport, so the HTTP code most of these advisories describe was not running.
+- On Windows, a `cmd.exe` inside the project can no longer be started in place of the system's. npm and pnpm are batch shims there and run under the command processor; with `ComSpec` missing from the environment SafeInstall started `cmd.exe` by bare name, which Windows looks up in the working directory (the project) first. The command processor is now taken from a fully qualified `ComSpec`, otherwise from `System32` under `SystemRoot`, and the install is blocked if neither is available. `PATH` entries that are relative to the working directory are skipped when the package manager is looked up.
 
 ### Breaking changes
 
@@ -59,6 +60,7 @@
 - In strict trust mode, an MCP server started through `npx`, `pnpx`, `bunx`, `uvx` or `pnpm dlx` with an option SafeInstall does not know counts as unpinned and blocks. Write such options as `--option=value`, or pin the server another way.
 - A project whose `.npmrc` or `pnpm-workspace.yaml` sets one of the redirecting or check-disabling settings listed above is no longer installed. Remove the setting; a store directory belongs in the user's own configuration.
 - `continuity` in `block` mode now also blocks a version without provenance when only the versions before the most recent `baselineSize` releases were attested. A package that stopped publishing provenance is reported for ten further releases instead of three.
+- On Windows, an install through an npm or pnpm batch shim is blocked when the environment has neither a fully qualified `ComSpec` nor `SystemRoot`. A package manager that is only reachable through a relative `PATH` entry is no longer found; put its directory into `PATH` with a drive letter.
 
 ## 0.15.0 - 2026-10-01
 
