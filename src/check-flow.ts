@@ -103,7 +103,7 @@ async function runCheckFlowInternal(
           message:
             "safeinstall check takes no package names or other arguments. It checks the dependencies of the project in the current directory.",
           suggestion:
-            "To check a package, run safeinstall npm install <package>, which blocks before anything is installed, or use the check_package tool of safeinstall mcp. Usage: safeinstall check [--record]"
+            "To check a package without installing it, use the check_package tool of safeinstall mcp. safeinstall npm install <package> checks it too, but installs it when policy allows. Usage: safeinstall check [--record]"
         }
       ],
       summary: "Check not run.",
