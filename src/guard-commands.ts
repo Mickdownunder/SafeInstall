@@ -12,6 +12,7 @@ import {
   stripRedirections
 } from "./guard-shell";
 import type { ScopeEvent, ShellSegment, ShellToken } from "./guard-shell";
+import { findHiddenShellInput } from "./guard-shell-input";
 import { literalDirectoryWord, parseWordAlternatives } from "./guard-words";
 import type {
   GuardCommandAnalysis,
@@ -1032,7 +1033,8 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
     return {};
   }
 
-  if (subcommandToken.hasExpansion) {
+  // `npm in*` becomes `npm install` when a file named `install` exists.
+  if (subcommandToken.hasExpansion || subcommandToken.hasGlob) {
     return {
       unanalyzable: {
         segmentText,
@@ -1146,7 +1148,7 @@ export function analyzeShellCommand(command: string): GuardCommandAnalysis {
   const writeTargets: string[] = [];
   let usesSafeInstall = false;
 
-  for (const segment of segments) {
+  for (const [index, segment] of segments.entries()) {
     const finding = analyzeSegment(segment, command);
     if (finding.install) {
       installs.push(finding.install);
@@ -1154,8 +1156,9 @@ export function analyzeShellCommand(command: string): GuardCommandAnalysis {
     if (finding.runner) {
       runners.push(finding.runner);
     }
-    if (finding.unanalyzable) {
-      unanalyzable.push(finding.unanalyzable);
+    const unseen = finding.unanalyzable ?? findHiddenShellInput(segments, index, command);
+    if (unseen) {
+      unanalyzable.push(unseen);
     }
     if (finding.writeTargets) {
       writeTargets.push(...finding.writeTargets);
