@@ -20,13 +20,17 @@ import path from "node:path";
  *    same search, but we need to know *what kind* of file we found before
  *    deciding how to run it). Only files are considered; the working
  *    directory is deliberately never searched (no current-directory binary
- *    planting, unlike raw CreateProcess semantics).
+ *    planting, unlike raw CreateProcess semantics), and PATH entries that
+ *    are relative to it are skipped.
  * 2. `.exe`/`.com` — spawn the resolved absolute path directly with
  *    `shell: false`. No shell is involved; Node quotes arguments per MSVCRT
  *    argv rules, which is safe for native executables.
  * 3. `.cmd`/`.bat` — run via `cmd.exe /d /s /c`, but ONLY when every argument
  *    matches a strict allowlist (see SAFE_CMD_ARG_PATTERN). Anything else is
  *    rejected with a clear error — blocked, never silently degraded.
+ *    cmd.exe itself is started by a fully qualified path only (see
+ *    locateCommandProcessor): a bare `cmd.exe` would be looked up in the
+ *    working directory first.
  *
  * On POSIX platforms `planPackageManagerSpawn` is the identity: the caller
  * spawns exactly what it spawns today.
@@ -114,6 +118,52 @@ function getEnvCaseInsensitive(env: NodeJS.ProcessEnv, name: string): string | u
   return undefined;
 }
 
+/**
+ * A path that names the same location whatever the working directory is: a
+ * drive letter with a root (`C:\...`) or a UNC path (`\\server\share\...`).
+ * `cmd.exe`, `tools\cmd.exe`, `C:cmd.exe` and `\Windows\cmd.exe` all depend
+ * on the working directory or its drive, and the working directory of an
+ * install is the project.
+ *
+ * The planner is unit tested on POSIX hosts against real temp directories, so
+ * a POSIX absolute path counts there. On Windows `path.sep` is `\` and that
+ * clause never applies.
+ */
+const FULLY_QUALIFIED_WINDOWS_PATH = /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/;
+
+function isFullyQualified(candidate: string): boolean {
+  return FULLY_QUALIFIED_WINDOWS_PATH.test(candidate) || (path.sep === "/" && path.isAbsolute(candidate));
+}
+
+/**
+ * The command processor for a batch shim, by a fully qualified path.
+ *
+ * Windows looks for a program started by bare name in the working directory
+ * before PATH (libuv follows CreateProcess here), so `spawn("cmd.exe")` in a
+ * project that ships its own `cmd.exe` would start that file. ComSpec is used
+ * when it is fully qualified; otherwise `System32\cmd.exe` under SystemRoot,
+ * which is what ComSpec holds on a stock system. An environment that names
+ * neither cannot run a batch shim safely and is refused.
+ */
+function locateCommandProcessor(env: NodeJS.ProcessEnv, command: string): string {
+  const comspec = getEnvCaseInsensitive(env, "ComSpec");
+  if (comspec !== undefined && isFullyQualified(comspec)) {
+    return comspec;
+  }
+
+  const systemRoot = getEnvCaseInsensitive(env, "SystemRoot");
+  if (systemRoot !== undefined && isFullyQualified(systemRoot)) {
+    return path.win32.join(systemRoot, "System32", "cmd.exe");
+  }
+
+  throw new WindowsCmdArgumentError(
+    `Blocked: "${command}" is a batch shim and has to run under cmd.exe, but neither ComSpec nor SystemRoot ` +
+      `names it by a full path. SafeInstall does not start "cmd.exe" by bare name, because Windows would look ` +
+      `for it in the project directory first. Set ComSpec to the full path of cmd.exe ` +
+      `(usually C:\\Windows\\System32\\cmd.exe).`
+  );
+}
+
 function isFile(candidate: string): boolean {
   try {
     return statSync(candidate).isFile();
@@ -133,7 +183,9 @@ interface ResolvedWindowsCommand {
  * Emulate the cmd/libuv PATH+PATHEXT search, restricted to extensions we
  * know how to execute safely. PATH is split on ";" (the win32 delimiter —
  * hardcoded, not `path.delimiter`, so the logic stays testable from POSIX)
- * and entries may be quoted, which cmd's own PATH parsing allows.
+ * and entries may be quoted, which cmd's own PATH parsing allows. Entries
+ * that are not fully qualified (`.`, `bin`, `\tools`) are skipped: they
+ * resolve against the working directory, which is the project.
  */
 function resolveWindowsCommand(command: string, env: NodeJS.ProcessEnv): ResolvedWindowsCommand | undefined {
   const rawPath = getEnvCaseInsensitive(env, "PATH") ?? "";
@@ -147,7 +199,7 @@ function resolveWindowsCommand(command: string, env: NodeJS.ProcessEnv): Resolve
   const directories = rawPath
     .split(";")
     .map((entry) => entry.trim().replace(/^"(.*)"$/, "$1"))
-    .filter((entry) => entry.length > 0);
+    .filter((entry) => isFullyQualified(entry));
 
   for (const directory of directories) {
     for (const extension of extensions) {
@@ -242,10 +294,9 @@ export function planPackageManagerSpawn(
    *   BatBadBut, and verbatim mode is how we keep full control here.
    */
   const commandLine = `"${[resolved.path, ...args].map((part) => `"${part}"`).join(" ")}"`;
-  const comspec = getEnvCaseInsensitive(env, "ComSpec") ?? "cmd.exe";
 
   return {
-    file: comspec,
+    file: locateCommandProcessor(env, command),
     args: ["/d", "/s", "/c", commandLine],
     windowsVerbatimArguments: true
   };
