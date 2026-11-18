@@ -8,6 +8,7 @@ import { findNearestUpward } from "./project-discovery";
 import { findProtectedWrite } from "./guard-write-match";
 import type { ProtectedWrite } from "./guard-write-match";
 import { redactSensitiveText } from "./redaction";
+import { nativeShellPath } from "./shell-drive-paths";
 import { findTrustContext } from "./trust-surface";
 import type { TrustSurfaceStatus } from "./trust-surface";
 import { checkTrustSurface, partitionTrustFindings } from "./trust-surface-check";
@@ -153,14 +154,14 @@ function reachedDirectories(analysis: ReturnType<typeof analyzeShellCommand>, cw
   const directories = new Set<string>();
   for (const operation of analysis.writeOperations) {
     const workingDirectories = operation.cwdVariants.map((changes) =>
-      changes.reduce((directory, change) => path.resolve(directory, change), cwd)
+      changes.reduce((directory, change) => path.resolve(directory, nativeShellPath(change)), cwd)
     );
     for (const directory of workingDirectories) {
       directories.add(directory);
     }
     for (const parts of operation.words) {
       if (!parts.every((part) => part.kind === "text")) continue;
-      const literal = parts.map((part) => (part.kind === "text" ? part.value : "")).join("");
+      const literal = nativeShellPath(parts.map((part) => (part.kind === "text" ? part.value : "")).join(""));
       if (literal === "") continue;
       for (const directory of path.isAbsolute(literal) ? [cwd] : workingDirectories) {
         const target = path.resolve(directory, literal);
