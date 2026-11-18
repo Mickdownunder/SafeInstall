@@ -173,6 +173,60 @@ describe("mergeCursorHooks", () => {
   });
 });
 
+// An entry that is there but never runs, or runs without effect, is not an
+// installed guard: setup must add a working one instead of reporting success.
+describe("entries that look like the guard but do not guard", () => {
+  const claude = (group: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    ...extra,
+    hooks: { PreToolUse: [group] }
+  });
+  const hook = (command: string, fields: Record<string, unknown> = {}) => ({ type: "command", command, ...fields });
+
+  it.each([
+    ["a matcher for other tools", claude({ matcher: "Edit", hooks: [hook("safeinstall guard claude")] })],
+    ["a matcher that only names Bash in part", claude({ matcher: "BashOutput", hooks: [hook("safeinstall guard claude")] })],
+    ["a command that ignores the guard's verdict", claude({ matcher: "Bash", hooks: [hook("safeinstall guard claude || true")] })],
+    ["a command that runs something else", claude({ matcher: "Bash", hooks: [hook("/bin/true /safeinstall guard claude")] })],
+    ["a comment", claude({ matcher: "Bash", hooks: [hook("true # safeinstall guard claude")] })],
+    ["a hook type other than command", claude({ matcher: "Bash", hooks: [{ type: "prompt", command: "safeinstall guard claude" }] })],
+    ["a timeout too short to answer", claude({ matcher: "Bash", hooks: [hook("safeinstall guard claude", { timeout: 0 })] })]
+  ])("adds the Claude guard next to %s", (_label, existing) => {
+    const merged = mergeClaudeSettings(existing);
+    expect(merged).toBeDefined();
+    expect(mergeClaudeSettings(merged as Record<string, unknown>)).toBeUndefined();
+  });
+
+  it.each([
+    ["Bash", "safeinstall guard claude"],
+    ["*", "safeinstall guard claude"],
+    ["Bash|Write", "/usr/local/bin/safeinstall guard claude"],
+    ["Bash", "C:\\Users\\dev\\AppData\\Roaming\\npm\\safeinstall.cmd guard claude"],
+    ["Bash", '"C:\\Program Files\\nodejs\\safeinstall.cmd" guard claude']
+  ])("accepts a working entry with matcher %j and command %j", (matcher, command) => {
+    expect(mergeClaudeSettings(claude({ matcher, hooks: [hook(command, { timeout: 60 })] }))).toBeUndefined();
+  });
+
+  it("refuses to report success when the settings switch every hook off", () => {
+    const existing = claude({ matcher: "Bash", hooks: [hook("safeinstall guard claude")] }, { disableAllHooks: true });
+    expect(() => mergeClaudeSettings(existing)).toThrow("disableAllHooks");
+  });
+
+  it("adds the Codex guard next to an entry for other tools", () => {
+    const existing = { hooks: { PreToolUse: [{ matcher: "apply_patch", hooks: [hook("safeinstall guard codex")] }] } };
+    expect(mergeCodexHooks(existing)).toBeDefined();
+  });
+
+  it.each([
+    ["without failClosed", { command: "safeinstall guard cursor", timeout: 60 }],
+    ["with failClosed off", { command: "safeinstall guard cursor", timeout: 60, failClosed: false }],
+    ["behind || true", { command: "safeinstall guard cursor || true", failClosed: true }]
+  ])("adds the Cursor guard next to an entry %s", (_label, entry) => {
+    const merged = mergeCursorHooks({ version: 1, hooks: { beforeShellExecution: [entry] } });
+    expect(merged).toBeDefined();
+    expect(mergeCursorHooks(merged as Record<string, unknown>)).toBeUndefined();
+  });
+});
+
 describe("runGuardSetupFlow", () => {
   it("creates all config files in a fresh project", async () => {
     const cwd = await createTempDir("safeinstall-guard-setup-");

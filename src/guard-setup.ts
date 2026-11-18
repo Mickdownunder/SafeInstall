@@ -50,10 +50,55 @@ function guardCommand(client: GuardSetupClient): string {
   return `safeinstall guard ${client}`;
 }
 
+/**
+ * The guard and nothing else: `safeinstall guard <client>`, optionally by a
+ * path (quoted when it holds spaces). Anything around it (`|| true`, a
+ * comment, another program in front) can discard the guard's verdict.
+ */
 function isGuardCommand(value: unknown, client: GuardSetupClient): boolean {
   return (
     typeof value === "string" &&
-    new RegExp(`(^|[\\\\/])safeinstall(?:\\.cmd)?\\s+guard\\s+${client}(?:\\s|$)`).test(value)
+    new RegExp(
+      `^\\s*(?:"[^"]*[\\\\/]safeinstall(?:\\.cmd)?"|(?:[^\\s"]*[\\\\/])?safeinstall(?:\\.cmd)?)\\s+guard\\s+${client}\\s*$`
+    ).test(value)
+  );
+}
+
+/**
+ * Below this a cold start of Node can miss the deadline, and a hook that
+ * times out lets the command through.
+ */
+const MINIMUM_HOOK_TIMEOUT_SECONDS = 5;
+
+function hasUsableTimeout(hook: Record<string, unknown>): boolean {
+  return hook.timeout === undefined || (typeof hook.timeout === "number" && hook.timeout >= MINIMUM_HOOK_TIMEOUT_SECONDS);
+}
+
+/** Whether a PreToolUse matcher selects the Bash tool. An absent, empty or `*` matcher selects every tool. */
+function matchesBashTool(matcher: unknown): boolean {
+  if (matcher === undefined || matcher === "" || matcher === "*") {
+    return true;
+  }
+  if (typeof matcher !== "string") {
+    return false;
+  }
+  try {
+    return new RegExp(`^(?:${matcher})$`).test("Bash");
+  } catch {
+    return false;
+  }
+}
+
+/** A PreToolUse entry (Claude Code, Codex) that runs the guard on every Bash call. */
+function hasWorkingPreToolUseGuard(preToolUse: unknown[], client: "claude" | "codex"): boolean {
+  return preToolUse.some(
+    (group) =>
+      isRecord(group) &&
+      matchesBashTool(group.matcher) &&
+      Array.isArray(group.hooks) &&
+      group.hooks.some(
+        (hook) => isRecord(hook) && hook.type === "command" && isGuardCommand(hook.command, client) && hasUsableTimeout(hook)
+      )
   );
 }
 
@@ -62,19 +107,18 @@ function isGuardCommand(value: unknown, client: GuardSetupClient): boolean {
  * Returns undefined when the guard is already registered.
  */
 export function mergeClaudeSettings(existing: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (existing.disableAllHooks === true) {
+    // An added hook would not run either, so there is nothing to report as done.
+    throw new Error(
+      "Cannot register the SafeInstall guard: these Claude Code settings set disableAllHooks, which switches every hook off. Remove that setting, then re-run safeinstall guard install."
+    );
+  }
   const settings = { ...existing };
   const hooks = isRecord(settings.hooks) ? { ...settings.hooks } : {};
   const preToolUse = Array.isArray(hooks.PreToolUse) ? [...hooks.PreToolUse] : [];
 
-  for (const group of preToolUse) {
-    if (!isRecord(group) || !Array.isArray(group.hooks)) {
-      continue;
-    }
-    for (const hook of group.hooks) {
-      if (isRecord(hook) && isGuardCommand(hook.command, "claude")) {
-        return undefined;
-      }
-    }
+  if (hasWorkingPreToolUseGuard(preToolUse, "claude")) {
+    return undefined;
   }
 
   preToolUse.push({
@@ -102,15 +146,8 @@ export function mergeCodexHooks(existing: Record<string, unknown>): Record<strin
   const hooks = isRecord(config.hooks) ? { ...config.hooks } : {};
   const preToolUse = Array.isArray(hooks.PreToolUse) ? [...hooks.PreToolUse] : [];
 
-  for (const group of preToolUse) {
-    if (!isRecord(group) || !Array.isArray(group.hooks)) {
-      continue;
-    }
-    for (const hook of group.hooks) {
-      if (isRecord(hook) && isGuardCommand(hook.command, "codex")) {
-        return undefined;
-      }
-    }
+  if (hasWorkingPreToolUseGuard(preToolUse, "codex")) {
+    return undefined;
   }
 
   preToolUse.push({
@@ -141,10 +178,13 @@ export function mergeCursorHooks(existing: Record<string, unknown>): Record<stri
     ? [...hooks.beforeShellExecution]
     : [];
 
-  for (const hook of beforeShellExecution) {
-    if (isRecord(hook) && isGuardCommand(hook.command, "cursor")) {
-      return undefined;
-    }
+  // Without failClosed, Cursor runs the command when the guard crashes or times out.
+  if (
+    beforeShellExecution.some(
+      (hook) => isRecord(hook) && isGuardCommand(hook.command, "cursor") && hook.failClosed === true && hasUsableTimeout(hook)
+    )
+  ) {
+    return undefined;
   }
 
   beforeShellExecution.push({
