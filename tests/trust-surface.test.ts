@@ -475,9 +475,41 @@ describe("findTrustContext", () => {
     await lockAt(outer);
     const worktree = path.join(outer, ".claude", "worktrees", "wt");
     await mkdir(worktree, { recursive: true });
-    await writeFile(path.join(worktree, ".git"), "gitdir: /elsewhere\n");
+    // A worktree's pointer names a git directory that holds HEAD.
+    const gitDir = path.join(await createTempDir("safeinstall-ctx-gitdir-"), "worktrees", "wt");
+    await mkdir(gitDir, { recursive: true });
+    await writeFile(path.join(gitDir, "HEAD"), "ref: refs/heads/wt\n");
+    await writeFile(path.join(worktree, ".git"), `gitdir: ${gitDir}\n`);
 
     expect(await findTrustContext(worktree)).toBeUndefined();
+  });
+
+  it.each([
+    ["a directory that does not exist", "gitdir: /nonexistent/safeinstall-git-dir\n"],
+    ["a directory without HEAD", "gitdir: ../no-head\n"],
+    ["nothing", "gitdir:\n"]
+  ])("is not stopped by a .git file that points to %s", async (_label, pointer) => {
+    const outer = await createTempDir("safeinstall-ctx-");
+    await initGit(outer);
+    await lockAt(outer);
+    await mkdir(path.join(outer, "no-head"), { recursive: true });
+    const planted = path.join(outer, "planted");
+    await mkdir(planted, { recursive: true });
+    await writeFile(path.join(planted, ".git"), pointer);
+
+    expect(await findTrustContext(planted)).toEqual({ root: outer, hasLock: true });
+  });
+
+  it("follows a relative gitdir pointer to a real git directory", async () => {
+    const outer = await createTempDir("safeinstall-ctx-");
+    await lockAt(outer);
+    const nested = path.join(outer, "vendor", "module");
+    await mkdir(path.join(outer, ".git-modules", "module"), { recursive: true });
+    await writeFile(path.join(outer, ".git-modules", "module", "HEAD"), "0123abc\n");
+    await mkdir(nested, { recursive: true });
+    await writeFile(path.join(nested, ".git"), "gitdir: ../../.git-modules/module\n");
+
+    expect(await findTrustContext(nested)).toBeUndefined();
   });
 
   it("uses a nested checkout's own lock", async () => {

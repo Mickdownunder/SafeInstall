@@ -264,4 +264,39 @@ describe("guard write targets under an active trust lock", () => {
     expect((await decideGuard("cd .claude && rm settings.json", link)).action).toBe("deny");
     expect(await decideGuard(`cd ${link}/sub && echo x > .mcp.json`, root)).toEqual({ action: "allow" });
   });
+
+  // The lock is found from the hook event's cwd. A write that reaches a locked
+  // project from a cwd outside of it has to be judged by that project's lock.
+  describe("from a working directory outside the locked project", () => {
+    it.each([
+      "rm ROOT/.mcp.json",
+      "echo x > ROOT/safeinstall.config.json",
+      "cd ROOT && rm .mcp.json",
+      "cd ROOT/.claude && echo {} > settings.json",
+      "cd ROOT/sub && echo x > ../AGENTS.md",
+      "rm -rf ROOT/.safeinstall"
+    ])("denies %j", async (template) => {
+      const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
+      const command = template.replace("ROOT", root);
+      expect((await decideGuard(command, outside)).action, command).toBe("deny");
+    });
+
+    it("leaves other writes alone", async () => {
+      const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
+      expect(await decideGuard(`echo x > ${root}/sub/notes.txt`, outside)).toEqual({ action: "allow" });
+      expect(await decideGuard("echo x > .mcp.json", outside)).toEqual({ action: "allow" });
+    });
+  });
+
+  // A `.git` file is a checkout boundary only when the directory it points
+  // to is a git directory; otherwise anyone could end the lock's scope.
+  it("is not stopped by a .git file that points nowhere", async () => {
+    const planted = path.join(root, "planted");
+    await mkdir(planted, { recursive: true });
+    await writeFile(path.join(planted, ".git"), "gitdir: /nonexistent/safeinstall-git-dir\n");
+
+    for (const command of ["rm ../.mcp.json", `rm ${root}/.mcp.json`, `echo x > ${root}/safeinstall.config.json`]) {
+      expect((await decideGuard(command, planted)).action, command).toBe("deny");
+    }
+  });
 });
