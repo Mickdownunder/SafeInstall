@@ -182,8 +182,12 @@ const COMMAND_RUNNERS = new Set([
   "timeout", "gtimeout", "nice", "ionice", "chrt", "taskset", "stdbuf", "xargs", "watch", "doas",
   "strace", "ltrace", "setsid", "flock", "script", "unbuffer", "caffeinate", "parallel"
 ]);
+/** Command runners plus the wrappers the shell layer resolves, for a runner nested in a runner. */
+const NESTED_COMMAND_RUNNERS = new Set([...COMMAND_RUNNERS, "sudo", "env", "nohup", "time", "exec", "command"]);
 /** A count or duration in front of the command (`60`, `10s`, `1.5m`). */
 const NUMERIC_ARGUMENT = /^\d+(?:\.\d+)?[a-z]*$/i;
+/** `NAME=value` in front of the command. */
+const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
  * `timeout 60 $NPM install x`: the command a runner executes is only known
@@ -193,10 +197,26 @@ const NUMERIC_ARGUMENT = /^\d+(?:\.\d+)?[a-z]*$/i;
  * `cmake --build "$DIR" --target install` and `mvn $OPTS install` are builds.
  */
 function findComputedInstall(tokens: ShellToken[]): { manager: string; keyword: string } | undefined {
-  let index = tokens.findIndex((token) => !token.value.startsWith("-") && !NUMERIC_ARGUMENT.test(token.value));
+  // The command a runner executes: the first word that is not an option, a
+  // count or duration, or an environment assignment (`env A=1 CMD`).
+  const commandPosition = (from: number): number => {
+    for (let position = from; position < tokens.length; position += 1) {
+      const value = tokens[position]?.value ?? "";
+      if (!value.startsWith("-") && !NUMERIC_ARGUMENT.test(value) && !ASSIGNMENT_WORD.test(value)) return position;
+    }
+    return -1;
+  };
+  let index = commandPosition(0);
   while (index >= 0) {
     const token = tokens[index];
-    if (token === undefined || !isCommandWord(token) || !hasDynamicCommandName(token)) return undefined;
+    if (token === undefined || !isCommandWord(token)) return undefined;
+    if (!hasDynamicCommandName(token)) {
+      // `timeout 60 nice $NPM install x`: a runner that runs another runner.
+      // Any other literal word owns the remaining arguments.
+      if (!NESTED_COMMAND_RUNNERS.has(basename(token.value))) return undefined;
+      index = commandPosition(index + 1);
+      continue;
+    }
     const following = tokens.slice(index + 1);
     const subcommand = findSubcommand(following);
     if (subcommand === undefined || !isCommandWord(subcommand)) return undefined;
