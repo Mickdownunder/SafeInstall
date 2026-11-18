@@ -38,7 +38,7 @@ inputs:
       Exact SafeInstall CLI version to install. Update this and integrity
       together after reviewing a release.
     required: false
-    default: "0.15.0"
+    default: "0.16.0"
   integrity:
     description: >
       sha512 SRI of the selected SafeInstall CLI tarball (for example,
@@ -87,8 +87,8 @@ runs:
         # The default CLI version and the digest of its published tarball are
         # recorded together, so a workflow that pins this Action by commit
         # also pins the executable. Bump both in the same change.
-        SAFEINSTALL_DEFAULT_VERSION="0.15.0"
-        SAFEINSTALL_DEFAULT_INTEGRITY="sha512-GjMB+YaFv7WtewK/JpCHndgWFTnAdQREUQUuLruzEzR3+rDhBElyKdf3fm/cK3ZrsGPtJayTU9aWkHoCrttBbg=="
+        SAFEINSTALL_DEFAULT_VERSION="0.16.0"
+        SAFEINSTALL_DEFAULT_INTEGRITY="sha512-h1yXrnWHIbWwMk7Ef+ILKwXeD1dOlH0TAau11Vs2Z1NO8g6mCb/98K99ypheUG2WUD5CJWL5DJiehexnzLGq6w=="
         if [ -z "$SAFEINSTALL_CLI_INTEGRITY" ] && [ "$SAFEINSTALL_CLI_VERSION" = "$SAFEINSTALL_DEFAULT_VERSION" ]; then
           SAFEINSTALL_CLI_INTEGRITY="$SAFEINSTALL_DEFAULT_INTEGRITY"
         fi
@@ -99,7 +99,7 @@ runs:
           const integrity = process.env.SAFEINSTALL_CLI_INTEGRITY || "";
           const exactVersion = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
           if (!exactVersion.test(version)) {
-            console.error("Invalid SafeInstall version: expected an exact semantic version such as `version: 0.15.0`, not a dist-tag (latest, next) or a range.");
+            console.error("Invalid SafeInstall version: expected an exact semantic version such as `version: 0.16.0`, not a dist-tag (latest, next) or a range.");
             process.exit(2);
           }
           if (!integrity.startsWith("sha512-")) {

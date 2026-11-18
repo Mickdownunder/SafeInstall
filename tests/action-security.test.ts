@@ -124,7 +124,7 @@ describe("GitHub Action install input boundary", () => {
     expect(Buffer.from(recorded, "base64").toString("base64")).toBe(recorded);
     expect(action.inputs.integrity?.required).toBe(false);
     expect(action.inputs.integrity?.default).toBe("");
-    expect(install).toContain("expected an exact semantic version such as `version: 0.15.0`");
+    expect(install).toContain("expected an exact semantic version such as `version: 0.16.0`");
     expect(install).toContain("the `integrity` input is required when `version` is not the default.");
     expect(install).toContain("timingSafeEqual(actual, expected)");
     expect(install).toContain('npm install -g "$SAFEINSTALL_TARBALL" --ignore-scripts');
