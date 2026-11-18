@@ -127,7 +127,30 @@ const DENIED: string[] = [
   "sed -i s/a/b/ packages/app/CLAUDE.md",
   "echo x > .claude/CLAUDE.md",
   "echo x > .claude/rules/style.md",
-  "rm -rf .claude/rules"
+  "rm -rf .claude/rules",
+  // A copy or move into a directory writes <directory>/<name of the source>.
+  "cp /tmp/evil/settings.json .claude/",
+  "cp /tmp/evil/settings.json .claude",
+  "cp /tmp/evil/.mcp.json .",
+  "cp /tmp/evil/safeinstall.config.json ./",
+  "cp -t .claude /tmp/evil/settings.json",
+  "cp --target-directory=.claude /tmp/evil/settings.json",
+  "cp --target-directory .claude /tmp/evil/settings.json",
+  "cp /tmp/evil/a.txt /tmp/evil/AGENTS.md sub/",
+  "cp /tmp/evil/* .claude/",
+  "cp $SRC .claude/",
+  "cd .claude && cp /tmp/evil/settings.json .",
+  "mv /tmp/evil/AGENTS.md sub/",
+  "mv /tmp/evil/CLAUDE.md packages/app",
+  "mv -t sub /tmp/evil/.cursorrules",
+  "install -m 644 /tmp/evil/settings.json .claude/",
+  "install /tmp/evil/settings.json .claude/settings.json",
+  "install -t .claude /tmp/evil/settings.json",
+  // A recursive copy writes a whole subtree below its destination.
+  "cp -r /tmp/evil/.claude .",
+  "cp -R /tmp/evil/ .claude",
+  "cp -a /tmp/evil/. .",
+  "cp --recursive /tmp/evil/.cursor sub"
 ];
 
 const ALLOWED: string[] = [
@@ -191,7 +214,19 @@ const ALLOWED: string[] = [
   "(cd sub && echo x > out.txt)",
   "{ cd sub; echo x > out.txt; }",
   "echo x | (cd sub && cat > out.txt)",
-  "(cd .claude); echo x > out.txt"
+  "(cd .claude); echo x > out.txt",
+  // Copies and moves whose destination file is not protected.
+  "cp /tmp/a.txt .",
+  "cp /tmp/a.txt sub/",
+  "cp /tmp/evil/settings.json sub/",
+  "cp /tmp/evil/.mcp.json sub",
+  "cp src/a.txt src/b.txt docs/",
+  "cp -r docs docs2",
+  "cp -r /tmp/assets sub/",
+  "mv /tmp/a.txt sub/",
+  "mv /tmp/a.txt sub/b.txt",
+  "install -d build/out",
+  "install -m 755 /tmp/tool sub/"
 ];
 
 describe("guard write targets under an active trust lock", () => {

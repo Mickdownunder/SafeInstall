@@ -422,11 +422,35 @@ describe("analyzeShellCommand", () => {
       "pnpm exec npm install evil",
       "node /usr/lib/node_modules/npm/bin/npm-cli.js install evil",
       "node node_modules/pnpm/bin/pnpm.cjs add evil",
-      "timeout 60 npm update"
+      "timeout 60 npm update",
+      // Quoting a single word does not change what the shell runs.
+      "timeout 60 'npm' install evil",
+      "timeout 60 \"npm\" install evil",
+      "timeout 60 npm 'install' evil",
+      "nice 'pnpm' \"add\" evil",
+      "somewrapper 'npm' i evil",
+      // A manager name that only exists after expansion.
+      "timeout 60 $NPM install evil",
+      "timeout 60 npm$EMPTY install evil"
     ])("fails closed on %j", (command) => {
       const analysis = analyzeShellCommand(command);
       expect(analysis.unanalyzable).toHaveLength(1);
       expect(analysis.rewrittenCommand).toBeUndefined();
+    });
+
+    it.each([
+      ["timeout 60 npx create-next-app@latest /tmp/demo", "npx", "create-next-app@latest"],
+      ["nice -n 10 pnpm dlx create-next-app@latest /tmp/demo", "pnpm dlx", "create-next-app@latest"],
+      ["somewrapper npx cowsay hi", "npx", "cowsay"],
+      ["timeout 60 bunx cowsay hi", "bunx", "cowsay"],
+      ["timeout 60 'npx' cowsay hi", "npx", "cowsay"],
+      ["timeout 60 npm exec -- cowsay hi", "npm exec", "cowsay"],
+      ["echo x | xargs npx cowsay", "npx", "cowsay"]
+    ])("classifies the runner behind another command in %j", (command, tool, packageHint) => {
+      const analysis = analyzeShellCommand(command);
+      expect(analysis.runners).toMatchObject([{ tool, packageHint }]);
+      // A runner behind another command never takes the local fast path.
+      expect(analysis.localRunnerResolutionSafe).toBe(false);
     });
 
     it("ignores package-manager words that are only text or run elsewhere", () => {
@@ -439,11 +463,17 @@ describe("analyzeShellCommand", () => {
         "docker run --rm node:22 npm install",
         "ssh build-host npm ci",
         "corepack enable pnpm",
-        "pnpm exec install-tool"
+        "pnpm exec install-tool",
+        "timeout 60 echo \"npx cowsay\"",
+        "timeout 600 $PYTHON -m pip install requests",
+        "brew install npx",
+        "chmod +x ./npx",
+        "docker run --rm node:22 npx cowsay"
       ]) {
         const analysis = analyzeShellCommand(command);
         expect(analysis.unanalyzable, command).toEqual([]);
         expect(analysis.installs, command).toEqual([]);
+        expect(analysis.runners, command).toEqual([]);
       }
     });
   });
