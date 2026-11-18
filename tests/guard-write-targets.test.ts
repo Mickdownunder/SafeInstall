@@ -38,6 +38,11 @@ afterAll(async () => {
   await cleanupTempDirs();
 });
 
+/** A native path as a POSIX shell word: Git Bash on Windows takes `C:/dir`. */
+function shellPath(nativePath: string): string {
+  return nativePath.split(path.sep).join("/");
+}
+
 const DENIED: string[] = [
   // Plain cwd tracking.
   "cd .claude && rm settings.json",
@@ -267,6 +272,8 @@ describe("guard write targets under an active trust lock", () => {
 
   // The lock is found from the hook event's cwd. A write that reaches a locked
   // project from a cwd outside of it has to be judged by that project's lock.
+  // The guard reads POSIX shell commands, where a backslash escapes the next
+  // character, so a Windows root is spelled with forward slashes as in Git Bash.
   describe("from a working directory outside the locked project", () => {
     it.each([
       "rm ROOT/.mcp.json",
@@ -277,13 +284,13 @@ describe("guard write targets under an active trust lock", () => {
       "rm -rf ROOT/.safeinstall"
     ])("denies %j", async (template) => {
       const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
-      const command = template.replace("ROOT", root);
+      const command = template.replace("ROOT", shellPath(root));
       expect((await decideGuard(command, outside)).action, command).toBe("deny");
     });
 
     it("leaves other writes alone", async () => {
       const outside = await realpath(await createTempDir("safeinstall-write-outside-"));
-      expect(await decideGuard(`echo x > ${root}/sub/notes.txt`, outside)).toEqual({ action: "allow" });
+      expect(await decideGuard(`echo x > ${shellPath(root)}/sub/notes.txt`, outside)).toEqual({ action: "allow" });
       expect(await decideGuard("echo x > .mcp.json", outside)).toEqual({ action: "allow" });
     });
   });
@@ -295,7 +302,11 @@ describe("guard write targets under an active trust lock", () => {
     await mkdir(planted, { recursive: true });
     await writeFile(path.join(planted, ".git"), "gitdir: /nonexistent/safeinstall-git-dir\n");
 
-    for (const command of ["rm ../.mcp.json", `rm ${root}/.mcp.json`, `echo x > ${root}/safeinstall.config.json`]) {
+    for (const command of [
+      "rm ../.mcp.json",
+      `rm ${shellPath(root)}/.mcp.json`,
+      `echo x > ${shellPath(root)}/safeinstall.config.json`
+    ]) {
       expect((await decideGuard(command, planted)).action, command).toBe("deny");
     }
   });
