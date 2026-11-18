@@ -5,7 +5,7 @@
     {
       "path": ".claude/settings.json",
       "kind": "enforcement",
-      "sha256": "3a60f5da9ce636471243f01d4468fc6b59c97bbb62bbbb79c5f54cce8d3894e6",
+      "sha256": "f95d87dc8f2f0df02753d95dd5b9f50aab75a353d038b49e93cd4b7b9d7eceb0",
       "hiddenUnicode": []
     },
     {
@@ -48,6 +48,6 @@
       "unpinned": false
     }
   ],
-  "approvedAt": "2026-11-17T20:13:37.759Z",
-  "ledgerHead": "46834438f70697b89a20fabceef5639c446e2f51e25c8b3594d8b69b25dffbee"
+  "approvedAt": "2026-11-17T22:56:04.947Z",
+  "ledgerHead": "6ea0d1a0d7bc2cac676fba8f60b5779d98c85a2cd5f85f1022d0ee2903856adc"
 }
