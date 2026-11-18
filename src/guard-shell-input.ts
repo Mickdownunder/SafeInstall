@@ -26,8 +26,12 @@ function unanalyzable(segmentText: string, reason: string): GuardUnanalyzableSeg
   return { segmentText, reason };
 }
 
-/** A shell glob as a regular expression over one path component. */
-function globPattern(glob: string): RegExp {
+/**
+ * A shell glob as a regular expression over one path component, or undefined
+ * when the shell's syntax has no equivalent here (a reversed range such as
+ * `[z-a]`). The caller treats undefined as a glob that can name anything.
+ */
+function globPattern(glob: string): RegExp | undefined {
   let source = "";
   for (let index = 0; index < glob.length; index += 1) {
     const character = glob[index] as string;
@@ -48,14 +52,18 @@ function globPattern(glob: string): RegExp {
       source += character.replace(/[.+^${}()|\\]/g, "\\$&");
     }
   }
-  return new RegExp(`^${source}$`, "i");
+  try {
+    return new RegExp(`^${source}$`, "i");
+  } catch {
+    return undefined;
+  }
 }
 
 function globCanNameGuardedCommand(token: ShellToken): boolean {
   if (!token.hasGlob) return false;
   const component = token.value.split(/[\\/]/).pop() ?? token.value;
   const pattern = globPattern(component.replace(/\.(cmd|exe|bat|ps1)$/i, ""));
-  return GUARDED_COMMAND_NAMES.some((name) => pattern.test(name));
+  return pattern === undefined || GUARDED_COMMAND_NAMES.some((name) => pattern.test(name));
 }
 
 /**

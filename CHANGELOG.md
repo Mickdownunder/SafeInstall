@@ -48,6 +48,7 @@
 - `guard install` and `init` report the guard as already registered only for an entry that runs: the exact guard command, a `command` hook, a matcher that selects Bash, a timeout of at least five seconds and, for Cursor, `failClosed: true`. A near match is left in place and a working entry is added next to it.
 - The signature and credential of Google Cloud Storage signed URLs (`X-Goog-Signature`, `X-Goog-Credential`) are redacted in output and decision records, and such a URL on the command line is rejected like other credential-bearing specs.
 - The shell guard fails closed when a package manager or runner reaches a shell without being on its command line: text piped or here-stringed into a shell that reads commands from standard input (`echo 'npm install x' | sh`, `bash <<< 'npm i x'`), a git alias that runs a shell command (`git -c alias.x='!npm install y' x`, or one stored with `git config alias.x '!...'`), and a command name or package-manager subcommand that a glob can complete (`np? install x`, `npm in* x`).
+- An error while the guard analyzes a command now denies the command. The hook used to exit with an error instead of a decision, and clients that treat a failing hook as non-blocking, such as Claude Code, then ran the command unscreened.
 
 ### Breaking changes
 

@@ -572,5 +572,12 @@ describe("analyzeShellCommand", () => {
       expect(analysis.unanalyzable, command).toEqual([]);
       expect(analysis.installs, command).toEqual([]);
     });
+
+    // A glob the shell accepts but a regular expression cannot express must
+    // not throw: an exception ends the hook without a decision.
+    it.each(["[z-a]; npm install evil", "np[z-a] install evil"])("fails closed on the invalid range in %j", (command) => {
+      const analysis = analyzeShellCommand(command);
+      expect(analysis.unanalyzable.length, command).toBeGreaterThan(0);
+    });
   });
 });
