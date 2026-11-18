@@ -184,6 +184,31 @@ describe("lookupGlobPattern", () => {
     const map = { "@acme/*": "acme/*" };
     expect(lookupGlobPattern(map, "@acme/widgets")).toBe("acme/*");
   });
+
+  it("prefers the exact name over a pattern, whatever the order", () => {
+    expect(lookupGlobPattern({ "@acme/*": "acme/*", "@acme/critical": "acme/critical" }, "@acme/critical")).toBe(
+      "acme/critical"
+    );
+    expect(lookupGlobPattern({ "@acme/critical": "acme/critical", "@acme/*": "acme/*" }, "@acme/critical")).toBe(
+      "acme/critical"
+    );
+  });
+
+  it("prefers the more specific of two matching patterns, whatever the order", () => {
+    expect(lookupGlobPattern({ "@acme/*": "acme/*", "@acme/core-*": "acme/core" }, "@acme/core-utils")).toBe(
+      "acme/core"
+    );
+    expect(lookupGlobPattern({ "@acme/core-*": "acme/core", "@acme/*": "acme/*" }, "@acme/core-utils")).toBe(
+      "acme/core"
+    );
+    expect(lookupGlobPattern({ "@acme/*": "acme/*", "@acme/core-*": "acme/core" }, "@acme/widgets")).toBe("acme/*");
+  });
+
+  it("resolves equally specific patterns the same way in either order", () => {
+    const first = lookupGlobPattern({ "a*c": "one", "ab*": "two" }, "abc");
+    const second = lookupGlobPattern({ "ab*": "two", "a*c": "one" }, "abc");
+    expect(first).toBe(second);
+  });
 });
 
 describe("extractRepositorySlug", () => {

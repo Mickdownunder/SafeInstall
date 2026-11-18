@@ -125,20 +125,27 @@ export function extractRepositorySlug(repositoryUrl: string | undefined): string
 
 /**
  * Resolve a package name against a map of glob patterns to values, returning
- * the value whose pattern matches the name. Supports only `*` wildcards (no
- * `?`, `**`, character classes) since that's all we need for scoped packages
- * and user/org prefixes.
+ * the value of the most specific pattern that matches the name. Supports only
+ * `*` wildcards (no `?`, `**`, character classes) since that's all we need
+ * for scoped packages and user/org prefixes.
+ *
+ * The exact name wins over any pattern, and among patterns the one with the
+ * most literal characters wins, so a pin for one package is not replaced by a
+ * broad rule that happens to be listed before it. Equally specific patterns
+ * resolve in pattern order, never in the order the config lists them.
  */
 export function lookupGlobPattern<TValue>(
   map: Record<string, TValue>,
   key: string
 ): TValue | undefined {
-  for (const [pattern, value] of Object.entries(map)) {
-    if (matchesGlob(pattern, key)) {
-      return value;
-    }
+  if (Object.hasOwn(map, key)) {
+    return map[key];
   }
-  return undefined;
+  const literalLength = (pattern: string): number => pattern.replaceAll("*", "").length;
+  const [best] = Object.keys(map)
+    .filter((pattern) => matchesGlob(pattern, key))
+    .sort((a, b) => literalLength(b) - literalLength(a) || (a < b ? -1 : a > b ? 1 : 0));
+  return best === undefined ? undefined : map[best];
 }
 
 export function matchesGlob(pattern: string, value: string): boolean {
@@ -237,7 +244,8 @@ async function defaultFetchAttestations(
   url: string,
   signal?: AbortSignal
 ): Promise<NpmAttestationResponse | null> {
-  const response = await fetch(url, { signal: createFetchSignal(signal) });
+  // "manual": a redirect would leave the registry origin; it counts as a failed fetch.
+  const response = await fetch(url, { redirect: "manual", signal: createFetchSignal(signal) });
   if (response.status === 404) {
     return null;
   }

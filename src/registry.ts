@@ -317,8 +317,12 @@ export class RegistryClient {
     init?: RequestInit
   ): Promise<TResponse> {
     try {
+      // "manual": an answer has to come from the configured registry. A
+      // redirect would let it send the request anywhere, so it counts as a
+      // failed fetch (status 3xx below).
       const response = await fetch(url, {
         ...init,
+        redirect: "manual",
         signal: this.fetchSignal()
       });
 

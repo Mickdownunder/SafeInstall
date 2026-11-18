@@ -33,6 +33,10 @@
 - The shell guard sees an install behind another command when the package manager or its subcommand is quoted (`timeout 60 'npm' install x`) or, in the command position of a command runner such as `timeout`, `nice` or `xargs`, only exists after expansion (`timeout 60 $NPM install x`). Quoting a single word does not change what the shell runs. A computed argument of another program is not a command: `make PREFIX="$PREFIX" install` and `mvn $OPTS install` are untouched.
 - A package runner behind another command (`timeout 60 npx pkg`, `xargs npx pkg`, `nice pnpm dlx pkg`) goes through the same approval as a direct runner call. It was allowed without a prompt.
 - A copy or move into a directory is checked at the path it writes: `cp /tmp/x/settings.json .claude/` is the write `.claude/settings.json`. This covers `cp`, `mv` and `install`, their `-t`/`--target-directory` forms, and several sources. A recursive `cp` is checked like `mv`: its destination receives a whole subtree.
+- With `provenance.offlineBehavior: "allow-cached"`, an unreachable attestation endpoint no longer turns a required check into a warning. Without a verified cached attestation, a package is blocked when `mode` is `"require"`, when `requireFor` names it, or when `trustedPublishers` pins it.
+- `trustedPublishers` resolves to the most specific matching entry: the exact package name first, then the pattern with the most literal characters. A broad rule listed before an exact pin no longer replaces the pin.
+- Requests to the registry (package metadata, attestations, version history, the verifier distribution for `trust lock --ci`) do not follow redirects. A redirect could send the request, and the answer SafeInstall trusts, to any other address.
+- A floating MCP server is no longer taken for pinned when an option in front of it has an exact-looking value (`npx --cache cache@1.2.3 floating-mcp`). When `npx`, `pnpx`, `bunx`, `uvx` or `pnpm dlx` is called with a separate-value option SafeInstall does not know, the server counts as unpinned; every `--package` has to be pinned, not only the first.
 
 ### Breaking changes
 
@@ -47,6 +51,9 @@
 - `--config` must come before the command (`safeinstall --config <path> check`). After the command it is an error. Earlier versions of the GitHub Action passed it after `check`, so use this Action version or later when combining `config-path` with this CLI version.
 - In a project with a trust lock, a config in a subfolder or parent folder, or one passed with `--config` or the Action's `config-path`, is rejected unless it is the locked root config.
 - The optional peer range for `@modelcontextprotocol/sdk` starts at 1.32.0 (was 1.29.0). Projects that run `safeinstall mcp` with an older SDK need to update it; installs without the MCP server are not affected.
+- `provenance.offlineBehavior: "allow-cached"` blocks a package whose provenance is required or pinned when the attestation cannot be fetched and none is cached. It used to warn. Packages without such a requirement still get a warning.
+- A registry or mirror that answers metadata or attestation requests with a redirect is treated as unreachable. Point `registryUrl` at the address that serves the data.
+- In strict trust mode, an MCP server started through `npx`, `pnpx`, `bunx`, `uvx` or `pnpm dlx` with an option SafeInstall does not know counts as unpinned and blocks. Write such options as `--option=value`, or pin the server another way.
 
 ## 0.15.0 - 2026-10-01
 

@@ -61,7 +61,9 @@ export function createDefaultContinuityDependencies(diskCache?: DiskCache): Cont
       // Baseline membership directly controls continuity decisions, so it
       // must come from the selected registry rather than an unsigned cache.
       const base = registryUrl.replace(/\/+$/, "");
+      // "manual": a redirect would leave the registry origin; it counts as a failed fetch.
       const response = await fetch(`${base}/${encodePackageNameForUrl(packageName)}`, {
+        redirect: "manual",
         signal: createFetchSignal(signal)
       });
       if (!response.ok) {
