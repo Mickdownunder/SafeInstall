@@ -487,8 +487,8 @@ Optional `safeinstall.config.json` — discovered by walking upward from the pro
 
 A project `.npmrc` or `pnpm-workspace.yaml` is read by the package manager itself, not by SafeInstall.
 Credentials and registry scopes belong there. Settings that move where the package manager reads or
-writes (`modules-dir`, `virtual-store-dir`, `lockfile-dir`, a project-supplied `store-dir`, npm's
-`prefix`), switch off one of its checks (`verify-store-integrity=false`, `ignore-scripts=false`) or make
+writes (`modules-dir`, `virtual-store-dir`, `lockfile-dir`, a project-supplied `store-dir`), switch off
+one of its checks (`verify-store-integrity=false`, `ignore-scripts=false`) or make
 it load code (`pnpmfile`, `use-node-version`, `git`, `script-shell`) block the install, also when they
 arrive as `npm_config_*` environment variables.
 

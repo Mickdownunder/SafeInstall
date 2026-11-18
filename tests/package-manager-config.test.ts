@@ -46,6 +46,20 @@ describe("parseNpmrc", () => {
       ["quoted", "x y"]
     ]);
   });
+
+  // The values npm itself reports for these lines (`npm config get`).
+  it.each([
+    ["tag=true # note", "true"],
+    ["tag=true ; note", "true"],
+    ["tag=false # true", "false"],
+    ["tag=true#note", "true"],
+    ["tag=\"a b\" # note", "\"a b\""],
+    ["tag='a # b'", "a # b"],
+    ["tag=a\\#b", "a#b"],
+    ["tag = spaced   ", "spaced"]
+  ])("reads %j the way the package manager does", (line, value) => {
+    expect(parseNpmrc(`${line}\n`)).toEqual([["tag", value]]);
+  });
 });
 
 describe("packageManagerConfigReasons for pnpm", () => {
@@ -84,12 +98,19 @@ describe("packageManagerConfigReasons for pnpm", () => {
         "auto-install-peers=true",
         "node-linker=hoisted",
         "verify-store-integrity=true",
-        "ignore-scripts=true",
+        "ignore-scripts=true # scripts stay off",
+        "lockfile=true ; keep the lockfile",
         ""
       ].join("\n")
     });
 
     expect(await packageManagerConfigReasons("pnpm", packageDir, {})).toEqual([]);
+  });
+
+  it("does not take a trailing comment for the value", async () => {
+    const { packageDir } = await repository({ "packages/app/.npmrc": "verify-store-integrity=false # true\n" });
+
+    expect(keys(await packageManagerConfigReasons("pnpm", packageDir, {}))).toEqual(["verify-store-integrity"]);
   });
 
   it("reads the settings of pnpm-workspace.yaml in their camelCase form", async () => {
@@ -157,7 +178,7 @@ describe("packageManagerConfigReasons for pnpm", () => {
 });
 
 describe("packageManagerConfigReasons for npm", () => {
-  it.each(["prefix=../outside", "git=./fake-git.sh", "script-shell=./sh", "node-options=--require ./x.js", "ignore-scripts=false"])(
+  it.each(["global=true", "git=./fake-git.sh", "script-shell=./sh", "node-options=--require ./x.js", "ignore-scripts=false"])(
     "blocks a project .npmrc with %s",
     async (line) => {
       const { packageDir } = await repository({ "packages/app/.npmrc": `${line}\n` });
@@ -172,5 +193,12 @@ describe("packageManagerConfigReasons for npm", () => {
     });
 
     expect(await packageManagerConfigReasons("npm", packageDir, {})).toEqual([]);
+  });
+
+  it("accepts a prefix, which SafeInstall overrides on the command line", async () => {
+    // GitHub's Windows images set NPM_CONFIG_PREFIX for every job.
+    const { packageDir } = await repository({ "packages/app/.npmrc": "prefix=../outside\n" });
+
+    expect(await packageManagerConfigReasons("npm", packageDir, { NPM_CONFIG_PREFIX: "C:\\npm\\prefix" })).toEqual([]);
   });
 });

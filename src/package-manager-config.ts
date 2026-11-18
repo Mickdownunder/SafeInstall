@@ -28,7 +28,9 @@ const UNSAFE_SETTINGS: Record<PackageManagerName, ReadonlySet<string>> = {
     // Code or a runtime loaded by the package manager.
     "pnpmfile", "global-pnpmfile", "use-node-version"
   ]),
-  npm: new Set(["prefix", "global", "location", "git", "script-shell", "shell", "node-options", "onload-script"]),
+  // `prefix` is not listed: SafeInstall passes --prefix itself, which wins over
+  // any file or variable (a Windows CI image sets NPM_CONFIG_PREFIX by default).
+  npm: new Set(["global", "location", "git", "script-shell", "shell", "node-options", "onload-script"]),
   bun: new Set()
 };
 
@@ -79,10 +81,37 @@ export function parseNpmrc(content: string): Array<[string, string]> {
     }
     const separator = line.indexOf("=");
     const key = separator === -1 ? line : line.slice(0, separator);
-    const value = separator === -1 ? "true" : line.slice(separator + 1).trim().replace(/^(["'])(.*)\1$/, "$2");
-    entries.push([key.trim(), value]);
+    entries.push([key.trim(), separator === -1 ? "true" : npmrcValue(line.slice(separator + 1))]);
   }
   return entries;
+}
+
+/**
+ * A value as the package manager's ini reader takes it: a value quoted as a
+ * whole keeps its content, anything else ends at the first `;` or `#` that
+ * is not escaped (`true # note` is `true`, `a\#b` is `a#b`).
+ */
+function npmrcValue(raw: string): string {
+  const value = raw.trim();
+  const first = value[0];
+  if (value.length >= 2 && (first === '"' || first === "'") && value.endsWith(first)) {
+    return value.slice(1, -1);
+  }
+  let result = "";
+  let escaped = false;
+  for (const character of value) {
+    if (escaped) {
+      result += character === "\\" || character === ";" || character === "#" ? character : `\\${character}`;
+      escaped = false;
+    } else if (character === ";" || character === "#") {
+      break;
+    } else if (character === "\\") {
+      escaped = true;
+    } else {
+      result += character;
+    }
+  }
+  return (escaped ? `${result}\\` : result).trim();
 }
 
 async function exists(candidate: string): Promise<boolean> {
