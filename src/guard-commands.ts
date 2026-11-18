@@ -156,30 +156,55 @@ function isCommandWord(token: ShellToken): boolean {
  * `node .../npm-cli.js install x`): a manager word followed by one of its
  * install or update subcommands.
  */
-function findWrappedInstall(tokens: ShellToken[]): { manager: string; keyword: string } | undefined {
+function findWrappedInstall(
+  tokens: ShellToken[],
+  runsCommand: boolean
+): { manager: string; keyword: string } | undefined {
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
     if (token === undefined || !isCommandWord(token)) continue;
-    if (hasDynamicCommandName(token)) {
-      // `timeout 60 $NPM install x`: the word is only known after expansion.
-      // As for a dynamic top-level command, only the subcommand position
-      // counts, so `$PYTHON -m pip install x` stays untouched.
-      const subcommand = findSubcommand(tokens.slice(index + 1));
-      if (
-        subcommand !== undefined &&
-        isCommandWord(subcommand) &&
-        ["npm", "pnpm", "bun", "yarn"].some((manager) => isFetchingSubcommand(manager, subcommand.value))
-      ) {
-        return { manager: token.value, keyword: subcommand.value };
-      }
-      continue;
-    }
     const manager = packageManagerFromWord(token.value);
     if (!manager) continue;
     const keyword = tokens
       .slice(index + 1)
       .find((candidate) => isCommandWord(candidate) && isFetchingSubcommand(manager, candidate.value));
     if (keyword) return { manager, keyword: keyword.value };
+  }
+  return runsCommand ? findComputedInstall(tokens) : undefined;
+}
+
+/**
+ * Commands whose purpose is to run the command that follows their own options
+ * (`timeout 60 CMD`, `nice -n 10 CMD`, `xargs CMD`). Only behind these is a
+ * word's command position known well enough to judge a computed name.
+ */
+const COMMAND_RUNNERS = new Set([
+  "timeout", "gtimeout", "nice", "ionice", "chrt", "taskset", "stdbuf", "xargs", "watch", "doas",
+  "strace", "ltrace", "setsid", "flock", "script", "unbuffer", "caffeinate", "parallel"
+]);
+/** A count or duration in front of the command (`60`, `10s`, `1.5m`). */
+const NUMERIC_ARGUMENT = /^\d+(?:\.\d+)?[a-z]*$/i;
+
+/**
+ * `timeout 60 $NPM install x`: the command a runner executes is only known
+ * after expansion. As for a computed top-level command, only its subcommand
+ * position decides, so `$PYTHON -m pip install x` stays untouched. Arguments
+ * of other programs are not commands: `make PREFIX="$PREFIX" install`,
+ * `cmake --build "$DIR" --target install` and `mvn $OPTS install` are builds.
+ */
+function findComputedInstall(tokens: ShellToken[]): { manager: string; keyword: string } | undefined {
+  let index = tokens.findIndex((token) => !token.value.startsWith("-") && !NUMERIC_ARGUMENT.test(token.value));
+  while (index >= 0) {
+    const token = tokens[index];
+    if (token === undefined || !isCommandWord(token) || !hasDynamicCommandName(token)) return undefined;
+    const following = tokens.slice(index + 1);
+    const subcommand = findSubcommand(following);
+    if (subcommand === undefined || !isCommandWord(subcommand)) return undefined;
+    if (["npm", "pnpm", "bun", "yarn"].some((manager) => isFetchingSubcommand(manager, subcommand.value))) {
+      return { manager: token.value, keyword: subcommand.value };
+    }
+    // `timeout $SECS $NPM install x`: a computed argument in front of the command.
+    index = index + 1 + following.indexOf(subcommand);
   }
   return undefined;
 }
@@ -969,7 +994,7 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
       };
     }
     if (!REMOTE_EXECUTORS.has(executable) && !ARGUMENT_ONLY_COMMANDS.has(executable)) {
-      const wrapped = findWrappedInstall(rest);
+      const wrapped = findWrappedInstall(rest, COMMAND_RUNNERS.has(executable));
       if (wrapped) {
         return wrappedInstallFinding(executable, wrapped, segmentText);
       }
@@ -1018,7 +1043,7 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
     if (subcommand === "exec") {
       // pnpm exec runs a local binary; a package manager named there is a
       // raw install one level down.
-      const wrapped = findWrappedInstall(rest.slice(rest.indexOf(subcommandToken) + 1));
+      const wrapped = findWrappedInstall(rest.slice(rest.indexOf(subcommandToken) + 1), true);
       if (wrapped) {
         return wrappedInstallFinding(`${manager} exec`, wrapped, segmentText);
       }
