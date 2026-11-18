@@ -47,6 +47,8 @@
 - MCP servers started through `npm exec`, `npm x`, `bun x` or `pnpm`/`yarn dlx` behind global options, or launched through `cmd /c`, `env`, `sh -c`, `timeout` or `nice`, are checked for a floating version like `npx` servers. A launcher whose command cannot be read as plain words and mentions a runner counts as unpinned.
 - `guard install` and `init` report the guard as already registered only for an entry that runs: the exact guard command, a `command` hook, a matcher that selects Bash, a timeout of at least five seconds and, for Cursor, `failClosed: true`. A near match is left in place and a working entry is added next to it.
 - The signature and credential of Google Cloud Storage signed URLs (`X-Goog-Signature`, `X-Goog-Credential`) are redacted in output and decision records, and such a URL on the command line is rejected like other credential-bearing specs.
+- The shell guard fails closed when a package manager or runner reaches a shell without being on its command line: text piped or here-stringed into a shell that reads commands from standard input (`echo 'npm install x' | sh`, `bash <<< 'npm i x'`), a git alias that runs a shell command (`git -c alias.x='!npm install y' x`, or one stored with `git config alias.x '!...'`), and a command name or package-manager subcommand that a glob can complete (`np? install x`, `npm in* x`).
+- An error while the guard analyzes a command now denies the command. The hook used to exit with an error instead of a decision, and clients that treat a failing hook as non-blocking, such as Claude Code, then ran the command unscreened.
 - The published package bundles its runtime dependencies (`npm-package-arg`, `semver`, `yaml` and what they depend on) at the versions and SHA-512 digests of the repository lockfile. The GitHub Action and the workflow from `trust lock --ci` check the tarball's SHA-512 and then install it; npm used to resolve the dependencies from their caret ranges at that point, so code outside the checked digest ran inside the verifier. The published `package.json` lists no `devDependencies`.
 
 ### Breaking changes
@@ -71,6 +73,7 @@
 - `check` from a dependency-free workspace root blocks when the shared lockfile holds an entry that policy blocks. Transitive entries from `git://` or `ssh://`, pnpm `git` and `directory` resolutions and unrecognised references block unless their source type is in `allowedSources`.
 - In strict trust mode, MCP servers started through `npm exec`, `npm x`, `bun x` or a launcher around a runner with a floating version now block, as `npx` servers already did. Pin the version (`npm exec --package=server@1.2.3 -- server`).
 - `guard install` and `init` stop with an error when Claude Code settings set `disableAllHooks`, instead of registering a hook that never runs.
+- The shell guard denies a shell that reads text naming a package manager or runner from a pipe or here-string, even for commands that install nothing (`echo 'npm test' | bash`), a git alias whose shell command names one, and a globbed command name that could complete to one. Run such commands directly (`npm test`).
 
 ## 0.15.0 - 2026-10-01
 

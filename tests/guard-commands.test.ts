@@ -527,4 +527,57 @@ describe("analyzeShellCommand", () => {
       }
     });
   });
+
+  // Scripts the guard does not see as arguments: a shell reading commands
+  // from a pipe or a here-string, a git alias that runs a shell command, and
+  // a command or subcommand word that a glob completes at run time.
+  describe("commands handed to a shell or completed by a glob", () => {
+    it.each([
+      "echo 'npm install evil' | sh",
+      "printf 'npm install evil' | bash",
+      "printf 'npx evil-tool' | bash -s",
+      "echo 'pnpm add evil' | tee log.txt | sh -",
+      "sh <<< 'npm install evil'",
+      "bash -s <<< \"npx evil-tool\"",
+      "git -c alias.si='!npm install evil' si",
+      "git -c 'alias.x=!npx evil-tool' x",
+      "git -calias.x='!pnpm add evil' x",
+      "git config alias.si '!npm install evil'",
+      "git config --global alias.si '!npx evil-tool'",
+      "npm in* evil",
+      "pnpm a?d evil",
+      "np? install evil",
+      "/usr/bin/np[m] install evil",
+      "np[x] evil-tool"
+    ])("fails closed on %j", (command) => {
+      const analysis = analyzeShellCommand(command);
+      expect(analysis.unanalyzable.length, command).toBeGreaterThan(0);
+    });
+
+    it.each([
+      "echo hello | sh",
+      "cat notes.txt | bash -c 'wc -l'",
+      "echo 'npm install evil' | grep npm",
+      "sh <<< 'echo hi'",
+      "sh ./setup.sh",
+      "git -c alias.st=status st",
+      "git -c alias.l='!git log --oneline' l",
+      "git config alias.co checkout",
+      "git log --grep 'npm install'",
+      "ls *.json",
+      "rm -f dist/*.js",
+      "npm run build:*"
+    ])("leaves %j alone", (command) => {
+      const analysis = analyzeShellCommand(command);
+      expect(analysis.unanalyzable, command).toEqual([]);
+      expect(analysis.installs, command).toEqual([]);
+    });
+
+    // A glob the shell accepts but a regular expression cannot express must
+    // not throw: an exception ends the hook without a decision.
+    it.each(["[z-a]; npm install evil", "np[z-a] install evil"])("fails closed on the invalid range in %j", (command) => {
+      const analysis = analyzeShellCommand(command);
+      expect(analysis.unanalyzable.length, command).toBeGreaterThan(0);
+    });
+  });
 });

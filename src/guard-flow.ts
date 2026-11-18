@@ -543,7 +543,20 @@ export async function runGuardHook(
     return 0;
   }
 
-  const decision = await decideGuard(parsed.command, parsed.cwd);
+  let decision: GuardDecision;
+  try {
+    decision = await decideGuard(parsed.command, parsed.cwd);
+  } catch (error) {
+    // An exception would end the hook with an error the client does not treat
+    // as a denial, and the command would run unscreened: fail closed instead.
+    decision = {
+      action: "deny",
+      userMessage: "SafeInstall could not analyze this command.",
+      agentMessage:
+        `SafeInstall guard: analyzing this command failed (${error instanceof Error ? error.message : String(error)}), ` +
+        "so it is blocked. Run each step as a plain top-level command."
+    };
+  }
   const response = renderGuardResponse(decision, client);
   if (response.stdout) {
     stdout.write(`${response.stdout}\n`);
