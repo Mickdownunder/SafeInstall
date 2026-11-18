@@ -276,7 +276,11 @@ function applyContinuityDecision(evaluation: PackageEvaluation, input: EvaluateP
   const block = config.mode === "block";
 
   if (result.status === "provenance-downgrade") {
-    const message = `${name}@${input.resolvedRegistryPackage?.resolvedVersion ?? input.requested.requested} dropped provenance: recent versions were attested${result.baselineRepository ? ` from ${result.baselineRepository}` : ""}, but this version has no attestation. This is the signature of a compromised-account publish.`;
+    const attestedFrom = result.baselineRepository ? ` from ${result.baselineRepository}` : "";
+    const history = result.skippedRecentVersions
+      ? `earlier versions were attested${attestedFrom}, but this version and ${result.skippedRecentVersions} recent ${result.skippedRecentVersions === 1 ? "release" : "releases"} before it have no attestation`
+      : `recent versions were attested${attestedFrom}, but this version has no attestation`;
+    const message = `${name}@${input.resolvedRegistryPackage?.resolvedVersion ?? input.requested.requested} dropped provenance: ${history}. This is the signature of a compromised-account publish.`;
     const suggestion =
       "Treat this as a likely account compromise. Do not install until the maintainer confirms the release.";
     if (block) {

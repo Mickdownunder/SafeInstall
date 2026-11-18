@@ -13,10 +13,21 @@ const VERSION_HISTORY_FETCH_TIMEOUT_MS = 15_000;
 // majority of packages that never adopted provenance).
 const BASELINE_PROVENANCE_THRESHOLD = 0.5;
 
+// How far back an established baseline is looked for when the most recent
+// versions carry no provenance, in multiples of `baselineSize`. Releases
+// without provenance must not be able to erase the history they follow: with
+// a baseline of 5, the 10 versions before the most recent 5 still count.
+const ESTABLISHED_BASELINE_WINDOWS = 3;
+
 export interface VersionRecord {
   version: string;
   publishedAt: Date;
   artifactIntegrity?: string | undefined;
+  /**
+   * The registry lists a provenance attestation for this version. A hint for
+   * where to look, never evidence: identities are verified separately.
+   */
+  claimsProvenance?: boolean | undefined;
 }
 
 export interface ContinuityDependencies {
@@ -41,6 +52,7 @@ interface PackumentTimeShape {
     {
       dist?: {
         integrity?: unknown;
+        attestations?: unknown;
       };
     }
   >;
@@ -86,10 +98,14 @@ export function createDefaultContinuityDependencies(diskCache?: DiskCache): Cont
           continue;
         }
         const artifactIntegrity = versions[version]?.dist?.integrity;
+        const attestations = versions[version]?.dist?.attestations;
+        const claimsProvenance =
+          typeof attestations === "object" && attestations !== null && "provenance" in attestations;
         records.push({
           version,
           publishedAt,
-          ...(typeof artifactIntegrity === "string" ? { artifactIntegrity } : {})
+          ...(typeof artifactIntegrity === "string" ? { artifactIntegrity } : {}),
+          ...(claimsProvenance ? { claimsProvenance } : {})
         });
       }
 
@@ -120,6 +136,11 @@ export function selectBaseline(
   targetVersion: string,
   baselineSize: number
 ): VersionRecord[] {
+  return selectPriors(history, targetVersion).slice(0, baselineSize);
+}
+
+/** Every version published before the target, most recent first. */
+function selectPriors(history: VersionRecord[], targetVersion: string): VersionRecord[] {
   const target = history.find((record) => record.version === targetVersion);
   const candidates = history.filter((record) => record.version !== targetVersion);
 
@@ -127,10 +148,11 @@ export function selectBaseline(
     ? candidates.filter((record) => record.publishedAt.getTime() < target.publishedAt.getTime())
     : candidates;
 
-  return priors
-    .slice()
-    .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime())
-    .slice(0, baselineSize);
+  return priors.slice().sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
+}
+
+function provenanceRate(identities: AttestationIdentity[]): number {
+  return identities.filter((identity) => identity.hasProvenance).length / identities.length;
 }
 
 function dominantRepository(identities: AttestationIdentity[]): string | undefined {
@@ -192,16 +214,14 @@ export async function evaluateContinuity(
     return { status: "unevaluated", error: error instanceof Error ? error.message : String(error) };
   }
 
-  const baseline = selectBaseline(history, input.targetVersion, input.config.baselineSize);
+  const priors = selectPriors(history, input.targetVersion);
+  const baseline = priors.slice(0, input.config.baselineSize);
   if (baseline.length === 0) {
     return { status: "no-baseline", sampledVersions: 0 };
   }
-
-  let baselineIdentities: AttestationIdentity[];
-  let targetIdentity: AttestationIdentity;
-  try {
-    baselineIdentities = await Promise.all(
-      baseline.map((record) =>
+  const fetchIdentities = (records: VersionRecord[]): Promise<AttestationIdentity[]> =>
+    Promise.all(
+      records.map((record) =>
         deps.fetchIdentity(
           input.packageName,
           record.version,
@@ -211,6 +231,11 @@ export async function evaluateContinuity(
         )
       )
     );
+
+  let baselineIdentities: AttestationIdentity[];
+  let targetIdentity: AttestationIdentity;
+  try {
+    baselineIdentities = await fetchIdentities(baseline);
     targetIdentity = await deps.fetchIdentity(
       input.packageName,
       input.targetVersion,
@@ -226,8 +251,36 @@ export async function evaluateContinuity(
     return { status: "unevaluated", error: error instanceof Error ? error.message : String(error) };
   }
 
-  const provenanceCount = baselineIdentities.filter((identity) => identity.hasProvenance).length;
-  const baselineProvenanceRate = provenanceCount / baselineIdentities.length;
+  let baselineProvenanceRate = provenanceRate(baselineIdentities);
+  let skippedRecentVersions = 0;
+
+  if (baselineProvenanceRate < BASELINE_PROVENANCE_THRESHOLD) {
+    // The most recent versions are not provenance-bearing. Either the package
+    // never was, or releases without provenance were published on top of an
+    // attested history. The registry's own listing says where to look, at no
+    // extra request for the packages that never had provenance; what counts
+    // is still the verified identity of those earlier versions.
+    const earlier = priors.slice(baseline.length, input.config.baselineSize * ESTABLISHED_BASELINE_WINDOWS);
+    const claimed = earlier.filter((record) => record.claimsProvenance === true);
+    if (earlier.length > 0 && claimed.length / earlier.length >= BASELINE_PROVENANCE_THRESHOLD) {
+      let earlierIdentities: AttestationIdentity[];
+      try {
+        earlierIdentities = await fetchIdentities(claimed.slice(0, input.config.baselineSize));
+      } catch (error) {
+        const shutdownError = getShutdownSignalError(input.signal);
+        if (shutdownError) {
+          throw shutdownError;
+        }
+        return { status: "unevaluated", error: error instanceof Error ? error.message : String(error) };
+      }
+      if (provenanceRate(earlierIdentities) >= BASELINE_PROVENANCE_THRESHOLD) {
+        skippedRecentVersions = baselineIdentities.filter((identity) => !identity.hasProvenance).length;
+        baselineIdentities = earlierIdentities;
+        baselineProvenanceRate = provenanceRate(earlierIdentities);
+      }
+    }
+  }
+
   const baselineRepository = dominantRepository(baselineIdentities);
 
   const base: ContinuityResult = {
@@ -236,7 +289,8 @@ export async function evaluateContinuity(
     baselineProvenanceRate,
     baselineRepository,
     targetHasProvenance: targetIdentity.hasProvenance,
-    targetRepository: targetIdentity.sourceRepository
+    targetRepository: targetIdentity.sourceRepository,
+    ...(skippedRecentVersions > 0 ? { skippedRecentVersions } : {})
   };
 
   if (baselineProvenanceRate < BASELINE_PROVENANCE_THRESHOLD) {
