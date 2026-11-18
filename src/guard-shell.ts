@@ -35,16 +35,24 @@ export interface ScopeEvent {
 export interface ShellWriteTarget {
   token: ShellToken;
   kind: "redirection" | "argument";
-  /** True when a directory operand is removed or moved as a whole (`rm -r`, `mv`). */
+  /** True when a directory operand is removed, moved or copied as a whole (`rm -r`, `mv`, `cp -r`). */
   recursive: boolean;
   /** True for `>(...)`: the target is a process, not a path. */
   processSubstitution?: boolean;
+  /**
+   * Set for a copy or move into a directory: the path written is the file
+   * named like this source inside the directory `token` names.
+   */
+  source?: ShellToken;
 }
 
 const REDIRECTION_OPERATORS = ["&>>", "<<<", "<<-", ">>", "<<", "<>", ">|", ">&", "<&", "&>", ">", "<"] as const;
 const REDIRECTION_OPERATOR_SET = new Set<string>(REDIRECTION_OPERATORS);
 const WRITE_REDIRECTIONS = new Set([">", ">>", "<>", ">|", "&>", "&>>", ">&"]);
-const FILE_WRITER_EXECUTABLES = new Set(["tee", "rm", "unlink", "mv", "cp", "truncate", "shred"]);
+const FILE_WRITER_EXECUTABLES = new Set(["tee", "rm", "unlink", "mv", "cp", "install", "truncate", "shred"]);
+/** Writers whose last operand may be a directory that receives the sources by name. */
+const DIRECTORY_PLACING_EXECUTABLES = new Set(["cp", "mv", "install"]);
+const TARGET_DIRECTORY_PREFIX = "--target-directory=";
 const WRAPPER_COMMANDS = new Set(["sudo", "command", "nohup", "time", "env", "exec", "corepack"]);
 const ENV_ASSIGNMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 /**
@@ -542,8 +550,42 @@ export function collectWriteTargetTokens(tokens: ShellToken[], commandIndex: num
       executable === "mv" ||
       (executable === "rm" &&
         args.some((token) => /^-[A-Za-z]*[rRd][A-Za-z]*$/.test(token.value) || token.value === "--recursive" || token.value === "--dir"));
-    for (const token of args) {
-      if (!token.value.startsWith("-")) targets.push({ token, kind: "argument", recursive });
+    const placesIntoDirectory = DIRECTORY_PLACING_EXECUTABLES.has(executable);
+    const recursiveCopy =
+      executable === "cp" &&
+      args.some((token) => /^-[A-Za-z]*[rRa][A-Za-z]*$/.test(token.value) || token.value === "--recursive" || token.value === "--archive");
+    const operands: ShellToken[] = [];
+    let targetDirectory: ShellToken | undefined;
+    for (let index = 0; index < args.length; index += 1) {
+      const token = args[index];
+      if (token === undefined) continue;
+      if (placesIntoDirectory && (token.value === "-t" || token.value === "--target-directory")) {
+        targetDirectory = args[index + 1];
+        index += 1;
+        continue;
+      }
+      if (placesIntoDirectory && token.value.startsWith(TARGET_DIRECTORY_PREFIX)) {
+        targetDirectory = {
+          ...token,
+          value: token.value.slice(TARGET_DIRECTORY_PREFIX.length),
+          start: token.start + TARGET_DIRECTORY_PREFIX.length
+        };
+        continue;
+      }
+      if (!token.value.startsWith("-")) operands.push(token);
+    }
+    // `cp a b dir` and `cp -t dir a b` write dir/a and dir/b; with one source
+    // the last operand is the file written, or again a directory to write into.
+    const destination = placesIntoDirectory ? (targetDirectory ?? operands[operands.length - 1]) : undefined;
+    const sources = targetDirectory ? operands : operands.slice(0, -1);
+    for (const token of targetDirectory ? [...operands, targetDirectory] : operands) {
+      // A recursive copy writes a whole subtree below its destination, like a move.
+      targets.push({ token, kind: "argument", recursive: recursive || (recursiveCopy && token === destination) });
+    }
+    if (destination) {
+      for (const source of sources) {
+        targets.push({ token: destination, source, kind: "argument", recursive: recursive || recursiveCopy });
+      }
     }
   }
   return targets;
@@ -551,5 +593,7 @@ export function collectWriteTargetTokens(tokens: ShellToken[], commandIndex: num
 
 /** Backward-compatible best-effort target values used by parser consumers. */
 export function collectWriteTargets(tokens: ShellToken[], commandIndex: number): string[] {
-  return collectWriteTargetTokens(tokens, commandIndex).map(({ token }) => token.value);
+  return collectWriteTargetTokens(tokens, commandIndex)
+    .filter((target) => target.source === undefined)
+    .map(({ token }) => token.value);
 }

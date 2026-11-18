@@ -18,7 +18,8 @@ import type {
   GuardInstallMatch,
   GuardRunnerMatch,
   GuardUnanalyzableSegment,
-  GuardWriteOperation
+  GuardWriteOperation,
+  WordPart
 } from "./guard-types";
 import type { PackageManagerName } from "./types";
 
@@ -141,20 +142,43 @@ function isFetchingSubcommand(manager: string, value: string): boolean {
 }
 
 /**
+ * Quoting a single word does not change what the shell runs: `'npm'` is the
+ * command npm. Only a quoted token with whitespace in it is certainly text
+ * (`"npm install"` as one argument).
+ */
+function isCommandWord(token: ShellToken): boolean {
+  return !token.quoted || !/\s/.test(token.value);
+}
+
+/**
  * Find a package manager that is run as an argument of another command
  * (`timeout 60 npm install x`, `xargs npm install`, `pnpm exec npm i x`,
- * `node .../npm-cli.js install x`): an unquoted manager word followed by one
- * of its install or update subcommands.
+ * `node .../npm-cli.js install x`): a manager word followed by one of its
+ * install or update subcommands.
  */
 function findWrappedInstall(tokens: ShellToken[]): { manager: string; keyword: string } | undefined {
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
-    if (token === undefined || token.quoted) continue;
+    if (token === undefined || !isCommandWord(token)) continue;
+    if (hasDynamicCommandName(token)) {
+      // `timeout 60 $NPM install x`: the word is only known after expansion.
+      // As for a dynamic top-level command, only the subcommand position
+      // counts, so `$PYTHON -m pip install x` stays untouched.
+      const subcommand = findSubcommand(tokens.slice(index + 1));
+      if (
+        subcommand !== undefined &&
+        isCommandWord(subcommand) &&
+        ["npm", "pnpm", "bun", "yarn"].some((manager) => isFetchingSubcommand(manager, subcommand.value))
+      ) {
+        return { manager: token.value, keyword: subcommand.value };
+      }
+      continue;
+    }
     const manager = packageManagerFromWord(token.value);
     if (!manager) continue;
     const keyword = tokens
       .slice(index + 1)
-      .find((candidate) => !candidate.quoted && isFetchingSubcommand(manager, candidate.value));
+      .find((candidate) => isCommandWord(candidate) && isFetchingSubcommand(manager, candidate.value));
     if (keyword) return { manager, keyword: keyword.value };
   }
   return undefined;
@@ -301,6 +325,32 @@ function createRunnerFinding(
       segmentText
     }
   };
+}
+
+/**
+ * Find a package runner that is run as an argument of another command
+ * (`timeout 60 npx pkg`, `xargs npx pkg`, `nice pnpm dlx pkg`). A standalone
+ * runner word with nothing to run after it is an argument, not an invocation
+ * (`brew install npx`, `chmod +x ./npx`).
+ */
+function findWrappedRunner(tokens: ShellToken[]): { config: RunnerConfig; args: ShellToken[] } | undefined {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === undefined || !isCommandWord(token)) continue;
+    const following = tokens.slice(index + 1);
+    const standalone = RUNNER_EXECUTABLES[basename(token.value)];
+    if (standalone) {
+      if (analyzeRunnerTarget(following).packageHint !== undefined) return { config: standalone, args: following };
+      continue;
+    }
+    const manager = packageManagerFromWord(token.value);
+    if (!manager) continue;
+    const subcommand = findSubcommand(following);
+    if (subcommand === undefined || !isCommandWord(subcommand)) continue;
+    const config = RUNNER_SUBCOMMANDS[manager]?.[subcommand.value.toLowerCase()];
+    if (config) return { config, args: following.slice(following.indexOf(subcommand) + 1) };
+  }
+  return undefined;
 }
 
 /**
@@ -573,12 +623,59 @@ function completedStates(states: ShellState[], effect: CwdEffect | undefined): S
   });
 }
 
+/**
+ * The file name of a source word: its parts after the last literal `/`.
+ * Undefined when the word names a directory's contents (`dir/`, `dir/.`),
+ * which a copy spreads over the destination instead of placing one file.
+ */
+function fileNameParts(parts: WordPart[]): WordPart[] | undefined {
+  let name = parts;
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if (part?.kind !== "text") continue;
+    const slash = part.value.lastIndexOf("/");
+    if (slash === -1) continue;
+    const tail = part.value.slice(slash + 1);
+    name = [...(tail.length > 0 ? [{ kind: "text" as const, value: tail }] : []), ...parts.slice(index + 1)];
+    break;
+  }
+  if (name.length === 0) return undefined;
+  if (name.length === 1 && name[0]?.kind === "text" && (name[0].value === "." || name[0].value === "..")) {
+    return undefined;
+  }
+  // A name the shell computes at run time can be any name.
+  return name.map((part) => (part.kind === "text" || part.kind === "glob" ? part : { kind: "unknown" as const }));
+}
+
+/** `directory` with its trailing slashes removed, so a name can be appended. */
+function withoutTrailingSlash(directory: WordPart[]): WordPart[] {
+  const last = directory[directory.length - 1];
+  if (last?.kind !== "text") return directory;
+  const trimmed = last.value.replace(/\/+$/, "");
+  if (trimmed.length === last.value.length) return directory;
+  if (trimmed.length > 0) return [...directory.slice(0, -1), { kind: "text", value: trimmed }];
+  // The word was only slashes after its other parts: `/` itself stays the root.
+  return directory.length === 1 ? [{ kind: "text", value: "" }] : directory.slice(0, -1);
+}
+
+/** Every `<directory>/<file name of source>` a copy or move into a directory can write. */
+function placedInto(directories: WordPart[][], sources: WordPart[][]): WordPart[][] {
+  const words: WordPart[][] = [];
+  for (const directory of directories) {
+    for (const source of sources) {
+      const name = fileNameParts(source);
+      if (name) words.push([...withoutTrailingSlash(directory), { kind: "text", value: "/" }, ...name]);
+    }
+  }
+  return words;
+}
+
 function operationForTarget(
   command: string,
   target: ReturnType<typeof collectWriteTargetTokens>[number],
   states: ShellState[],
   commandEffect: CwdEffect
-): GuardWriteOperation {
+): GuardWriteOperation | undefined {
   const usesCommandCwd = target.kind === "argument";
   const variants = states
     .filter((state) => !state.cwdUncertain)
@@ -587,12 +684,19 @@ function operationForTarget(
       ...(usesCommandCwd && !commandEffect.uncertain ? commandEffect.changes : [])
     ]);
   const uniqueVariants = [...new Map(variants.map((variant) => [JSON.stringify(variant), variant])).values()];
+  const ownWords: WordPart[][] = target.processSubstitution
+    ? [[{ kind: "unknown" }]]
+    : parseWordAlternatives(command, target.token.start);
+  const words = target.source
+    ? placedInto(ownWords, parseWordAlternatives(command, target.source.start))
+    : ownWords;
+  if (words.length === 0) return undefined;
   return {
-    target: target.token.value,
-    hasExpansion: target.token.hasExpansion,
-    words: target.processSubstitution
-      ? [[{ kind: "unknown" }]]
-      : parseWordAlternatives(command, target.token.start),
+    target: target.source
+      ? `${target.token.value.replace(/\/+$/, "")}/${target.source.value.split("/").pop() ?? ""}`
+      : target.token.value,
+    hasExpansion: target.token.hasExpansion || (target.source?.hasExpansion ?? false),
+    words,
     kind: target.kind,
     recursive: target.recursive,
     cwdVariants: uniqueVariants,
@@ -713,7 +817,8 @@ function collectWriteOperations(segments: ShellSegment[], command: string): Guar
       const { index: commandIndex } = findCommandTokenIndex(segment.tokens);
       const commandEffect = commandCwdEffect(command, segment.tokens, commandIndex);
       for (const target of collectWriteTargetTokens(segment.tokens, commandIndex)) {
-        operations.push(operationForTarget(command, target, executed, commandEffect));
+        const operation = operationForTarget(command, target, executed, commandEffect);
+        if (operation) operations.push(operation);
       }
     }
 
@@ -867,6 +972,10 @@ function analyzeSegmentCore(segment: ShellSegment, command: string): SegmentFind
       const wrapped = findWrappedInstall(rest);
       if (wrapped) {
         return wrappedInstallFinding(executable, wrapped, segmentText);
+      }
+      const wrappedRunner = findWrappedRunner(rest);
+      if (wrappedRunner) {
+        return createRunnerFinding(wrappedRunner.config, wrappedRunner.args, segmentText);
       }
     }
     return {};
