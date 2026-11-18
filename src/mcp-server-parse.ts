@@ -26,8 +26,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Runner flags that name a package to resolve (`uvx --from <spec> <tool>`). */
-const RUNNER_PACKAGE_FLAGS = new Set(["-p", "--package", "--from"]);
+/**
+ * Flags that name a package to resolve, per runner. They are not
+ * interchangeable: `npx --from=a@1.2.3 floating` ignores `--from` and
+ * resolves `floating`, so a flag only counts for the runner that defines it.
+ */
+const NODE_RUNNER_PACKAGE_FLAGS: ReadonlySet<string> = new Set(["-p", "--package"]);
+const UVX_PACKAGE_FLAGS: ReadonlySet<string> = new Set(["--from", "--with"]);
 /** Runner flags that consume the following token as their value. */
 const RUNNER_VALUE_FLAGS = new Set(["-c", "--call", "--shell", "--cwd"]);
 /** Runner flags known to take no value. */
@@ -48,7 +53,7 @@ const RUNNER_BOOLEAN_FLAGS = new Set([
  * proves nothing: the result is undefined and the caller treats the server as
  * unpinned. `--option=value` is unambiguous and skipped.
  */
-function runnerSpecs(args: string[]): string[] | undefined {
+function runnerSpecs(args: string[], packageFlags: ReadonlySet<string>): string[] | undefined {
   const packages: string[] = [];
   let positional: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
@@ -60,7 +65,7 @@ function runnerSpecs(args: string[]): string[] | undefined {
       positional = args[index + 1];
       break;
     }
-    if (RUNNER_PACKAGE_FLAGS.has(arg)) {
+    if (packageFlags.has(arg)) {
       const value = args[index + 1];
       if (value === undefined) {
         return undefined;
@@ -69,7 +74,7 @@ function runnerSpecs(args: string[]): string[] | undefined {
       index += 1;
       continue;
     }
-    const attached = [...RUNNER_PACKAGE_FLAGS].find((flag) => flag.startsWith("--") && arg.startsWith(`${flag}=`));
+    const attached = [...packageFlags].find((flag) => flag.startsWith("--") && arg.startsWith(`${flag}=`));
     if (attached) {
       packages.push(arg.slice(attached.length + 1));
       continue;
@@ -120,9 +125,9 @@ function isUnpinnedMcpServer(command: string | undefined, args: string[]): boole
   const binary = path.basename(command).toLowerCase().replace(/\.(cmd|exe)$/, "");
   let specs: string[] | undefined;
   if (RUNNER_BINARIES.has(binary)) {
-    specs = runnerSpecs(args);
+    specs = runnerSpecs(args, binary === "uvx" ? UVX_PACKAGE_FLAGS : NODE_RUNNER_PACKAGE_FLAGS);
   } else if ((binary === "pnpm" || binary === "yarn") && args[0] === "dlx") {
-    specs = runnerSpecs(args.slice(1));
+    specs = runnerSpecs(args.slice(1), NODE_RUNNER_PACKAGE_FLAGS);
   } else {
     return false;
   }
