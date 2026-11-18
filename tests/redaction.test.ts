@@ -16,6 +16,10 @@ describe("credential redaction", () => {
     ["https://example.test/pkg.tgz?access_token=top-secret&download=1", "https://example.test/pkg.tgz?access_token=[REDACTED]&download=1"],
     ["https://example.test/pkg.tgz?%74oken=top-secret", "https://example.test/pkg.tgz?%74oken=[REDACTED]"],
     ["https://example.test/pkg.tgz?X-Amz-Signature=top-secret", "https://example.test/pkg.tgz?X-Amz-Signature=[REDACTED]"],
+    [
+      "https://storage.googleapis.com/b/pkg.tgz?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=svc%40p.iam.gserviceaccount.com%2F20261118%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Expires=600&X-Goog-Signature=0123abcdef",
+      "https://storage.googleapis.com/b/pkg.tgz?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=[REDACTED]&X-Goog-Expires=600&X-Goog-Signature=[REDACTED]"
+    ],
     ["ssh://user:top-secret@example.test/repo.git", "ssh://[REDACTED]@example.test/repo.git"],
     ["HTTPS://user:top-secret@example.test/pkg.tgz", "HTTPS://[REDACTED]@example.test/pkg.tgz"],
     ["https://us%3Aer:p%40ss@example.test/pkg.tgz", "https://[REDACTED]@example.test/pkg.tgz"],
