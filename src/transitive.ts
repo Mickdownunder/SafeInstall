@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { parse as parseYaml } from "yaml";
 
-import { classifyResolvedSource } from "./project-installs/shared";
+import { classifyResolvedSource, isHttpUrl } from "./project-installs/shared";
 import type { PolicyBlockReason, SafeInstallConfig, SourceType } from "./types";
 
 export interface TransitivePackage {
@@ -40,7 +40,15 @@ interface PnpmLockfileTree {
     string,
     {
       version?: string;
-      resolution?: { integrity?: string; tarball?: string };
+      resolution?: {
+        integrity?: string;
+        tarball?: string;
+        /** `git` and `directory` resolutions carry no tarball. */
+        type?: string;
+        repo?: string;
+        commit?: string;
+        directory?: string;
+      };
     }
   >;
 }
@@ -62,9 +70,18 @@ function extractNpmName(packageKey: string): string | undefined {
 }
 
 /**
- * Parse a pnpm `packages` key into name and version. Handles both the
- * modern `name@version` form (including scoped names and peer-dependency
- * suffixes like `foo@1.0.0(bar@2.0.0)`) and the legacy `/name/version` form.
+ * The name and the separator that follows it in a key with a leading slash:
+ * `@` in lockfile v6 (`/name@1.0.0`), `/` in v5 (`/name/1.0.0`). The name
+ * ends at the first of the two after the scope, so a v5 peer context such as
+ * `_react@18.0.0` is never taken for the separator.
+ */
+const LEADING_SLASH_KEY = /^(@[^/@]+\/[^/@]+|[^/@]+)[/@](.+)$/;
+
+/**
+ * Parse a pnpm `packages` key into name and version. Handles the
+ * `name@version` form of lockfile v9 (including scoped names and
+ * peer-dependency suffixes like `foo@1.0.0(bar@2.0.0)`), `/name@version` of
+ * v6 and `/name/version` of v5.
  */
 export function parsePnpmPackageKey(
   packageKey: string
@@ -72,14 +89,8 @@ export function parsePnpmPackageKey(
   const base = packageKey.replace(/\(.*\)$/, "");
 
   if (base.startsWith("/")) {
-    const withoutLead = base.slice(1);
-    const lastSlash = withoutLead.lastIndexOf("/");
-    if (lastSlash === -1) {
-      return undefined;
-    }
-    const name = withoutLead.slice(0, lastSlash);
-    const version = withoutLead.slice(lastSlash + 1);
-    return name && version ? { name, version } : undefined;
+    const match = LEADING_SLASH_KEY.exec(base.slice(1));
+    return match?.[1] && match[2] ? { name: match[1], version: match[2] } : undefined;
   }
 
   const atIndex = base.lastIndexOf("@");
@@ -123,6 +134,18 @@ function dedupe(packages: TransitivePackage[]): TransitivePackage[] {
   return result;
 }
 
+/**
+ * The source of a transitive lockfile record. A record from the registry has
+ * no resolved reference (pnpm) or an HTTP(S) one (npm, pnpm tarballs). A
+ * reference in any other form that the classifier still left at "registry"
+ * (`evil/x`, `github:evil/x`) is a spelling it does not know, and an unknown
+ * source is not the registry.
+ */
+function transitiveSourceType(reference: string | undefined, registryUrl: string | undefined): SourceType {
+  const sourceType = classifyResolvedSource("registry", reference, undefined, registryUrl);
+  return sourceType === "registry" && reference !== undefined && !isHttpUrl(reference) ? "unknown" : sourceType;
+}
+
 export function collectNpmTransitivePackages(
   lockfile: NpmLockfileTree,
   directLockfileKeys: ReadonlySet<string>,
@@ -147,7 +170,7 @@ export function collectNpmTransitivePackages(
       // Lockfile integrity only binds bytes to the lockfile author's value;
       // unlike direct targets, transitive entries are not compared with a
       // freshly checked registry manifest here.
-      sourceType: classifyResolvedSource("registry", entry.resolved, undefined, registryUrl),
+      sourceType: transitiveSourceType(entry.resolved, registryUrl),
       hasInstallScript: entry.hasInstallScript === true
     });
   }
@@ -172,11 +195,18 @@ export function collectPnpmTransitivePackages(
     if (!parsed || directKeys.has(stripPnpmPeerSuffix(key))) {
       continue;
     }
-    const tarball = entry.resolution?.tarball;
+    const resolution = entry.resolution;
     collected.push({
       name: parsed.name,
       version: entry.version ?? parsed.version,
-      sourceType: classifyResolvedSource("registry", tarball, undefined, registryUrl),
+      // A git or directory resolution has no tarball, and without one the
+      // record would read as a registry package.
+      sourceType:
+        resolution?.type === "git"
+          ? "git"
+          : resolution?.type === "directory"
+            ? "directory"
+            : transitiveSourceType(resolution?.tarball, registryUrl),
       // pnpm lockfiles do not record install-script presence; left unknown.
       hasInstallScript: undefined
     });

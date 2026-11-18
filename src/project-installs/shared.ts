@@ -93,7 +93,8 @@ export function classifyResolvedSource(
   if (
     resolvedReference.startsWith("git+") ||
     resolvedReference.startsWith("git@") ||
-    resolvedReference.includes("github.com:")
+    resolvedReference.includes("github.com:") ||
+    GIT_TRANSPORT_URL.test(resolvedReference)
   ) {
     return "git";
   }
@@ -125,5 +126,16 @@ export function classifyResolvedSource(
     return isTarballLike(resolvedReference) ? "tarball" : "url";
   }
 
+  // Any other URL (`ftp://`, ...) is not the registry. A version string such
+  // as `1.14.0` or `1.0.0(react@18.0.0)`, which the pnpm loader passes when a
+  // record has no tarball, has no `://` and falls through.
+  if (OTHER_URL.test(resolvedReference)) {
+    return "url";
+  }
+
   return declaredSourceType === "unknown" ? "unknown" : declaredSourceType;
 }
+
+/** git's own transports, which npm and pnpm fetch as git dependencies. */
+const GIT_TRANSPORT_URL = /^(?:git|ssh):\/\//i;
+const OTHER_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
